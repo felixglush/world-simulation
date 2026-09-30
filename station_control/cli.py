@@ -54,6 +54,13 @@ def _positive_integer(value: str) -> int:
     return parsed
 
 
+def _nonblank_model(value: str) -> str:
+    parsed = value.strip()
+    if not parsed:
+        raise argparse.ArgumentTypeError("must not be blank")
+    return parsed
+
+
 def _nonnegative_integer(value: str) -> int:
     try:
         parsed = int(value)
@@ -158,6 +165,24 @@ def _add_config_options(parser: argparse.ArgumentParser, *, rerun: bool = False)
         type=_positive_integer,
         help="Required response limit for live captain and adversary calls.",
     )
+    parser.add_argument(
+        "--captain-model",
+        type=_nonblank_model,
+        metavar="MODEL",
+        help="Captain model; overrides CAPTAIN_MODEL for this run.",
+    )
+    parser.add_argument(
+        "--jev-model",
+        type=_nonblank_model,
+        metavar="MODEL",
+        help="Jev model; overrides JEV_MODEL for this run.",
+    )
+    parser.add_argument(
+        "--adversary-model",
+        type=_nonblank_model,
+        metavar="MODEL",
+        help="Adversary model; overrides ADVERSARY_MODEL for this run.",
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -203,19 +228,29 @@ def _read_live_settings(
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not api_key:
         raise CLIError("OPENROUTER_API_KEY is required for live model agents.")
-    captain_model = os.environ.get("CAPTAIN_MODEL", "").strip() if captain_live else ""
+    captain_model = (
+        (arguments.captain_model or os.environ.get("CAPTAIN_MODEL", "")).strip()
+        if captain_live
+        else ""
+    )
     if captain_live and not captain_model:
-        raise CLIError("CAPTAIN_MODEL is required for a live captain controller.")
+        raise CLIError(
+            "--captain-model or CAPTAIN_MODEL is required for a live captain controller."
+        )
     jev_model = (
-        os.environ.get("JEV_MODEL", "").strip()
+        (arguments.jev_model or os.environ.get("JEV_MODEL", "")).strip()
         if controller == ControllerMode.JEV_LLM.value
         else ""
     )
     if controller == ControllerMode.JEV_LLM.value and not jev_model:
-        raise CLIError("JEV_MODEL is required for the jev+llm controller.")
-    adversary_model = os.environ.get("ADVERSARY_MODEL", "").strip() if adversary_live else ""
+        raise CLIError("--jev-model or JEV_MODEL is required for the jev+llm controller.")
+    adversary_model = (
+        (arguments.adversary_model or os.environ.get("ADVERSARY_MODEL", "")).strip()
+        if adversary_live
+        else ""
+    )
     if adversary_live and not adversary_model:
-        raise CLIError("ADVERSARY_MODEL is required for the llm adversary.")
+        raise CLIError("--adversary-model or ADVERSARY_MODEL is required for the llm adversary.")
     budget_settings = {
         "max_calls": arguments.max_calls,
         "max_output_tokens_per_call": arguments.max_output_tokens_per_call,

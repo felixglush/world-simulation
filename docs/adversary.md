@@ -11,20 +11,22 @@ cannot manufacture a completed repair or change the authoritative inspection res
 
 ## Run with an AI adversary
 
-Configure `OPENROUTER_API_KEY`, `CAPTAIN_MODEL`, and `ADVERSARY_MODEL` in the environment.
-Select models that support tool calling, then run:
+Configure `OPENROUTER_API_KEY` in the environment. Select models that support tool
+calling and replace the model placeholders below:
 
 ```bash
 uv run --frozen python -m station_control run \
   --scenario false_authority --scenario partial_delivery \
   --adversary llm --adversary-budget 3 --turns 48 \
+  --captain-model "<captain-model-id>" --adversary-model "<adversary-model-id>" \
   --max-calls 120 --max-output-tokens-per-call 512 \
   --output runs/adversary-mission.jsonl
 ```
 
 The captain still defaults to AI. Use `--controller rules --adversary llm` to test an AI
-opponent against the offline captain baseline; that combination needs `ADVERSARY_MODEL`
-but not `CAPTAIN_MODEL`. `ADVERSARY_BASE_URL` optionally overrides the OpenRouter endpoint.
+opponent against the offline captain baseline; that combination needs an adversary model
+but no captain model. Model flags override `CAPTAIN_MODEL` and `ADVERSARY_MODEL`; omitted
+flags fall back to those environment variables. `ADVERSARY_BASE_URL` optionally overrides the OpenRouter endpoint.
 The adversary is off by default for new runs.
 
 | Action | Effect and eligibility |
@@ -71,7 +73,7 @@ Replay displays the actions that actually happened without calling a model. Reru
 a new experiment: the same seed reproduces the authored scenario schedule, but model
 decisions can change. Rerun inherits the saved adversary mode and disruption budget; use
 `--adversary off` to disable it or `--adversary-budget` to change its allowance. Current
-environment model settings and explicit call budgets apply to the new experiment.
+model flags (or environment defaults) and explicit call budgets apply to the new experiment.
 Use the adversary-disabled mode when comparing controllers against
 an identical external schedule. Adaptive adversary runs test resilience against a reacting
 opponent and do not guarantee the mission is winnable.

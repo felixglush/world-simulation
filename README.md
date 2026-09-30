@@ -12,7 +12,7 @@ bash scripts/setup-cloud.sh
 
 Use this same command as the Codex Cloud install command. It installs uv 0.12.21 when needed, syncs dependencies, and runs offline SDK, credential-handling tests, lint, and formatting checks. The simulator, mission, adapter, and CLI checks run offline with fake model transports.
 
-The CLI defaults `run` and `rerun` to the AI captain (`llm`). A live mission requires `OPENROUTER_API_KEY`, `CAPTAIN_MODEL`, `--max-calls`, and `--max-output-tokens-per-call`; if any are missing, it stops before creating a run log and never switches to rules. The `jev+llm` controller also requires `JEV_MODEL`. Supply credentials through the environment and allow HTTPS access to `openrouter.ai`. Both Jev and the captain use OpenRouter. `.env.example` documents the planned model configuration; it is not automatically loaded. Select a captain model with tool calling for live missions.
+The CLI defaults `run` and `rerun` to the AI captain (`llm`). A live mission requires `OPENROUTER_API_KEY`, a captain model, `--max-calls`, and `--max-output-tokens-per-call`; if any are missing, it stops before creating a run log and never switches to rules. Select models at invocation with `--captain-model`, `--jev-model`, and `--adversary-model`. Each flag overrides its corresponding `CAPTAIN_MODEL`, `JEV_MODEL`, or `ADVERSARY_MODEL` environment variable; omitted flags use those variables as defaults. The `jev+llm` controller requires a Jev model, and `--adversary llm` requires an adversary model. Model flags alone do not enable a role. Supply credentials through the environment and allow HTTPS access to `openrouter.ai`. All model adapters use OpenRouter. `.env.example` is not automatically loaded. Select captain and adversary models with tool calling.
 
 The checker reads `OPENROUTER_API_KEY` from the process environment and never prints it. To require that the cloud value is present:
 
@@ -26,13 +26,12 @@ The project's TDD skill and supporting guides are stored in `.agents/skills/tdd`
 
 ## Run, replay, and compare missions
 
-Run a short AI-led mission with the default `llm` controller. The CLI saves a versioned JSONL run under `runs/` unless `--output` names another path:
+Run a short AI-led mission with the default `llm` controller, replacing the model placeholder. The CLI saves a versioned JSONL run under `runs/` unless `--output` names another path:
 
 ```bash
 export OPENROUTER_API_KEY=...
-export CAPTAIN_MODEL=...
 UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control run \
-  --scenario leak --seed 41 --turns 48 \
+  --scenario leak --seed 41 --turns 48 --captain-model "<captain-model-id>" \
   --max-calls 40 --max-output-tokens-per-call 256
 ```
 
@@ -52,22 +51,23 @@ Rerun the saved scenario and seed with a changed setting into a new file. A reru
 
 ```bash
 UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control rerun runs/RUN_ID.jsonl \
-  --evidence-access history --turns 48 --max-calls 40 \
+  --evidence-access history --turns 48 --captain-model "<captain-model-id>" --max-calls 40 \
   --max-output-tokens-per-call 256 --output runs/RUN_ID-history.jsonl
 ```
 
-For a model-backed run, configure the key and selected model identifiers in the environment and pass explicit finite call and output-token budgets. The CLI records model identifiers and budgets without recording the API key. All enabled model adapters share the call limit; the token limit applies to the captain and adversary because Jev exposes no documented output-token limit. This is not a dollar cap. Live endpoint interoperability was not exercised during offline verification:
+For a model-backed run, configure the key in the environment and select models with flags or environment defaults. Pass explicit finite call and output-token budgets. The CLI records the resolved model identifiers and budgets without recording the API key. These model flags also work on `rerun`: current flags take precedence over current environment values; saved model identifiers are retained for audit but are not reused as defaults. Blank model flags are rejected. All enabled model adapters share the call limit; the token limit applies to the captain and adversary because Jev exposes no documented output-token limit. This is not a dollar cap. Live endpoint interoperability was not exercised during offline verification:
 
 ```bash
-# Configure OPENROUTER_API_KEY, CAPTAIN_MODEL, and JEV_MODEL in the environment first.
+# Configure OPENROUTER_API_KEY first; replace the captain model placeholder.
 UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control run \
   --scenario leak --seed 41 --turns 48 --controller jev+llm \
+  --captain-model "<captain-model-id>" --jev-model typesafe/jev-1.13 \
   --max-calls 40 --max-output-tokens-per-call 256 --output runs/jev-leak-41.jsonl
 ```
 
 See [the reproducible offline experiment](docs/mvp-experiment.md) and [service boundaries](docs/architecture.md).
 
-Add `--adversary llm --adversary-budget 3` and configure `ADVERSARY_MODEL` to introduce
+Add `--adversary llm --adversary-budget 3` and select `--adversary-model` (or `ADVERSARY_MODEL`) to introduce
 an AI opponent that reads current world state and selects bounded disruptions alongside
 your scenarios. Its private context stays separate from captain evidence. It shares the
 model-call budget with the crew. See [the adversary action space and run guide](docs/adversary.md).
