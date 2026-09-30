@@ -28,7 +28,8 @@ from .providers import (
     JevDispatchProvider,
     OpenRouterCaptainProvider,
 )
-from .scenarios import ScenarioFamily
+from .scenario_library import list_scenarios, load_library_scenario, load_scenario
+from .scenarios import ScenarioFamily, scenario_definition_from_dict
 
 LIVE_CONTROLLERS = {ControllerMode.LLM.value, ControllerMode.JEV_LLM.value}
 
@@ -62,11 +63,18 @@ def _bounded_integer(minimum: int, maximum: int):
 
 def _add_config_options(parser: argparse.ArgumentParser, *, rerun: bool = False) -> None:
     defaults = {} if rerun else mission_metadata(MissionConfig())
-    parser.add_argument(
+    scenario_options = parser.add_mutually_exclusive_group()
+    scenario_options.add_argument(
         "--scenario",
-        choices=[scenario.value for scenario in ScenarioFamily],
-        default=defaults.get("scenario"),
-        help="Scenario family to run.",
+        default=None,
+        metavar="NAME",
+        help="Legacy scenario family or YAML scenario-library ID.",
+    )
+    scenario_options.add_argument(
+        "--scenario-file",
+        type=Path,
+        metavar="PATH",
+        help="Run a validated custom scenario from a YAML file.",
     )
     parser.add_argument("--seed", type=int, default=defaults.get("seed"), help="Replayable seed.")
     parser.add_argument(
@@ -121,6 +129,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     run_parser = commands.add_parser("run", help="Run a new mission (LLM controller by default).")
     _add_config_options(run_parser)
+
+    commands.add_parser("scenarios", help="List legacy and YAML scenario definitions.")
 
     replay_parser = commands.add_parser("replay", help="Validate and display a saved mission log.")
     replay_parser.add_argument("log", type=Path)
@@ -208,8 +218,35 @@ def _run_config(
 ) -> MissionConfig:
     defaults = saved or mission_metadata(MissionConfig())
     values = {"controller_mode": arguments.controller}
+    scenario_definition = None
+    if arguments.scenario_file is not None:
+        try:
+            scenario_definition = load_scenario(arguments.scenario_file)
+        except OSError:
+            raise CLIError(f"Cannot read scenario file: {arguments.scenario_file}") from None
+        scenario = scenario_definition.id
+    elif arguments.scenario is not None:
+        try:
+            scenario = ScenarioFamily(arguments.scenario)
+        except ValueError:
+            try:
+                scenario_definition = load_library_scenario(arguments.scenario)
+            except KeyError:
+                raise CLIError(f"Unknown scenario: {arguments.scenario!r}") from None
+            scenario = scenario_definition.id
+    elif "scenario_definition" in defaults:
+        snapshot = defaults["scenario_definition"]
+        if not isinstance(snapshot, dict):
+            raise CLIError("Saved scenario definition is missing or invalid")
+        scenario_definition = scenario_definition_from_dict(snapshot)
+        scenario = scenario_definition.id
+    else:
+        scenario = defaults.get("scenario", ScenarioFamily.NORMAL.value)
+    values["scenario"] = scenario
+    if scenario_definition is not None:
+        values["scenario_definition"] = scenario_definition
+
     for argument, field, metadata_key in (
-        ("scenario", "scenario", "scenario"),
         ("seed", "seed", "seed"),
         ("turns", "duration_turns", "duration_turns"),
         ("evidence_access", "evidence_access", "evidence_access"),
@@ -288,11 +325,29 @@ def _run(arguments: argparse.Namespace, config: MissionConfig) -> int:
 
     print(f"Saved run: {output}")
     print(
-        f"Scenario: {config.scenario.value}; seed: {config.seed}; "
+        f"Scenario: {_scenario_id(config.scenario)}; seed: {config.seed}; "
         f"controller: {config.controller_mode.value}"
     )
     print(f"Turns completed: {result.turns_completed}; status: {result.status.value}")
     print(f"Metrics: {json.dumps(_evaluation_metrics(result), sort_keys=True)}")
+    return 0
+
+
+def _scenario_id(scenario: ScenarioFamily | str) -> str:
+    return scenario.value if isinstance(scenario, ScenarioFamily) else scenario
+
+
+def _list_scenarios() -> int:
+    try:
+        definitions = list_scenarios()
+    except OSError:
+        raise CLIError("Cannot read the YAML scenario library") from None
+    print("Legacy scenarios:")
+    for scenario in ScenarioFamily:
+        print(f"  {scenario.value}")
+    print("YAML scenario library:")
+    for definition in definitions:
+        print(f"  {definition.id}: {definition.description}")
     return 0
 
 
@@ -318,6 +373,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if arguments.command == "replay":
             print(render_run_log(read_run_log(arguments.log)))
             return 0
+        if arguments.command == "scenarios":
+            return _list_scenarios()
         if arguments.command == "rerun":
             return _rerun(arguments)
         config = _run_config(arguments)

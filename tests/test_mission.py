@@ -23,6 +23,7 @@ from station_control.controllers import (
     Subsystem,
 )
 from station_control.domain import StationState
+from station_control.scenarios import ScenarioDefinition, ScenarioEventSpec
 
 
 class InspectingCaptain:
@@ -145,6 +146,41 @@ class DeferringCaptain:
         )
 
 
+class ClosingFromDelayedRepairNoticeCaptain:
+    def __init__(self):
+        self.notice_contexts = []
+
+    def decide(self, context):
+        if (
+            context.incident.kind == "report"
+            and "repair completed at turn" in context.incident.message
+        ):
+            self.notice_contexts.append(context)
+            return CaptainDecision(
+                ActionRequest(
+                    ActionRequestKind.CLOSE,
+                    reason="the delayed maintenance notice says the repair is complete",
+                    evidence_sequences=(context.incident.sequence,),
+                )
+            )
+
+        inspections = [item for item in context.evidence if item.kind == "inspection"]
+        if not inspections:
+            return CaptainDecision(ActionRequest(ActionRequestKind.INSPECT, target="oxygen_system"))
+        latest = inspections[-1]
+        if "active oxygen leak" in latest.message.lower():
+            return CaptainDecision(
+                ActionRequest(ActionRequestKind.ASSIGN_REPAIR, target="oxygen_system")
+            )
+        return CaptainDecision(
+            ActionRequest(
+                ActionRequestKind.CLOSE,
+                reason="current inspection shows the system is stable",
+                evidence_sequences=(latest.sequence,),
+            )
+        )
+
+
 class EmptyReasonCaptain:
     def __init__(self):
         self.inspection_sequence = None
@@ -223,6 +259,60 @@ def test_inspection_budget_improves_survival_on_held_out_leak_seeds():
 
     assert all(with_inspection)
     assert not any(without_inspection)
+
+
+def test_delayed_repair_notice_cannot_close_a_recurrent_leak_incident():
+    captain = ClosingFromDelayedRepairNoticeCaptain()
+    definition = ScenarioDefinition(
+        id="recurrent_leak_with_delayed_notice",
+        description="A later leak starts before an earlier repair notice arrives.",
+        initial={"repair_notice_delay_turns": 3},
+        events=(
+            ScenarioEventSpec(turn=1, kind="leak_start"),
+            ScenarioEventSpec(turn=5, kind="leak_start"),
+        ),
+    )
+
+    result = run_mission(
+        MissionConfig(
+            scenario_definition=definition,
+            seed=4,
+            duration_turns=7,
+            controller_mode=ControllerMode.LLM,
+        ),
+        captain=captain,
+    )
+
+    assert captain.notice_contexts
+    notice = captain.notice_contexts[0].incident
+    notice_record = next(
+        event
+        for event in result.events
+        if event["event_type"] == "world_evidence"
+        and event["evidence"]["sequence"] == notice.sequence
+    )
+    assert notice_record["turn"] == 7
+    assert notice.kind == "report"
+    assert next(
+        snapshot for snapshot in result.debug_snapshots if snapshot.turn == notice_record["turn"]
+    ).leak_active
+    rejected = [
+        event
+        for event in result.events
+        if event["event_type"] == "action"
+        and event["decision"]["incident_id"] == notice.sequence
+        and event["decision"]["kind"] == "close"
+    ]
+    assert rejected
+    assert rejected[0]["consequence"] == {
+        "accepted": False,
+        "rejection": "resolution_evidence_required",
+    }
+    assert not any(
+        event["event_type"] == "incident_closed"
+        and event["decision"]["incident_id"] == notice.sequence
+        for event in result.events
+    )
 
 
 def test_history_setting_controls_evidence_and_context_never_contains_world_truth():

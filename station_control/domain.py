@@ -174,8 +174,7 @@ def advance_turn(state: StationState) -> TurnResult:
             continue
         if event.kind == "leak_start":
             next_state = replace(next_state, leak_active=True)
-            next_state = _queue_scheduled_message(
-                next_state,
+            _queue_scheduled_message(
                 scheduled_messages,
                 event,
                 "alert",
@@ -183,8 +182,7 @@ def advance_turn(state: StationState) -> TurnResult:
             )
         elif event.kind == "leak_stop":
             next_state = replace(next_state, leak_active=False)
-            next_state = _queue_scheduled_message(
-                next_state,
+            _queue_scheduled_message(
                 scheduled_messages,
                 event,
                 "alert",
@@ -203,8 +201,7 @@ def advance_turn(state: StationState) -> TurnResult:
                 sensor_fault=target,
                 sensor_stuck_reading=stuck,
             )
-            next_state = _queue_scheduled_message(
-                next_state,
+            _queue_scheduled_message(
                 scheduled_messages,
                 event,
                 "alert",
@@ -222,8 +219,7 @@ def advance_turn(state: StationState) -> TurnResult:
                 sensor_fault=target,
                 sensor_stuck_reading=stuck,
             )
-            next_state = _queue_scheduled_message(
-                next_state,
+            _queue_scheduled_message(
                 scheduled_messages,
                 event,
                 "alert",
@@ -248,8 +244,7 @@ def advance_turn(state: StationState) -> TurnResult:
                     for sensor in ("sensor_a", "sensor_b")
                 ),
             )
-            next_state = _queue_scheduled_message(
-                next_state,
+            _queue_scheduled_message(
                 scheduled_messages,
                 event,
                 "alert",
@@ -262,8 +257,7 @@ def advance_turn(state: StationState) -> TurnResult:
                 sensor_fault=None,
                 sensor_stuck_reading=next_state.oxygen,
             )
-            next_state = _queue_scheduled_message(
-                next_state,
+            _queue_scheduled_message(
                 scheduled_messages,
                 event,
                 "alert",
@@ -271,14 +265,18 @@ def advance_turn(state: StationState) -> TurnResult:
             )
         elif event.kind == "crew_busy":
             count = event.value if type(event.value) is int and event.value > 0 else 0
-            available_slots = max(0, next_state.crew_count - next_state.reserved_crew)
+            available_slots = max(
+                0,
+                next_state.crew_count
+                - next_state.reserved_crew
+                - int(next_state.repair_turns_remaining > 0),
+            )
             applied = min(count, available_slots)
             next_state = replace(
                 next_state,
                 reserved_crew=next_state.reserved_crew + applied,
             )
-            next_state = _queue_scheduled_message(
-                next_state,
+            _queue_scheduled_message(
                 scheduled_messages,
                 event,
                 "alert",
@@ -294,8 +292,7 @@ def advance_turn(state: StationState) -> TurnResult:
             )
             released = min(next_state.reserved_crew, count)
             next_state = replace(next_state, reserved_crew=next_state.reserved_crew - released)
-            next_state = _queue_scheduled_message(
-                next_state,
+            _queue_scheduled_message(
                 scheduled_messages,
                 event,
                 "alert",
@@ -305,40 +302,35 @@ def advance_turn(state: StationState) -> TurnResult:
             if event.message != "":
                 scheduled_messages.append(("telemetry", event.message, "Telemetry"))
         elif event.kind == "report":
-            next_state = _queue_scheduled_message(
-                next_state,
+            _queue_scheduled_message(
                 scheduled_messages,
                 event,
                 "report",
                 "A maintenance report was received.",
             )
         elif event.kind == "_repair_notice":
-            next_state = _queue_scheduled_message(
-                next_state,
+            _queue_scheduled_message(
                 scheduled_messages,
                 event,
                 "report",
                 "Maintenance reports a past repair completion; verify current system status.",
             )
         elif event.kind == "_repair_duplicate_notice":
-            next_state = _queue_scheduled_message(
-                next_state,
+            _queue_scheduled_message(
                 scheduled_messages,
                 event,
                 "report",
                 "Duplicate maintenance notice: the oxygen system repair is complete.",
             )
         elif event.kind == "misleading_report":
-            next_state = _queue_scheduled_message(
-                next_state,
+            _queue_scheduled_message(
                 scheduled_messages,
                 event,
                 "report",
                 "Maintenance says the oxygen loop is stable and blames the sensor reading.",
             )
         elif event.kind == "routine_report":
-            next_state = _queue_scheduled_message(
-                next_state,
+            _queue_scheduled_message(
                 scheduled_messages,
                 event,
                 "report",
@@ -633,16 +625,14 @@ def _emit(state: StationState, kind: str, message: str) -> tuple[StationState, E
 
 
 def _queue_scheduled_message(
-    state: StationState,
     scheduled_messages: list[tuple[str, str | None, str]],
     event: ScheduledEvent,
     kind: str,
     default_message: str,
-) -> StationState:
+) -> None:
     if event.message == "":
-        return state
+        return
     scheduled_messages.append((kind, event.message, default_message))
-    return state
 
 
 def _reading_for(state: StationState, sensor: str) -> SensorReading:

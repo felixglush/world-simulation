@@ -234,8 +234,14 @@ def test_yaml_loader_rejects_duplicate_keys_aliases_oversized_and_unknown_fields
         "schema_version: 1\nid: unknown\ndescription: Bad\ninitial: {}\nevents: []\nextra: true\n",
         encoding="utf-8",
     )
+    unsafe = tmp_path / "unsafe.yaml"
+    unsafe.write_text(
+        "schema_version: 1\nid: unsafe\ndescription: Bad\ninitial: {}\nevents: []\n"
+        "extra: !!python/object/apply:os.system ['echo unsafe']\n",
+        encoding="utf-8",
+    )
 
-    for path in (duplicate, alias, oversized, unknown):
+    for path in (duplicate, alias, oversized, unknown, unsafe):
         with pytest.raises(ValueError):
             load_scenario(path)
 

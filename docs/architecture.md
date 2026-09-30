@@ -9,6 +9,9 @@ process makes deterministic experiments cheap while preserving replaceable integ
 - **World engine and scenarios:** own authoritative resources, hidden faults, sensors,
   scheduled external disruptions, and physical action validation. Only completed work
   changes equipment condition. Seeded disruptions do not depend on controller choices.
+- **YAML scenario adapter:** parses bounded, validated data into the world's scenario
+  definition. Scenario selection and saved snapshots belong to the CLI; the world does
+  not read files. Public messages may be deceptive, but cannot directly mutate reality.
 - **Mission application:** owns the turn loop, incident lifecycle, routing, follow-up,
   observation history, and action budgets. Controllers propose commands; the application
   and world validate them. Provider inputs contain observations, never authoritative state.

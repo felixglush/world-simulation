@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import httpx2
@@ -336,6 +337,35 @@ def test_captain_receives_only_allowed_tools_and_returns_a_validated_action() ->
     assert result.metadata["timeout_seconds"] == 1.0
     assert result.metadata["instruction_version"] == "captain-instructions-v1"
     assert result.metadata["latency_ms"] >= 0
+
+
+def test_captain_projection_includes_only_public_sensor_reading_provenance() -> None:
+    requests: list[dict[str, Any]] = []
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        requests.append(json.loads(request.content))
+        return httpx2.Response(200, json=_captain_payload())
+
+    context = _captain_context()
+    station = replace(
+        context.station,
+        oxygen_sensors=(
+            SensorReading("sensor_a", 68, sampled_turn=3, source="sensor_a"),
+            SensorReading("sensor_b", 70, sampled_turn=3, source="sensor_b"),
+        ),
+    )
+    provider = _captain(handle)
+    try:
+        provider.decide(replace(context, station=station))
+    finally:
+        provider.close()
+
+    serialized_prompt = requests[0]["messages"][1]["content"]
+    assert '"sampled_turn":3' in serialized_prompt
+    assert '"source":"sensor_a"' in serialized_prompt
+    assert '"source":"sensor_b"' in serialized_prompt
+    assert "PRIVATE_SCENARIO_DESCRIPTION" not in serialized_prompt
+    assert "scenario_definition" not in serialized_prompt
 
 
 def test_captain_accepts_no_argument_action_schema() -> None:

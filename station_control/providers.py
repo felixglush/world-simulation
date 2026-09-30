@@ -390,7 +390,12 @@ def _station(station: Any) -> dict[str, object]:
     return {
         "turn": station.turn,
         "oxygen_sensors": [
-            {"sensor": reading.sensor, "oxygen": reading.oxygen}
+            {
+                "sensor": reading.sensor,
+                "oxygen": reading.oxygen,
+                "sampled_turn": reading.sampled_turn,
+                "source": reading.source,
+            }
             for reading in station.oxygen_sensors
         ],
         "backup_oxygen": station.backup_oxygen,

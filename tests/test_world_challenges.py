@@ -197,6 +197,28 @@ def test_crew_reservations_survive_turn_resets_and_release_by_count():
     assert released.reserved_crew == 1
 
 
+def test_crew_busy_respects_a_repair_already_allocated_across_turns():
+    state = _world(
+        leak_active=True,
+        scheduled_events=(ScheduledEvent(1, "crew_busy", value=6, message=""),),
+    )
+    assigned = apply_action(state, Action(ActionKind.ASSIGN_REPAIR, target="oxygen_system"))
+
+    first_work_turn = advance_turn(assigned.state).state
+
+    assert first_work_turn.repair_turns_remaining == 1
+    assert first_work_turn.reserved_crew == 5
+    assert first_work_turn.reserved_crew + int(first_work_turn.repair_turns_remaining > 0) <= 6
+    assert observe(first_work_turn).available_crew == 0
+
+    completed = advance_turn(first_work_turn).state
+
+    assert completed.repairs_completed == 1
+    assert not completed.leak_active
+    assert completed.reserved_crew == 5
+    assert completed.reserved_crew + int(completed.repair_turns_remaining > 0) <= 6
+
+
 def test_crew_busy_default_reports_the_applied_reservation_delta():
     state = _world(
         reserved_crew=5,

@@ -37,9 +37,15 @@ from .domain import (
     observe,
 )
 from .evaluation import MissionEvaluation, evaluate_mission
-from .scenarios import ScenarioFamily, create_world
+from .scenarios import (
+    ScenarioDefinition,
+    ScenarioFamily,
+    create_configured_world,
+    create_world,
+    scenario_definition_to_dict,
+)
 
-SIMULATOR_VERSION = "0.1.0"
+SIMULATOR_VERSION = "0.2.0"
 MAX_MISSION_TURNS = 14 * 24
 MAX_INSPECTIONS_PER_TURN = 6
 QUESTION_VERSION = "jev-questions-v1"
@@ -76,10 +82,16 @@ class MissionConfig:
     question_version: str = QUESTION_VERSION
     rubric_version: str = RUBRIC_VERSION
     instruction_version: str = INSTRUCTION_VERSION
+    scenario_definition: ScenarioDefinition | None = None
 
     def __post_init__(self) -> None:
         try:
-            object.__setattr__(self, "scenario", ScenarioFamily(self.scenario))
+            if self.scenario_definition is None:
+                object.__setattr__(self, "scenario", ScenarioFamily(self.scenario))
+            elif not isinstance(self.scenario_definition, ScenarioDefinition):
+                raise ValueError("Scenario definition must be a validated ScenarioDefinition")
+            else:
+                object.__setattr__(self, "scenario", self.scenario_definition.id)
             object.__setattr__(self, "controller_mode", ControllerMode(self.controller_mode))
             object.__setattr__(self, "evidence_access", EvidenceAccess(self.evidence_access))
         except ValueError as error:
@@ -140,8 +152,12 @@ EventSink = Callable[[dict[str, object]], None]
 
 def mission_metadata(config: MissionConfig) -> dict[str, object]:
     """Return the versioned, serializable settings used to compose a mission."""
-    return {
-        "scenario": config.scenario.value,
+    metadata: dict[str, object] = {
+        "scenario": (
+            config.scenario.value
+            if isinstance(config.scenario, ScenarioFamily)
+            else config.scenario
+        ),
         "seed": config.seed,
         "duration_turns": config.duration_turns,
         "controller": config.controller_mode.value,
@@ -152,6 +168,9 @@ def mission_metadata(config: MissionConfig) -> dict[str, object]:
         "rubric_version": config.rubric_version,
         "instruction_version": config.instruction_version,
     }
+    if config.scenario_definition is not None:
+        metadata["scenario_definition"] = scenario_definition_to_dict(config.scenario_definition)
+    return metadata
 
 
 def run_mission(
@@ -170,7 +189,11 @@ def run_mission(
         raise ValueError("Controller mode 'jev+llm' requires a dispatch provider")
 
     run_id = config.run_id or str(uuid4())
-    state = create_world(config.scenario, config.seed)
+    state = (
+        create_configured_world(config.scenario_definition, config.seed)
+        if config.scenario_definition is not None
+        else create_world(config.scenario, config.seed)
+    )
     states = [state]
     public_history: list[PublicEvidence] = list(state.evidence)
     events: list[dict[str, object]] = []
