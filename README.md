@@ -2,7 +2,21 @@
 
 Companion Page: https://chatgpt.com/space/page_fc5b19900a188191a26a38b452913a17
 
-![Station Control roles and decisions, including Jev outputs and Python routing rules](docs/images/station-control-roles.png)
+```mermaid
+flowchart LR
+    Adversary[AI adversary] -->|Proposes disruption| World[World engine]
+    World -->|Public observations and evidence| Jev[Jev classifies events]
+    Jev -->|Assessment| App[Application routes incidents]
+    App -->|Escalated incident and public events| Captain[Captain investigates and proposes actions]
+    Captain -->|Proposed action| Validate[Application and world validate and execute]
+    Validate -->|Public action results| Jev
+    Validate -->|State changes| World
+    World -->|All world activity| Log[Full audit log]
+    Adversary -->|Private selections and rationale| Log
+    Validate -->|Actions and outcomes| Log
+```
+
+This flow applies to `jev+llm` mode. Jev assesses public events in batches; the captain chooses actions. The application routes alerts and classification failures to review, and validates proposals before execution. Action results return to Jev, with further actions scheduled for a later turn. The audit log also preserves private adversary activity and hidden world transitions; those records stay outside the crew AIs' inputs.
 
 ## Purpose and current product
 
@@ -10,7 +24,7 @@ Station Control tests how an AI crew keeps a space station operational when equi
 
 The product simulates one station with six crew members and one life-support system. It has two oxygen sensors, three controller options, and an optional AI adversary. You can run individual scenarios or combine sabotage scenarios in one mission. A command-line interface lets you select models, save results, replay decisions, and run new comparisons.
 
-This document describes simulator version `0.3.1`, which adds structured public evidence codes to the [0.3.0 baseline](https://github.com/felixglush/world-simulation/tree/43fefc3feae24f13d3a51dbd7e442c365a95812f). This simulator version is separate from the package version in `pyproject.toml`.
+This document describes simulator version `0.3.2`, which adds full world auditing and public-event classification to the structured-evidence simulator. This simulator version is separate from the package version in `pyproject.toml`.
 
 Use the product to find a decision failure and understand its cause. Change one setting. Then test the change on missions that you did not use to select it. Keep results from the rules controller separate from evidence about live AI performance.
 
@@ -20,7 +34,7 @@ Use the product to find a decision failure and understand its cause. Change one 
 | --- | --- | --- |
 | Station commander | Select missions and models. Review results and compare runs. | Run settings, public evidence, and debug records. |
 | Captain | Choose investigations, repairs, supplies, and incident follow-up. | Sensor readings, available resources, and public evidence. |
-| Jev dispatch officer | Assess reports and help route them to the captain. | Public station observations and report evidence. |
+| Jev dispatch officer | Classify public event batches and help route incidents to the captain. | Public observations, world evidence, clarification replies, action results, and permitted history. |
 | AI adversary | Choose valid disruptions at a time it selects. | Current actual resources, faults, sensors, repair progress, and pending deliveries. |
 | Scenario engine | Apply the selected starting settings and scheduled events. | The full scenario definition and seed. |
 | World engine | Enforce physical rules and apply valid actions. | Actual station state. |
