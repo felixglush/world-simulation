@@ -174,14 +174,27 @@ def apply_action(state: StationState, action: Action) -> ActionResult:
 
 
 def advance_turn(state: StationState) -> TurnResult:
-    """Advance physical time, scheduled events, repair work, and deliveries."""
+    """Apply the world's ordered phases through one authoritative transition."""
     if not state.crew_alive:
         return TurnResult(state=state, evidence=())
-    turn = state.turn + 1
-    next_state = replace(state, turn=turn)
-    emitted: list[Evidence] = []
-    scheduled_messages: list[tuple[str, str | None, str, EvidenceCode | None]] = []
+    updated, messages = _apply_scheduled_events(replace(state, turn=state.turn + 1))
+    updated, arrivals = _deliver_supplies(updated)
+    updated, oxygen_alerts = _update_oxygen(updated, previous_oxygen=state.oxygen)
+    updated, repairs = _advance_repairs(updated)
+    updated = _update_sensors_and_crew(updated)
+    updated, reports = _publish_scheduled_messages(updated, messages)
+    return TurnResult(updated, arrivals + oxygen_alerts + repairs + reports)
 
+
+_ScheduledMessage = tuple[str, str | None, str, EvidenceCode | None]
+
+
+def _apply_scheduled_events(
+    state: StationState,
+) -> tuple[StationState, list[_ScheduledMessage]]:
+    next_state = state
+    turn = state.turn
+    scheduled_messages: list[_ScheduledMessage] = []
     remaining_events = []
     for event in state.scheduled_events:
         if event.turn != turn:
@@ -352,7 +365,13 @@ def advance_turn(state: StationState) -> TurnResult:
                 "Routine maintenance reports the oxygen system operating normally.",
             )
     next_state = replace(next_state, scheduled_events=tuple(remaining_events))
+    return next_state, scheduled_messages
 
+
+def _deliver_supplies(state: StationState) -> tuple[StationState, tuple[Evidence, ...]]:
+    next_state = state
+    turn = state.turn
+    emitted: list[Evidence] = []
     deliveries = []
     for delivery in next_state.deliveries:
         if delivery.due_turn != turn:
@@ -373,7 +392,14 @@ def advance_turn(state: StationState) -> TurnResult:
         next_state, item = _emit(next_state, "arrival", detail)
         emitted.append(item)
     next_state = replace(next_state, deliveries=tuple(deliveries))
+    return next_state, tuple(emitted)
 
+
+def _update_oxygen(
+    state: StationState, *, previous_oxygen: int
+) -> tuple[StationState, tuple[Evidence, ...]]:
+    next_state = state
+    emitted: list[Evidence] = []
     backup_draw = 0
     if next_state.backup_active:
         backup_draw = min(next_state.backup_rate, next_state.backup_oxygen)
@@ -405,7 +431,7 @@ def advance_turn(state: StationState) -> TurnResult:
             code=EvidenceCode.OXYGEN_EXHAUSTED,
         )
         emitted.append(item)
-    elif next_state.crew_alive and oxygen <= CRITICAL_OXYGEN and state.oxygen > CRITICAL_OXYGEN:
+    elif next_state.crew_alive and oxygen <= CRITICAL_OXYGEN and previous_oxygen > CRITICAL_OXYGEN:
         next_state, item = _emit(
             next_state,
             "alert",
@@ -413,7 +439,13 @@ def advance_turn(state: StationState) -> TurnResult:
             code=EvidenceCode.OXYGEN_CRITICAL,
         )
         emitted.append(item)
+    return next_state, tuple(emitted)
 
+
+def _advance_repairs(state: StationState) -> tuple[StationState, tuple[Evidence, ...]]:
+    next_state = state
+    turn = state.turn
+    emitted: list[Evidence] = []
     if next_state.repair_turns_remaining > 0:
         remaining_work = next_state.repair_turns_remaining - 1
         next_state = replace(next_state, repair_turns_remaining=remaining_work)
@@ -459,7 +491,12 @@ def advance_turn(state: StationState) -> TurnResult:
                         ),
                     ),
                 )
+    return next_state, tuple(emitted)
 
+
+def _update_sensors_and_crew(state: StationState) -> StationState:
+    next_state = state
+    turn = state.turn
     previous_readings = {reading.sensor: reading for reading in next_state.sensor_readings}
     if next_state.sensor_mode == "correlated":
         sensor_readings = next_state.sensor_readings
@@ -506,6 +543,14 @@ def advance_turn(state: StationState) -> TurnResult:
             else 0
         ),
     )
+    return next_state
+
+
+def _publish_scheduled_messages(
+    state: StationState, scheduled_messages: list[_ScheduledMessage]
+) -> tuple[StationState, tuple[Evidence, ...]]:
+    next_state = state
+    emitted: list[Evidence] = []
     for kind, message, default_message, code in scheduled_messages:
         if kind == "telemetry":
             prefix = default_message if message is None else message
@@ -520,7 +565,7 @@ def advance_turn(state: StationState) -> TurnResult:
             message = default_message
         next_state, item = _emit(next_state, kind, message, code=code)
         emitted.append(item)
-    return TurnResult(state=next_state, evidence=tuple(emitted))
+    return next_state, tuple(emitted)
 
 
 OXYGEN_ORDER_SIZE = 100
@@ -654,7 +699,7 @@ def _emit(
 
 
 def _queue_scheduled_message(
-    scheduled_messages: list[tuple[str, str | None, str, EvidenceCode | None]],
+    scheduled_messages: list[_ScheduledMessage],
     event: ScheduledEvent,
     kind: str,
     default_message: str,
