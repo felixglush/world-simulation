@@ -62,3 +62,22 @@ transport requests. Scoped tests, lint, formatting, and offline SDK checks pass.
 The captain has an output-token cap; Jev's SDK exposes no documented output-token cap.
 Both share a request cap and disable retries. A request cap is not a dollar ceiling.
 The configured OpenRouter endpoints were not exercised live.
+
+## CLI and complete MVP verification
+
+The CLI matrix first reached its intended missing-runner RED; independent error-path
+cases passed before the runner was complete. The final 18 CLI cases pass through real
+subprocess entry points, including offline run/replay/rerun, existing output protection,
+malformed/incomplete/version-incompatible logs, ordered events, live configuration gates,
+and provider-construction cleanup.
+
+Final aggregate verification: **93 tests pass**, repository-wide Ruff lint and formatting
+pass (23 Python files), `git diff --check` passes, and the offline SDK checker passes.
+Eight actual CLI runs reproduce the development/held-out inspection ablation in
+`docs/mvp-experiment.md`; replay and rerun were also exercised from saved files. Logs are
+ignored under `runs/mvp-validation-*.jsonl`. No live model requests were sent.
+
+Docker packaging now includes `station_control/`; a container build/run was not performed.
+Git transport was unavailable in this environment, so GitHub trees/commits/stacked PRs
+were published through the authenticated connector to the verified checkout origin.
+Local and remote commit IDs differ; file trees are the publication parity check.
