@@ -23,6 +23,74 @@ def _line(record: dict[str, Any]) -> str:
         raise RunLogError(f"Run contains data that cannot be written as JSON: {error}") from error
 
 
+def _validate_start(record: dict[str, Any]) -> None:
+    version = record.get("schema_version")
+    if type(version) is not int or version != LOG_SCHEMA_VERSION:
+        raise RunLogError(
+            f"Unsupported run log schema version: {version!r}; "
+            f"this CLI supports {LOG_SCHEMA_VERSION}"
+        )
+    run_id = record.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        raise RunLogError("Run start and end records have missing or mismatched run IDs")
+    if not isinstance(record.get("simulator_version"), str):
+        raise RunLogError("Run start record must contain the simulator version")
+    if not isinstance(record.get("metadata"), dict):
+        raise RunLogError("Run start metadata must be an object")
+
+
+def _validated_event(
+    data: object, expected_sequence: int, previous_turn: int | None
+) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        raise RunLogError("Mission events must be objects")
+    if data.get("record_type") != "event":
+        raise RunLogError("Mission event record_type must be 'event'")
+    turn = data.get("turn")
+    if not isinstance(turn, int) or isinstance(turn, bool) or turn < 0:
+        raise RunLogError("Mission event turn must be a nonnegative integer")
+    if previous_turn is not None and turn < previous_turn:
+        raise RunLogError("Mission event turns cannot move backwards")
+    sequence = data.get("sequence")
+    if type(sequence) is not int or sequence != expected_sequence:
+        raise RunLogError(f"Mission event sequence must be {expected_sequence}")
+    event_type = data.get("event_type")
+    if not isinstance(event_type, str) or not event_type:
+        raise RunLogError("Mission event must have a nonempty event_type")
+    safe_record = {
+        "record_type": "event",
+        "sequence": sequence,
+        "turn": turn,
+        "event_type": event_type,
+        "evidence": data.get("evidence"),
+        "decision": data.get("decision"),
+        "consequence": data.get("consequence"),
+    }
+    return safe_record
+
+
+def _validate_end(
+    record: dict[str, Any], run_id: str, event_count: int, previous_turn: int | None
+) -> None:
+    if record.get("run_id") != run_id:
+        raise RunLogError("Run start and end records have missing or mismatched run IDs")
+    version = record.get("schema_version")
+    if type(version) is not int or version != LOG_SCHEMA_VERSION:
+        raise RunLogError("Run end schema version is missing or unsupported")
+    count = record.get("event_count")
+    if type(count) is not int or count != event_count:
+        raise RunLogError("Run end event count does not match the recorded events")
+    if not isinstance(record.get("status"), str) or not record["status"]:
+        raise RunLogError("Run end record must contain a status")
+    end_turn = record.get("turn")
+    if end_turn is not None and (type(end_turn) is not int or end_turn < 0):
+        raise RunLogError("Run end turn must be a nonnegative integer")
+    if not isinstance(record.get("debug_snapshots", []), list):
+        raise RunLogError("Run end debug_snapshots must be an array")
+    if end_turn is not None and previous_turn is not None and end_turn < previous_turn:
+        raise RunLogError("Run end turn precedes the last mission event")
+
+
 class RunLogWriter:
     """Reserve a new path immediately, then stream one run as validated JSONL."""
 
@@ -34,6 +102,14 @@ class RunLogWriter:
         run_id: str,
         simulator_version: str,
     ) -> None:
+        start_record = {
+            "record_type": "run_start",
+            "schema_version": LOG_SCHEMA_VERSION,
+            "run_id": run_id,
+            "simulator_version": simulator_version,
+            "metadata": metadata,
+        }
+        _validate_start(start_record)
         self.path = Path(path)
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -50,15 +126,7 @@ class RunLogWriter:
         self._last_turn: int | None = None
         self._finished = False
         try:
-            self._write(
-                {
-                    "record_type": "run_start",
-                    "schema_version": LOG_SCHEMA_VERSION,
-                    "run_id": self.run_id,
-                    "simulator_version": simulator_version,
-                    "metadata": metadata,
-                }
-            )
+            self._write(start_record)
         except Exception:
             try:
                 self._stream.close()
@@ -82,34 +150,10 @@ class RunLogWriter:
     def write_event(self, event: dict[str, Any]) -> None:
         if self._finished:
             raise RunLogError("Cannot add an event after the run log is finished")
-        data = event
-        if not isinstance(data, dict):
-            raise RunLogError("Mission events must be objects")
-        if data.get("record_type") != "event":
-            raise RunLogError("Mission event record_type must be 'event'")
-        turn = data.get("turn")
-        if not isinstance(turn, int) or isinstance(turn, bool) or turn < 0:
-            raise RunLogError("Mission event turn must be a nonnegative integer")
-        if self._last_turn is not None and turn < self._last_turn:
-            raise RunLogError("Mission event turns cannot move backwards")
-        sequence = data.get("sequence")
-        if type(sequence) is not int or sequence != self._sequence:
-            raise RunLogError(f"Mission event sequence must be {self._sequence}")
-        event_type = data.get("event_type")
-        if not isinstance(event_type, str) or not event_type:
-            raise RunLogError("Mission event must have a nonempty event_type")
-        safe_record = {
-            "record_type": "event",
-            "sequence": sequence,
-            "turn": turn,
-            "event_type": event_type,
-            "evidence": data.get("evidence"),
-            "decision": data.get("decision"),
-            "consequence": data.get("consequence"),
-        }
+        safe_record = _validated_event(event, self._sequence, self._last_turn)
         self._write(safe_record)
         self._sequence += 1
-        self._last_turn = turn
+        self._last_turn = safe_record["turn"]
 
     def finish(
         self,
@@ -121,19 +165,25 @@ class RunLogWriter:
     ) -> None:
         if self._finished:
             return
+        end_record = {
+            "record_type": "run_end",
+            "schema_version": LOG_SCHEMA_VERSION,
+            "run_id": self.run_id,
+            "status": status,
+            "turn": self._last_turn if turns_completed is None else turns_completed,
+            "metrics": metrics,
+            "event_count": self._sequence,
+            "debug_snapshots": (
+                list(debug_snapshots)
+                if isinstance(debug_snapshots, tuple)
+                else []
+                if debug_snapshots is None
+                else debug_snapshots
+            ),
+        }
+        _validate_end(end_record, self.run_id, self._sequence, self._last_turn)
         try:
-            self._write(
-                {
-                    "record_type": "run_end",
-                    "schema_version": LOG_SCHEMA_VERSION,
-                    "run_id": self.run_id,
-                    "status": status,
-                    "turn": self._last_turn if turns_completed is None else turns_completed,
-                    "metrics": metrics,
-                    "event_count": self._sequence,
-                    "debug_snapshots": debug_snapshots or [],
-                }
-            )
+            self._write(end_record)
         except Exception:
             self.close_incomplete()
             self._finished = True
@@ -210,51 +260,20 @@ def read_run_log(path: str | Path) -> list[dict[str, Any]]:
         raise RunLogError("Run log must contain exactly one run_start")
     if sum(record.get("record_type") == "run_end" for record in records) != 1:
         raise RunLogError("Run log must contain exactly one run_end")
-    schema_version = records[0].get("schema_version")
-    if type(schema_version) is not int or schema_version != LOG_SCHEMA_VERSION:
-        raise RunLogError(
-            f"Unsupported run log schema version: {records[0].get('schema_version')!r}; "
-            f"this CLI supports {LOG_SCHEMA_VERSION}"
-        )
-    run_id = records[0].get("run_id")
-    if not isinstance(run_id, str) or not run_id or records[-1].get("run_id") != run_id:
-        raise RunLogError("Run start and end records have missing or mismatched run IDs")
-    if not isinstance(records[0].get("simulator_version"), str):
-        raise RunLogError("Run start record must contain the simulator version")
-    if not isinstance(records[0].get("metadata"), dict):
-        raise RunLogError("Run start metadata must be an object")
-    end_schema = records[-1].get("schema_version")
-    if type(end_schema) is not int or end_schema != LOG_SCHEMA_VERSION:
-        raise RunLogError("Run end schema version is missing or unsupported")
+    _validate_start(records[0])
+    run_id = records[0]["run_id"]
 
     expected_sequence = 0
     previous_turn = -1
     for index, record in enumerate(records[1:-1], start=1):
-        if record.get("record_type") != "event":
-            raise RunLogError(f"Unexpected record type at line {index + 1}")
-        sequence = record.get("sequence")
-        if type(sequence) is not int or sequence != expected_sequence:
-            raise RunLogError(f"Run event sequence is invalid at line {index + 1}")
-        turn = record.get("turn")
-        if not isinstance(turn, int) or isinstance(turn, bool) or turn < 0:
-            raise RunLogError(f"Run event turn is invalid at line {index + 1}")
-        if turn < previous_turn:
-            raise RunLogError(f"Run event turns move backwards at line {index + 1}")
+        try:
+            _validated_event(record, expected_sequence, previous_turn)
+        except RunLogError as error:
+            raise RunLogError(f"{error} at line {index + 1}") from error
         expected_sequence += 1
-        previous_turn = turn
+        previous_turn = record["turn"]
 
-    event_count = records[-1].get("event_count")
-    if type(event_count) is not int or event_count != expected_sequence:
-        raise RunLogError("Run end event count does not match the recorded events")
-    if not isinstance(records[-1].get("status"), str) or not records[-1]["status"]:
-        raise RunLogError("Run end record must contain a status")
-    end_turn = records[-1].get("turn")
-    if end_turn is not None and (type(end_turn) is not int or end_turn < 0):
-        raise RunLogError("Run end turn must be a nonnegative integer")
-    if not isinstance(records[-1].get("debug_snapshots", []), list):
-        raise RunLogError("Run end debug_snapshots must be an array")
-    if end_turn is not None and previous_turn >= 0 and end_turn < previous_turn:
-        raise RunLogError("Run end turn precedes the last mission event")
+    _validate_end(records[-1], run_id, expected_sequence, previous_turn)
     return records
 
 
