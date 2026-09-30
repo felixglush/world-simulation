@@ -44,6 +44,7 @@ from .domain import (
     Action,
     ActionKind,
     Evidence,
+    EvidenceCode,
     SensorReading,
     StationObservation,
     StationState,
@@ -61,7 +62,7 @@ from .scenarios import (
     scenario_definition_to_dict,
 )
 
-SIMULATOR_VERSION = "0.3.0"
+SIMULATOR_VERSION = "0.3.1"
 MAX_MISSION_TURNS = 14 * 24
 MAX_INSPECTIONS_PER_TURN = 6
 QUESTION_VERSION = "jev-questions-v1"
@@ -949,13 +950,11 @@ def _resolves_latest_evidence(incident: _Incident, cited: Evidence) -> bool:
         return False
     if cited.kind == "repair_complete":
         return True
-    message = cited.message.lower()
     if cited.kind != "inspection":
         return False
-    origin = incident.origin.message.lower()
-    if "sensors are reporting different levels" in origin:
-        return "calibration fault" in message
-    return "oxygen system operating normally" in message
+    if incident.origin.code is EvidenceCode.SENSOR_DISAGREEMENT:
+        return cited.code is EvidenceCode.SENSOR_CALIBRATION_FAULT
+    return cited.code is EvidenceCode.OXYGEN_HEALTHY
 
 
 def _set_follow_up(

@@ -8,6 +8,7 @@ from .controllers import (
     PublicEvidence,
     StationView,
 )
+from .domain import Evidence, EvidenceCode
 
 
 class RulesCaptain:
@@ -39,27 +40,29 @@ def _choose_action(
             evidence_sequences=(recent.sequence,),
         )
     if recent.kind == "inspection":
-        message = recent.message.lower()
-        if "active oxygen leak" in message:
+        if recent.code is EvidenceCode.ACTIVE_LEAK:
             return ActionRequest(ActionRequestKind.ASSIGN_REPAIR, target="oxygen_system")
-        if "calibration fault" in message:
+        if recent.code is EvidenceCode.SENSOR_CALIBRATION_FAULT:
             return ActionRequest(
                 ActionRequestKind.DEFER,
                 follow_up_turn=min(station.turn + 4, duration),
             )
-        if "within calibration range" in message or "operating normally" in message:
+        if recent.code in {EvidenceCode.SENSOR_HEALTHY, EvidenceCode.OXYGEN_HEALTHY}:
             return ActionRequest(
                 ActionRequestKind.CLOSE,
                 reason="inspection produced supporting evidence",
                 evidence_sequences=(recent.sequence,),
             )
-    if recent.kind == "action" and "repair assigned" in recent.message.lower():
+    if recent.kind == "action" and recent.code is EvidenceCode.REPAIR_ASSIGNED:
         follow_up = min(station.turn + 1, duration)
         if follow_up > station.turn:
             return ActionRequest(ActionRequestKind.DEFER, follow_up_turn=follow_up)
-    combined = " ".join(item.message.lower() for item in evidence)
-    if ("critical" in combined or "exhausted" in combined) and station.backup_oxygen > 0:
-        if not any("backup oxygen activated" in item.message.lower() for item in evidence):
+    codes = {item.code for item in evidence if isinstance(item, Evidence)}
+    if (
+        codes & {EvidenceCode.OXYGEN_CRITICAL, EvidenceCode.OXYGEN_EXHAUSTED}
+        and station.backup_oxygen > 0
+    ):
+        if EvidenceCode.BACKUP_ACTIVATED not in codes:
             return ActionRequest(ActionRequestKind.ACTIVATE_BACKUP)
     if (
         len(station.oxygen_sensors) == 2

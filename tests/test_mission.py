@@ -717,3 +717,40 @@ def test_malformed_captain_decision_is_recorded_and_followed_up(field, value):
         and event["consequence"]["reason"] == "provider_failure"
         for event in result.events
     )
+
+
+def test_custom_sensor_alert_wording_does_not_change_valid_closure():
+    class SensorCaptain:
+        def decide(self, context):
+            inspection = next(
+                (item for item in context.evidence if item.kind == "inspection"), None
+            )
+            if inspection is None:
+                return CaptainDecision(ActionRequest(ActionRequestKind.INSPECT, target="sensor_a"))
+            return CaptainDecision(
+                ActionRequest(
+                    ActionRequestKind.CLOSE,
+                    reason="inspection identified the calibration fault",
+                    evidence_sequences=(inspection.sequence,),
+                )
+            )
+
+    def run(message):
+        return run_mission(
+            MissionConfig(
+                scenario_definition=ScenarioDefinition(
+                    "sensor_wording",
+                    "Sensor alert wording.",
+                    {},
+                    (ScenarioEventSpec(1, "sensor_fault", target="sensor_a", message=message),),
+                ),
+                controller_mode=ControllerMode.LLM,
+                duration_turns=4,
+            ),
+            captain=SensorCaptain(),
+        )
+
+    standard = run(None)
+    reworded = run("Sensor A needs an independent inspection.")
+    assert standard.evaluation.metrics["unresolved_incidents"] == 0
+    assert reworded.evaluation.metrics["unresolved_incidents"] == 0

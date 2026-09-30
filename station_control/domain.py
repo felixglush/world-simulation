@@ -13,12 +13,27 @@ class ActionKind(StrEnum):
     ORDER_SUPPLIES = "order_supplies"
 
 
+class EvidenceCode(StrEnum):
+    """Public findings and alerts; display wording does not define their meaning."""
+
+    SENSOR_DISAGREEMENT = "sensor_disagreement"
+    OXYGEN_CRITICAL = "oxygen_critical"
+    OXYGEN_EXHAUSTED = "oxygen_exhausted"
+    ACTIVE_LEAK = "active_leak"
+    OXYGEN_HEALTHY = "oxygen_healthy"
+    SENSOR_CALIBRATION_FAULT = "sensor_calibration_fault"
+    SENSOR_HEALTHY = "sensor_healthy"
+    REPAIR_ASSIGNED = "repair_assigned"
+    BACKUP_ACTIVATED = "backup_activated"
+
+
 @dataclass(frozen=True, slots=True)
 class Evidence:
     sequence: int
     turn: int
     kind: str
     message: str
+    code: EvidenceCode | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,7 +169,7 @@ def apply_action(state: StationState, action: Action) -> ActionResult:
         if state.backup_oxygen <= 0:
             return _rejected(state, "backup_empty")
         updated = replace(state, backup_active=True)
-        return _accepted(updated, "Backup oxygen activated.")
+        return _accepted(updated, "Backup oxygen activated.", code=EvidenceCode.BACKUP_ACTIVATED)
     return _order_supplies(state, action)
 
 
@@ -165,7 +180,7 @@ def advance_turn(state: StationState) -> TurnResult:
     turn = state.turn + 1
     next_state = replace(state, turn=turn)
     emitted: list[Evidence] = []
-    scheduled_messages: list[tuple[str, str | None, str]] = []
+    scheduled_messages: list[tuple[str, str | None, str, EvidenceCode | None]] = []
 
     remaining_events = []
     for event in state.scheduled_events:
@@ -300,7 +315,7 @@ def advance_turn(state: StationState) -> TurnResult:
             )
         elif event.kind == "telemetry":
             if event.message != "":
-                scheduled_messages.append(("telemetry", event.message, "Telemetry"))
+                scheduled_messages.append(("telemetry", event.message, "Telemetry", None))
         elif event.kind == "report":
             _queue_scheduled_message(
                 scheduled_messages,
@@ -387,6 +402,7 @@ def advance_turn(state: StationState) -> TurnResult:
             next_state,
             "alert",
             "Main oxygen reserves are exhausted; the crew has been lost.",
+            code=EvidenceCode.OXYGEN_EXHAUSTED,
         )
         emitted.append(item)
     elif next_state.crew_alive and oxygen <= CRITICAL_OXYGEN and state.oxygen > CRITICAL_OXYGEN:
@@ -394,6 +410,7 @@ def advance_turn(state: StationState) -> TurnResult:
             next_state,
             "alert",
             "Main oxygen reserves have entered the critical range.",
+            code=EvidenceCode.OXYGEN_CRITICAL,
         )
         emitted.append(item)
 
@@ -489,7 +506,7 @@ def advance_turn(state: StationState) -> TurnResult:
             else 0
         ),
     )
-    for kind, message, default_message in scheduled_messages:
+    for kind, message, default_message, code in scheduled_messages:
         if kind == "telemetry":
             prefix = default_message if message is None else message
             summary = "; ".join(
@@ -501,7 +518,7 @@ def advance_turn(state: StationState) -> TurnResult:
             message = f"{prefix}: {summary}."
         elif message is None:
             message = default_message
-        next_state, item = _emit(next_state, kind, message)
+        next_state, item = _emit(next_state, kind, message, code=code)
         emitted.append(item)
     return TurnResult(state=next_state, evidence=tuple(emitted))
 
@@ -523,7 +540,9 @@ def _inspect(state: StationState, action: Action) -> ActionResult:
     if state.available_crew <= 0:
         return _rejected(state, "crew_unavailable")
 
+    code = None
     if action.target == "oxygen_system":
+        code = EvidenceCode.ACTIVE_LEAK if state.leak_active else EvidenceCode.OXYGEN_HEALTHY
         detail = (
             "Inspection found an active oxygen leak."
             if state.leak_active
@@ -540,11 +559,13 @@ def _inspect(state: StationState, action: Action) -> ActionResult:
             f"independent measurement is {state.oxygen} units."
         )
     elif state.sensor_fault in {action.target, "both"}:
+        code = EvidenceCode.SENSOR_CALIBRATION_FAULT
         detail = f"Inspection found a calibration fault in {action.target}."
     else:
+        code = EvidenceCode.SENSOR_HEALTHY
         detail = f"Inspection found {action.target} within calibration range."
     updated = replace(state, available_crew=state.available_crew - 1)
-    return _accepted(updated, detail, kind="inspection")
+    return _accepted(updated, detail, kind="inspection", code=code)
 
 
 def _assign_repair(state: StationState, action: Action) -> ActionResult:
@@ -570,7 +591,11 @@ def _assign_repair(state: StationState, action: Action) -> ActionResult:
         repair_turns_remaining=duration,
     )
     unit = "turn" if duration == 1 else "turns"
-    return _accepted(updated, f"Oxygen system repair assigned; completion takes {duration} {unit}.")
+    return _accepted(
+        updated,
+        f"Oxygen system repair assigned; completion takes {duration} {unit}.",
+        code=EvidenceCode.REPAIR_ASSIGNED,
+    )
 
 
 def _order_supplies(state: StationState, action: Action) -> ActionResult:
@@ -605,8 +630,9 @@ def _accepted(
     message: str,
     *,
     kind: str = "action",
+    code: EvidenceCode | None = None,
 ) -> ActionResult:
-    updated, evidence = _emit(state, kind, message)
+    updated, evidence = _emit(state, kind, message, code=code)
     return ActionResult(state=updated, accepted=True, rejection=None, evidence=(evidence,))
 
 
@@ -614,25 +640,29 @@ def _rejected(state: StationState, rejection: str) -> ActionResult:
     return ActionResult(state=state, accepted=False, rejection=rejection, evidence=())
 
 
-def _emit(state: StationState, kind: str, message: str) -> tuple[StationState, Evidence]:
+def _emit(
+    state: StationState, kind: str, message: str, *, code: EvidenceCode | None = None
+) -> tuple[StationState, Evidence]:
     evidence = Evidence(
         sequence=len(state.evidence) + 1,
         turn=state.turn,
         kind=kind,
         message=message,
+        code=code,
     )
     return replace(state, evidence=state.evidence + (evidence,)), evidence
 
 
 def _queue_scheduled_message(
-    scheduled_messages: list[tuple[str, str | None, str]],
+    scheduled_messages: list[tuple[str, str | None, str, EvidenceCode | None]],
     event: ScheduledEvent,
     kind: str,
     default_message: str,
 ) -> None:
     if event.message == "":
         return
-    scheduled_messages.append((kind, event.message, default_message))
+    code = EvidenceCode.SENSOR_DISAGREEMENT if event.kind == "sensor_fault" else None
+    scheduled_messages.append((kind, event.message, default_message, code))
 
 
 def _reading_for(state: StationState, sensor: str) -> SensorReading:

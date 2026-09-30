@@ -394,6 +394,7 @@ def _station(station: Any) -> dict[str, object]:
 def _evidence(item: Any) -> dict[str, object]:
     return {
         "sequence": item.sequence,
+        "code": getattr(item, "code", None),
         "turn": item.turn,
         "kind": item.kind,
         "message": item.message,

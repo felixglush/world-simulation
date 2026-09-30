@@ -10,7 +10,7 @@ Station Control tests how an AI crew keeps a space station operational when equi
 
 The product simulates one station with six crew members and one life-support system. It has two oxygen sensors, three controller options, and an optional AI adversary. You can run individual scenarios or combine sabotage scenarios in one mission. A command-line interface lets you select models, save results, replay decisions, and run new comparisons.
 
-This document describes simulator version `0.3.0`. Its reference is [main commit 43fefc3](https://github.com/felixglush/world-simulation/tree/43fefc3feae24f13d3a51dbd7e442c365a95812f). This simulator version is separate from the package version in `pyproject.toml`.
+This document describes simulator version `0.3.1`, which adds structured public evidence codes to the [0.3.0 baseline](https://github.com/felixglush/world-simulation/tree/43fefc3feae24f13d3a51dbd7e442c365a95812f). This simulator version is separate from the package version in `pyproject.toml`.
 
 Use the product to find a decision failure and understand its cause. Change one setting. Then test the change on missions that you did not use to select it. Keep results from the rules controller separate from evidence about live AI performance.
 
@@ -64,6 +64,8 @@ Scenarios can make sensors retain a fixed reading, keep an old sample, or share 
 Scenarios can also reserve crew for other work, change repair duration, delay supplies, or reduce delivered quantities. Partial parts deliveries are rounded down to whole parts. The full order price is still charged. Oxygen delivery cannot exceed main capacity.
 
 Physical repair completion and its notification are separate. A delayed notice is a report about past work. A duplicate notice does not represent another repair. The captain must check current evidence before it closes a case.
+
+Public evidence includes structured codes for physical findings and safety alerts. Incident closure and the rules captain use these codes, so changing display wording does not change those decisions. Authored report text cannot supply a trusted finding code.
 
 Invalid physical actions leave the world unchanged and return a reason. The mission still records the rejection and schedules review when time remains.
 
