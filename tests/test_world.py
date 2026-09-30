@@ -260,3 +260,13 @@ def test_supply_orders_reject_unbounded_or_non_integer_quantities(quantity):
     assert not result.accepted
     assert result.rejection == "invalid_quantity"
     assert result.state == state
+
+
+@pytest.mark.parametrize("kind", [ActionKind.INSPECT, ActionKind.ORDER_SUPPLIES])
+@pytest.mark.parametrize("target", [[], {}])
+def test_malformed_action_target_is_rejected_without_mutating_the_world(kind, target):
+    state = create_world(ScenarioFamily.NORMAL, seed=0)
+    result = apply_action(state, Action(kind, target=target, quantity=1))
+    assert not result.accepted
+    assert result.rejection == "invalid_target"
+    assert result.state == state

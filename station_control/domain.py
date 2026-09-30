@@ -128,6 +128,8 @@ def apply_action(state: StationState, action: Action) -> ActionResult:
     if not state.crew_alive:
         return _rejected(state, "crew_lost")
 
+    if action.target is not None and not isinstance(action.target, str):
+        return _rejected(state, "invalid_target")
     if kind is ActionKind.INSPECT:
         return _inspect(state, action)
     if kind is ActionKind.ASSIGN_REPAIR:

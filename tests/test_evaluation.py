@@ -201,3 +201,27 @@ def test_evaluation_keeps_unsupported_scores_out_of_metrics():
     assert "critical_reports_missed" not in result.metrics
     assert "critical_reports_missed" in result.unavailable
     assert "model_cost" not in result.unavailable
+
+
+def test_provider_attempt_is_counted_once_when_proposal_and_action_share_metadata():
+    metadata = {
+        "calls": 1,
+        "request_made": True,
+        "latency_ms": 5,
+        "input_tokens": 10,
+        "output_tokens": 3,
+        "cost_usd": 0.01,
+    }
+    events = [
+        {
+            "event_type": kind,
+            "turn": 1,
+            "decision": {"incident_id": 1, "kind": "inspect", "metadata": metadata},
+            "consequence": {"accepted": True},
+        }
+        for kind in ("captain_decision", "action")
+    ]
+    metrics = evaluate_mission((), events).metrics
+    assert metrics["model_calls"] == 1
+    assert metrics["model_cost"] == 0.01
+    assert metrics["inspections"] == 1

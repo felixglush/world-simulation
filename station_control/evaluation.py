@@ -128,7 +128,11 @@ def evaluate_mission(
                     repair_sequences.add(sequence)
 
         metadata = _provider_metadata(event, decision, consequence)
-        if metadata is not None:
+        if metadata is not None and event_type in {
+            "dispatch",
+            "captain_decision",
+            "provider_failure",
+        }:
             calls = _reported_calls(metadata)
             if calls > 0:
                 provider_records.append((calls, metadata))
