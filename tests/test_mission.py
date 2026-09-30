@@ -665,3 +665,22 @@ def test_malformed_dispatch_result_routes_to_captain_without_crashing(field, val
         and event["consequence"]["code"] == "malformed_response"
         for event in result.events
     )
+
+
+def test_event_sink_cannot_change_mission_history_or_evaluation():
+    config = MissionConfig(
+        scenario=ScenarioFamily.LEAK, seed=3, duration_turns=8, run_id="sink-test"
+    )
+    expected = run_mission(config)
+
+    def modifying_sink(record):
+        if isinstance(record["decision"], dict):
+            record["decision"].clear()
+        if isinstance(record["consequence"], dict):
+            record["consequence"].clear()
+        if isinstance(record["evidence"], dict):
+            record["evidence"]["message"] = "changed by sink"
+
+    actual = run_mission(config, event_sink=modifying_sink)
+    assert actual.events == expected.events
+    assert actual.evaluation == expected.evaluation

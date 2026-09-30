@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from enum import Enum, StrEnum
 from typing import Callable, Mapping
@@ -250,7 +251,7 @@ def run_mission(
         }
         events.append(record)
         if event_sink is not None:
-            event_sink(dict(record))
+            event_sink(deepcopy(record))
         return record
 
     for _ in range(config.duration_turns):
