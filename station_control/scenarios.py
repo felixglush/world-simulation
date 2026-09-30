@@ -51,7 +51,7 @@ class ScenarioDefinition:
         object.__setattr__(self, "events", validated["events"])
 
 
-_MAX_TURN = 336
+MAX_SCENARIO_TURNS = 14 * 24
 _MAX_EVENTS = 256
 _MAX_DESCRIPTION_LENGTH = 512
 _MAX_MESSAGE_LENGTH = 2000
@@ -371,14 +371,18 @@ def _event_from_value(value: object, index: int) -> ScenarioEventSpec:
 
     raw_turn = fields["turn"]
     if type(raw_turn) is int:
-        if not 1 <= raw_turn <= _MAX_TURN:
-            raise ValueError(f"events[{index}].turn must be between 1 and {_MAX_TURN}")
+        if not 1 <= raw_turn <= MAX_SCENARIO_TURNS:
+            raise ValueError(f"events[{index}].turn must be between 1 and {MAX_SCENARIO_TURNS}")
         turn: int | tuple[int, int] = raw_turn
     elif isinstance(raw_turn, (list, tuple)) and len(raw_turn) == 2:
         start, end = raw_turn
-        if type(start) is not int or type(end) is not int or not 1 <= start <= end <= _MAX_TURN:
+        if (
+            type(start) is not int
+            or type(end) is not int
+            or not 1 <= start <= end <= MAX_SCENARIO_TURNS
+        ):
             raise ValueError(
-                f"events[{index}].turn window must be ordered integers in 1..{_MAX_TURN}"
+                f"events[{index}].turn window must be ordered integers in 1..{MAX_SCENARIO_TURNS}"
             )
         turn = (start, end)
     else:
@@ -445,13 +449,13 @@ def _initial_bounds(name: str) -> tuple[int, int]:
     if name == "oxygen_capacity":
         return 1, 10_000
     if name in {"repair_duration_turns"}:
-        return 1, _MAX_TURN
+        return 1, MAX_SCENARIO_TURNS
     if name in {
         "delivery_delay_turns",
         "repair_notice_delay_turns",
         "duplicate_notice_delay_turns",
     }:
-        return 0, _MAX_TURN
+        return 0, MAX_SCENARIO_TURNS
     if name == "delivery_fill_percent":
         return 0, 100
     return 0, 10_000

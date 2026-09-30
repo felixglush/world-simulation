@@ -64,6 +64,7 @@ from .domain import (
 from .evaluation import MissionEvaluation, evaluate_mission
 from .rules import RulesCaptain
 from .scenarios import (
+    MAX_SCENARIO_TURNS,
     ScenarioDefinition,
     ScenarioFamily,
     create_configured_world,
@@ -72,7 +73,7 @@ from .scenarios import (
 )
 
 SIMULATOR_VERSION = "0.3.1"
-MAX_MISSION_TURNS = 14 * 24
+MAX_MISSION_TURNS = MAX_SCENARIO_TURNS
 MAX_INSPECTIONS_PER_TURN = 6
 
 
