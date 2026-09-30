@@ -2,6 +2,10 @@
 
 Read README.md for the product contract. Setup and operating commands are below.
 
+## Keep these instructions current
+
+Update this file in the same change whenever setup, dependencies, entry points, CLI flags, defaults, model configuration, verification, or cleanup commands change. Check the instructions against the implementation and CLI help. Replace obsolete commands and verify affected examples offline where possible. Record any checks that could not run. Keep product descriptions in README.md and operating instructions here.
+
 For testing and test-first implementation, use the $tdd skill at .agents/skills/tdd/SKILL.md.
 For architecture design or review, use $clean-architecture at .agents/skills/clean-architecture/SKILL.md.
 
@@ -53,7 +57,27 @@ UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control run
   --max-calls 40 --max-output-tokens-per-call 256
 ```
 
-For offline runs and rules benchmarks, select rules explicitly with `--controller rules`. These runs need no key or model budget and make no model requests.
+For offline runs and rules benchmarks, select rules explicitly with `--controller rules`. With the adversary off, these runs need no key or model budget and make no model requests.
+
+Also use `--adversary off` for a fully offline run. An AI adversary still makes model requests when the captain uses rules. Run these commands from the repository root after setup:
+
+```bash
+UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control scenarios
+UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control run \
+  --scenario leak --controller rules --adversary off --seed 41 --turns 48 \
+  --output runs/leak-41-offline.jsonl
+```
+
+Use a fresh output path each time. To combine YAML presets in the same station:
+
+```bash
+UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control run \
+  --scenario false_authority --scenario partial_delivery --scenario-spacing 8 \
+  --controller rules --adversary off --seed 101 --turns 48 \
+  --output runs/parallel-offline.jsonl
+```
+
+Repeat `--scenario-file` to combine custom files instead. Do not mix file and named selection. The four original scenario shortcuts can only be selected individually. Omit spacing to overlap YAML schedules. Starting settings apply from mission start; spacing shifts events only.
 
 The original scenarios are `normal`, `leak`, `faulty_sensor`, and `misleading_report`. The [YAML scenario library](docs/scenarios.md) adds harder and deceptive missions; list them with `python -m station_control scenarios`, select an ID with `--scenario`, or load a custom file with `--scenario-file`. Repeat either selector to combine YAML scenarios in one shared station; `--scenario-spacing 8` staggers successive event schedules by eight turns. Each log stores the scenario, seed, simulator and controller configuration, instruction and rubric versions, model identifiers, per-turn observed evidence and decisions, consequences, debug state, and evaluation metrics.
 
@@ -65,7 +89,15 @@ UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control rep
 
 Logs with the current JSONL schema remain replayable across simulator versions. Rerunning requires the same simulator version because scenario behavior may have changed.
 
-Rerun the saved scenario and seed with a changed setting into a new file. A rerun defaults to the AI controller, including when the saved run used rules; provide the live configuration and budgets above. To keep a rerun offline, pass `--controller rules` explicitly. Existing output files are never replaced.
+Rerun the saved scenario and seed with a changed setting into a new file. A rerun defaults to the AI controller, including when the saved run used rules; provide the live configuration and budgets above. It inherits the saved adversary mode and disruption allowance. To keep a rerun offline, pass both `--controller rules` and `--adversary off`. Existing output files are never replaced.
+
+```bash
+UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control rerun runs/leak-41-offline.jsonl \
+  --controller rules --adversary off --evidence-access history \
+  --output runs/leak-41-offline-history.jsonl
+```
+
+YAML reruns use the definition saved in the log. They do not reopen the source files. To change scenario spacing, select the source scenarios again.
 
 ```bash
 UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control rerun runs/RUN_ID.jsonl \
@@ -90,7 +122,21 @@ an AI opponent that reads current world state and selects bounded disruptions al
 your scenarios. Its private context stays separate from captain evidence. It shares the
 model-call budget with the crew. See [the adversary action space and run guide](docs/adversary.md).
 
-For a controlled comparison, keep the scenario and seed fixed across controller configurations so the external events match. Use one seed set for tuning, then report results on a separate held-out set; keep every run in its own output file. For example, use seeds `1, 2, 3` while adjusting settings and seeds `101, 102, 103` for the held-out comparison. Add the explicit budgets above to every live-controller invocation. No benchmark service or shared mutable run state is needed.
+For an authorized live experiment with an AI captain and adversary:
+
+```bash
+# Configure OPENROUTER_API_KEY securely before running; replace both model placeholders.
+UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control run \
+  --scenario false_authority --scenario partial_delivery --turns 48 \
+  --adversary llm --adversary-budget 3 \
+  --captain-model "<captain-model-id>" --adversary-model "<adversary-model-id>" \
+  --max-calls 120 --max-output-tokens-per-call 512 \
+  --output runs/adversary-mission.jsonl
+```
+
+Disruption points range from 0 to 6; the default is 3. They limit accepted sabotage actions, not model requests. Live settings are still required when the adversary is enabled with zero points. Use `--adversary off` to disable it. Current model flags or environment values supply rerun models; saved model IDs are not reused as defaults.
+
+For a controlled comparison, disable the adaptive adversary and keep the scenario definition and seed fixed across controller configurations so the external events match. Adaptive adversary choices can differ across runs with the same seed. Use one seed set for tuning, then report results on a separate held-out set; keep every run in its own output file. For example, use seeds `1, 2, 3` while adjusting settings and seeds `101, 102, 103` for the held-out comparison. Add the explicit budgets above to every live-controller invocation. No benchmark service or shared mutable run state is needed.
 
 ## Optional Docker checks
 
