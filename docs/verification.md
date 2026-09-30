@@ -45,3 +45,20 @@ irrelevant healthy-sensor evidence, stale evidence, or missing reasons.
 Integration review added two further RED/GREEN fixes: malformed unhashable action targets
 now return a domain rejection, and model attempts recorded in proposal and action events
 are counted once. The mission/world/evaluation/setup checks pass with lint and formatting.
+
+## Model adapters slice
+
+The first 16 adapter cases failed against placeholder provider behavior. The final
+20-case suite uses fake HTTP transports with the installed OpenAI and TypeSafe SDKs.
+It checks separate Jev judgments, uncertain/negative Noul outcomes, malformed responses,
+unknown/invalid actions, failure sanitization, explicit shared call limits, usage reporting,
+and request-attempt metadata on errors.
+
+Two real-runner/real-adapter cases exposed and fixed the handling of valid no-argument
+JSON Schema tools (an omitted `required` is empty). Both latest/history cases now complete
+inspection → timed repair → evidence-backed closure, and measured model calls match actual
+transport requests. Scoped tests, lint, formatting, and offline SDK checks pass.
+
+The captain has an output-token cap; Jev's SDK exposes no documented output-token cap.
+Both share a request cap and disable retries. A request cap is not a dollar ceiling.
+The configured OpenRouter endpoints were not exercised live.
