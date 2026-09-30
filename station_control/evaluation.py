@@ -65,6 +65,8 @@ def evaluate_mission(
     parts_consumed = 0
     clarification_requests = 0
     invalid_actions = 0
+    adversary_disruptions = 0
+    adversary_rejected_actions = 0
     open_incidents: dict[int, int | None] = {}
     scheduled_followups: dict[int, int] = {}
     resolution_turns: list[int] = []
@@ -88,6 +90,14 @@ def evaluate_mission(
                 parts_consumed += 1
             if decision.get("kind") == "request_clarification" and accepted is True:
                 clarification_requests += 1
+        elif event_type == "adversary_decision":
+            action = decision.get("action")
+            action = action if isinstance(action, Mapping) else {}
+            accepted = consequence.get("accepted")
+            if accepted is False:
+                adversary_rejected_actions += 1
+            elif action.get("kind") != "wait" and accepted is True:
+                adversary_disruptions += 1
         elif event_type == "incident_opened":
             incident_id = decision.get("incident_id")
             if type(incident_id) is int:
@@ -125,6 +135,7 @@ def evaluate_mission(
             "dispatch",
             "captain_decision",
             "provider_failure",
+            "adversary_decision",
         }:
             calls = _reported_calls(metadata)
             if calls > 0:
@@ -145,6 +156,8 @@ def evaluate_mission(
             "clarification_requests": clarification_requests,
             "repair_completions": max(completed_repairs, evidenced_repairs),
             "invalid_actions": invalid_actions,
+            "adversary_disruptions": adversary_disruptions,
+            "adversary_rejected_actions": adversary_rejected_actions,
             "unresolved_incidents": len(open_incidents),
             "forgotten_incidents": sum(
                 incident_id not in scheduled_followups
