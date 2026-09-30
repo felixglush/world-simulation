@@ -1,7 +1,10 @@
 # Station Control architecture explorer
 
 A React Flow canvas for the current Python implementation, with service boundaries,
-typed messages, source code, state schemas, and recorded-run playback. These are
+typed messages, source code, state schemas, and recorded-run playback.
+Vercel AI Elements supplies the syntax-highlighted code and JSON viewers;
+shadcn/ui (Radix) supplies inspector tabs, replay buttons, and status badges.
+Tailwind CSS styles these shared components alongside the custom diagram layout. These are
 logical boundaries inside one process; only model requests cross an HTTPS boundary.
 
 ## Open the explorer
@@ -86,3 +89,20 @@ mobile layout, and opening the standalone HTML without a server.
 The repository-installed [PR Lens skill](../.agents/skills/pr-lens/SKILL.md) informed
 the source references, message walkthroughs, and boundaries. Its upstream provenance
 and MIT license are recorded beside the skill. No PR Lens hosted renderer is needed.
+
+## UI component maintenance
+
+Official registry sources are installed in `src/components/ai-elements` and
+`src/components/ui`; `components.json` configures their aliases. `SourceBlock.tsx`
+composes Vercel's CodeBlock, header, actions, and copy button for source and payloads.
+The source snapshot retains original Python line numbers. Tabs support arrow-key
+navigation without advancing the run player.
+
+Install additional components selectively with `npx shadcn@latest add <component>`.
+The AI Elements code block was installed from
+`https://elements.ai-sdk.dev/api/registry/code-block.json`. Local adaptations use
+Shiki's JavaScript engine with bundled Python/JSON grammars and two GitHub themes,
+and key the token cache by full source text. Preserve these when refreshing from
+the registry: importing the full language loader inflates the offline artifact.
+`src/ui.css` defines shared design tokens and CSS layer ordering; the existing
+light diagram style remains in `src/styles.css`. No Vercel deployment is required.

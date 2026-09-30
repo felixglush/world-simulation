@@ -1,3 +1,4 @@
+import { Button } from "./components/ui/button";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ReactFlowProvider } from "@xyflow/react";
 import {
@@ -29,7 +30,6 @@ import {
   visibleComponents,
 } from "./model";
 import type { DemoRun, MessageKind, Mode } from "./model";
-import "./styles.css";
 
 export default function App() {
   return (
@@ -87,7 +87,10 @@ function Explorer() {
   const clear = useCallback(() => setSelected(null), []);
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
-      if ((event.target as HTMLElement).matches("input,textarea,select"))
+      if (
+        (event.target as HTMLElement).matches("input,textarea,select") ||
+        (event.target as HTMLElement).closest("[role=tablist]")
+      )
         return;
       if (event.key === "/") {
         event.preventDefault();
@@ -216,10 +219,10 @@ function Explorer() {
             <option value="rules">Rules baseline</option>
           </select>
         </label>
-        <button className="primary walkthrough-button" onClick={startReplay}>
+        <Button className="walkthrough-button" onClick={startReplay}>
           <Play size={14} />
           Walk through a turn
-        </button>
+        </Button>
       </div>
       <div className="workspace">
         {sidebar && (

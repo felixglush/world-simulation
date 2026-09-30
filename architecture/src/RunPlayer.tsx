@@ -1,3 +1,5 @@
+import { Button } from "./components/ui/button";
+import { Badge } from "./components/ui/badge";
 import { useEffect, useRef, useState } from "react";
 import {
   Download,
@@ -99,9 +101,9 @@ export function RunPlayer({
         <div className="run-label">
           <span className="live-dot" />
           <strong>Run player</strong>
-          <span className="demo-badge">
+          <Badge variant="outline" className="demo-badge">
             {run.id.startsWith("import-") ? "Imported run" : "Scripted AI demo"}
-          </span>
+          </Badge>
         </div>
         <select
           aria-label="Run input"
@@ -116,10 +118,14 @@ export function RunPlayer({
             </option>
           ))}
         </select>
-        <button className="text-button" onClick={() => input.current?.click()}>
+        <Button
+          variant="ghost"
+          className="text-button"
+          onClick={() => input.current?.click()}
+        >
           <Upload size={15} />
           Load JSONL
-        </button>
+        </Button>
         <input
           type="file"
           accept=".jsonl,.ndjson,.json"
@@ -128,21 +134,23 @@ export function RunPlayer({
           aria-label="Import run file"
           hidden
         />
-        <button
+        <Button
+          variant="ghost"
           className="icon-button"
           aria-label="Download this run"
           title="Download this run"
           onClick={download}
         >
           <Download size={17} />
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
           className="icon-button"
           aria-label="Close run player"
           onClick={onClose}
         >
           <X size={18} />
-        </button>
+        </Button>
       </div>
       {error && (
         <div role="alert" className="import-error">
@@ -167,7 +175,8 @@ export function RunPlayer({
               const item = events[index],
                 itemTrace = eventTrace(item);
               return (
-                <button
+                <Button
+                  variant="ghost"
                   key={item.sequence}
                   className={cursor === index ? "current" : ""}
                   aria-current={cursor === index ? "step" : undefined}
@@ -188,7 +197,7 @@ export function RunPlayer({
                   <i
                     className={itemTrace.private ? "private-dot" : "public-dot"}
                   />
-                </button>
+                </Button>
               );
             })}
           </div>
@@ -253,7 +262,8 @@ export function RunPlayer({
         </div>
       </div>
       <div className="transport">
-        <button
+        <Button
+          variant="ghost"
           aria-label="Restart run"
           title="Restart run"
           onClick={() => {
@@ -262,8 +272,9 @@ export function RunPlayer({
           }}
         >
           <RotateCcw size={16} />
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
           aria-label="Previous step"
           disabled={cursor === 0}
           onClick={() => {
@@ -272,8 +283,9 @@ export function RunPlayer({
           }}
         >
           <SkipBack size={17} />
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
           className="play-button"
           aria-label={playing ? "Pause run" : "Play run"}
           onClick={() => {
@@ -282,8 +294,9 @@ export function RunPlayer({
           }}
         >
           {playing ? <Pause size={18} /> : <Play size={18} />}
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
           aria-label="Next step"
           disabled={cursor === events.length - 1}
           onClick={() => {
@@ -292,7 +305,7 @@ export function RunPlayer({
           }}
         >
           <SkipForward size={17} />
-        </button>
+        </Button>
         <input
           aria-label="Run progress"
           type="range"

@@ -184,3 +184,10 @@ inside `architecture/`. Use `npm run format:check` for hand-maintained frontend 
 Demo providers are scripted and make zero model calls; label this distinction in the UI.
 Preserve the README infographic's picture style when updating architecture documentation.
 Stop the optional Vite development server with Ctrl-C when finished.
+
+The architecture UI uses Vercel AI Elements for source/JSON viewing, shadcn/ui
+(Radix) for inspector/replay controls, and Tailwind via the Vite plugin. Component
+sources live under `architecture/src/components`; registry configuration is in
+`architecture/components.json`. Preserve the offline Python/JSON-only Shiki setup,
+source-file line offsets, keyboard tabs, and clipboard error feedback when updating
+components. Run the browser suite after changes to these interactions.

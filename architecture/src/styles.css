@@ -910,35 +910,9 @@ p {
   padding: 0 0 10px;
 }
 .code-block {
-  font-size: 10px;
-  line-height: 1.75;
-  background: #132a40;
-  border: 1px solid #17344f;
-  border-radius: 7px;
-  overflow: auto;
-  max-height: 650px;
-  padding: 10px 0;
-  color: #d0e1ed;
+  margin-top: 12px;
 }
-.code-line {
-  display: flex;
-  white-space: pre;
-}
-.code-line > span {
-  position: sticky;
-  left: 0;
-  flex-shrink: 0;
-  width: 41px;
-  background: #132a40;
-  text-align: right;
-  padding-right: 10px;
-  color: #52718a;
-  font: 9px/1.95 monospace;
-  user-select: none;
-}
-.code-line code {
-  padding-right: 14px;
-}
+
 .ownership {
   display: flex;
   gap: 9px;

@@ -195,4 +195,33 @@ test("standalone HTML works offline without a development server", async ({
     .click();
   await page.getByRole("tab", { name: "Code", exact: true }).click();
   await expect(page.locator(".code-block")).toContainText("class ");
+  await expect(
+    page.locator(".code-block pre span[style*='color']").first(),
+  ).toBeVisible();
+});
+
+test("inspector supports keyboard tabs, highlighted source, and copying the definition", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Walk through a turn" }).click();
+  const progress = page.getByRole("slider", { name: "Run progress" });
+  const before = await progress.inputValue();
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await inspector.getByRole("tab", { name: "Overview", exact: true }).click();
+  await page.keyboard.press("ArrowRight");
+  await expect(
+    inspector.getByRole("tab", { name: "Code", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(progress).toHaveValue(before);
+  await expect(
+    inspector.locator(".code-block pre span[style*='color']").first(),
+  ).toBeVisible();
+  await inspector.getByRole("button", { name: "Copy source code" }).click();
+  await expect(inspector.getByRole("status")).toHaveText("Copied");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain(
+    "class StationState",
+  );
 });
