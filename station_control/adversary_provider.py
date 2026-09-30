@@ -26,7 +26,9 @@ from .provider_support import (
     DEFAULT_TIMEOUT_SECONDS,
     MAX_ARGUMENT_CHARS,
     CallBudget,
+    call_metadata,
     ensure_bounded,
+    failure_metadata,
     measure_latency_ms,
     reported_cost,
     validate_configuration,
@@ -282,20 +284,22 @@ def _decision(
         target = None
 
     usage = response.usage
-    metadata = {
-        "provider": "openrouter",
-        "calls": 1,
-        "request_made": True,
-        "model": response.model,
-        "input_tokens": _nonnegative_int(getattr(usage, "prompt_tokens", None)),
-        "output_tokens": _nonnegative_int(getattr(usage, "completion_tokens", None)),
-        "cost_usd": reported_cost(usage),
-        "latency_ms": elapsed_ms,
-        "prompt_version": ADVERSARY_PROMPT_VERSION,
-        "max_output_tokens": max_tokens,
-        "timeout_seconds": timeout_seconds,
-        "retry_limit": 0,
-    }
+    metadata = call_metadata(
+        provider="openrouter",
+        model=response.model,
+        input_tokens=getattr(usage, "prompt_tokens", None),
+        output_tokens=getattr(usage, "completion_tokens", None),
+        cost=reported_cost(usage),
+        elapsed_ms=elapsed_ms,
+    )
+    metadata.update(
+        {
+            "prompt_version": ADVERSARY_PROMPT_VERSION,
+            "max_output_tokens": max_tokens,
+            "timeout_seconds": timeout_seconds,
+            "retry_limit": 0,
+        }
+    )
     rationale = message.content if isinstance(message.content, str) else ""
     return AdversaryDecision(
         action=AdversaryAction(descriptor.kind, target=target),
@@ -313,16 +317,9 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def _nonnegative_int(value: object) -> int | None:
-    return value if type(value) is int and value >= 0 else None
-
-
 def _failure_metadata(model: str, *, request_made: bool, latency_ms: float) -> dict[str, object]:
-    return {
-        "provider": "openrouter",
-        "model": model,
-        "calls": int(request_made),
-        "request_made": request_made,
-        "latency_ms": latency_ms,
-        "prompt_version": ADVERSARY_PROMPT_VERSION,
-    }
+    metadata = failure_metadata(
+        "openrouter", model, request_made=request_made, latency_ms=latency_ms
+    )
+    metadata["prompt_version"] = ADVERSARY_PROMPT_VERSION
+    return metadata

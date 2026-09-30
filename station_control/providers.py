@@ -57,7 +57,9 @@ from .provider_support import (
     CallBudget as CallBudget,
 )
 from .provider_support import (
+    call_metadata,
     ensure_bounded,
+    failure_metadata,
     measure_latency_ms,
     reported_cost,
     validate_configuration,
@@ -131,7 +133,7 @@ class JevDispatchProvider:
         except ProviderError as error:
             raise ProviderError(
                 error.code,
-                _failure_metadata("typesafe", self._model, request_made=False, latency_ms=0),
+                failure_metadata("typesafe", self._model, request_made=False, latency_ms=0),
             ) from None
         started = time.perf_counter()
         try:
@@ -202,7 +204,7 @@ class JevDispatchProvider:
         except TypeSafeAPIResponseValidationError:
             raise ProviderError(
                 ProviderErrorCode.MALFORMED_RESPONSE,
-                _failure_metadata(
+                failure_metadata(
                     "typesafe",
                     self._model,
                     request_made=True,
@@ -212,7 +214,7 @@ class JevDispatchProvider:
         except Exception:
             raise ProviderError(
                 ProviderErrorCode.PROVIDER_UNAVAILABLE,
-                _failure_metadata(
+                failure_metadata(
                     "typesafe",
                     self._model,
                     request_made=True,
@@ -226,14 +228,14 @@ class JevDispatchProvider:
         except ProviderError as error:
             raise ProviderError(
                 error.code,
-                _failure_metadata(
+                failure_metadata(
                     "typesafe", response.model, request_made=True, latency_ms=elapsed_ms
                 ),
             ) from None
         except Exception:
             raise ProviderError(
                 ProviderErrorCode.MALFORMED_RESPONSE,
-                _failure_metadata(
+                failure_metadata(
                     "typesafe", response.model, request_made=True, latency_ms=elapsed_ms
                 ),
             ) from None
@@ -283,7 +285,7 @@ class OpenRouterCaptainProvider:
         except ProviderError as error:
             raise ProviderError(
                 error.code,
-                _failure_metadata("openrouter", self._model, request_made=False, latency_ms=0),
+                failure_metadata("openrouter", self._model, request_made=False, latency_ms=0),
             ) from None
         started = time.perf_counter()
         try:
@@ -310,7 +312,7 @@ class OpenRouterCaptainProvider:
         except APIResponseValidationError:
             raise ProviderError(
                 ProviderErrorCode.MALFORMED_RESPONSE,
-                _failure_metadata(
+                failure_metadata(
                     "openrouter",
                     self._model,
                     request_made=True,
@@ -320,7 +322,7 @@ class OpenRouterCaptainProvider:
         except Exception:
             raise ProviderError(
                 ProviderErrorCode.PROVIDER_UNAVAILABLE,
-                _failure_metadata(
+                failure_metadata(
                     "openrouter",
                     self._model,
                     request_made=True,
@@ -337,14 +339,14 @@ class OpenRouterCaptainProvider:
             response_model = getattr(response, "model", self._model)
             raise ProviderError(
                 error.code,
-                _failure_metadata(
+                failure_metadata(
                     "openrouter", response_model, request_made=True, latency_ms=elapsed_ms
                 ),
             ) from None
         except Exception:
             raise ProviderError(
                 ProviderErrorCode.MALFORMED_RESPONSE,
-                _failure_metadata(
+                failure_metadata(
                     "openrouter", self._model, request_made=True, latency_ms=elapsed_ms
                 ),
             ) from None
@@ -496,7 +498,7 @@ def _captain_result(
         raise ProviderError(ProviderErrorCode.MALFORMED_RESPONSE) from None
     rationale = message.content if isinstance(message.content, str) else ""
     usage = response.usage
-    metadata = _call_metadata(
+    metadata = call_metadata(
         provider="openrouter",
         model=response.model,
         input_tokens=getattr(usage, "prompt_tokens", None),
@@ -640,7 +642,7 @@ def _dispatch_result(
         raise ProviderError(ProviderErrorCode.MALFORMED_RESPONSE)
 
     usage = response.usage
-    metadata = _call_metadata(
+    metadata = call_metadata(
         provider="typesafe",
         model=response.model,
         input_tokens=getattr(usage, "input_tokens", None),
@@ -684,42 +686,3 @@ def _valid_distribution(values: Mapping[object, float], expected_keys: set[objec
     ):
         return False
     return math.isclose(sum(values.values()), 1.0, abs_tol=0.03)
-
-
-def _call_metadata(
-    *,
-    provider: str,
-    model: str,
-    input_tokens: object,
-    output_tokens: object,
-    cost: float | None,
-    elapsed_ms: float,
-) -> dict[str, object]:
-    return {
-        "provider": provider,
-        "calls": 1,
-        "request_made": True,
-        "model": model,
-        "input_tokens": input_tokens if type(input_tokens) is int and input_tokens >= 0 else None,
-        "output_tokens": output_tokens
-        if type(output_tokens) is int and output_tokens >= 0
-        else None,
-        "cost_usd": cost,
-        "latency_ms": elapsed_ms,
-    }
-
-
-def _failure_metadata(
-    provider: str,
-    model: object,
-    *,
-    request_made: bool,
-    latency_ms: float,
-) -> dict[str, object]:
-    return {
-        "provider": provider,
-        "model": model if isinstance(model, str) else "unknown",
-        "calls": int(request_made),
-        "request_made": request_made,
-        "latency_ms": latency_ms,
-    }

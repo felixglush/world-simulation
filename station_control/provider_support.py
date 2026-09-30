@@ -77,3 +77,42 @@ def reported_cost(usage: object) -> float | None:
 
 def measure_latency_ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 3)
+
+
+def call_metadata(
+    *,
+    provider: str,
+    model: str,
+    input_tokens: object,
+    output_tokens: object,
+    cost: float | None,
+    elapsed_ms: float,
+) -> dict[str, object]:
+    return {
+        "provider": provider,
+        "calls": 1,
+        "request_made": True,
+        "model": model,
+        "input_tokens": input_tokens if type(input_tokens) is int and input_tokens >= 0 else None,
+        "output_tokens": output_tokens
+        if type(output_tokens) is int and output_tokens >= 0
+        else None,
+        "cost_usd": cost,
+        "latency_ms": elapsed_ms,
+    }
+
+
+def failure_metadata(
+    provider: str,
+    model: object,
+    *,
+    request_made: bool,
+    latency_ms: float,
+) -> dict[str, object]:
+    return {
+        "provider": provider,
+        "model": model if isinstance(model, str) else "unknown",
+        "calls": int(request_made),
+        "request_made": request_made,
+        "latency_ms": latency_ms,
+    }
