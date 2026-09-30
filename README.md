@@ -4,6 +4,7 @@ Companion Page: https://chatgpt.com/space/page_fc5b19900a188191a26a38b452913a17
 
 ![Station Control roles and decisions: public-event classification, captain response, and full audit logging](docs/images/station-control-roles.png)
 
+Explore the [interactive architecture canvas](architecture/README.md): zoom through service boundaries, inspect backing code and state, and replay an adversarial run event by event.
 This flow applies to `jev+llm` mode. Jev assesses public events in batches; the captain chooses actions. The application routes alerts and classification failures to review, and validates proposals before execution. Action results return to Jev, with further actions scheduled for a later turn. The audit log also preserves private adversary activity and hidden world transitions; those records stay outside the crew AIs' inputs.
 
 ## Purpose and current product

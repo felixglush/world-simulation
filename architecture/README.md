@@ -1,0 +1,88 @@
+# Station Control architecture explorer
+
+A React Flow canvas for the current Python implementation, with service boundaries,
+typed messages, source code, state schemas, and recorded-run playback. These are
+logical boundaries inside one process; only model requests cross an HTTPS boundary.
+
+## Open the explorer
+
+Use Node 24 and npm 11:
+
+```bash
+cd architecture
+npm ci
+npm run dev
+```
+
+Open http://127.0.0.1:4173. Stop the server with Ctrl-C.
+
+For a portable, offline HTML file:
+
+```bash
+npm run build
+```
+
+Open `dist/index.html` directly in a browser. Everything needed for the canvas,
+source inspector, and demo runs is bundled in that single file. GitHub source links
+require a connection; browsing the bundled code does not.
+
+## Explore and follow a run
+
+- Drag to pan, scroll to zoom, or use the fit/focus controls and minimap.
+- Choose a focused view or search for a component, Python symbol, or message.
+- Click a component for its responsibilities and connections. **Code** opens actual
+  Python definitions with line numbers; **State** shows state ownership, schemas, and
+  values at the selected replay event. Click the code icon for direct source access.
+- Click a connection for its contract fields, payload example, timing, and failure policy.
+- Choose **Walk through a turn** to follow adversarial input, world changes, public
+  events, Jev classification, captain proposals, validation, repair, and closure.
+  Play, step, or scrub; **Follow event** moves the camera along the active path.
+- Load a completed simulator 0.3.2+ schema-1 JSONL run to inspect your own data.
+  Files stay in the browser; there is no upload or model request. The 5 MB limit
+  keeps this small documentation viewer responsive.
+
+The two bundled demonstrations execute the **real Python simulator with scripted AI
+providers**. Their decisions are illustrative, not outputs from live models.
+World state is reconstructed from authoritative initialization and transition records.
+Incident state is explicitly labeled as a partial projection of the audit log;
+provider panels show recorded requests/results, not persistent model memory.
+Private audit information is shown for review and never claimed to be crew-visible.
+This is a recorded-run player, not a second implementation of the simulator.
+
+## Maintain and verify
+
+`src/model.json` owns the human-authored components, logical services, views, message
+contracts, and examples. `src/model.ts` projects audit records into display state.
+`Graph.tsx`, `Inspector.tsx`, and `RunPlayer.tsx` render those models independently.
+
+When Python interfaces or behavior change, update the model and run from the repository
+root with the locked Python dependencies installed:
+
+```bash
+uv run --frozen python architecture/scripts/generate.py
+uv run --frozen python architecture/scripts/generate.py --check
+```
+
+The generator extracts actual Python symbols and annotated fields into
+`src/source-index.json` and records two zero-call demonstrations in
+`src/demo-runs.json`. Do not hand-edit these generated files. Commit runtime source
+changes before generating the final source index so GitHub permalinks match its
+recorded revision. `--check` detects stale source and demo fixtures.
+
+Inside `architecture/`:
+
+```bash
+npm run check
+npm run format:check
+npm run build
+npx playwright install chromium
+npm test
+```
+
+For an existing system Chromium, use `CHROMIUM_PATH=/usr/bin/chromium npm test`.
+Browser checks cover navigation, contracts, actual code/state, playback, JSONL import,
+mobile layout, and opening the standalone HTML without a server.
+
+The repository-installed [PR Lens skill](../.agents/skills/pr-lens/SKILL.md) informed
+the source references, message walkthroughs, and boundaries. Its upstream provenance
+and MIT license are recorded beside the skill. No PR Lens hosted renderer is needed.

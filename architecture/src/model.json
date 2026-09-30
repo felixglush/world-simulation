@@ -1,0 +1,1267 @@
+{
+  "components": [
+    {
+      "id": "commander",
+      "title": "Commander / CLI",
+      "service": "setup",
+      "icon": "user",
+      "summary": "Choose the mission, models, and finite budgets.",
+      "responsibilities": [
+        "Parses run, rerun, replay and scenario commands.",
+        "Builds providers and connects RunLogWriter to the mission EventSink."
+      ],
+      "sources": [
+        {
+          "path": "station_control/cli.py",
+          "symbol": "main"
+        },
+        {
+          "path": "station_control/cli.py",
+          "symbol": "_read_live_settings"
+        },
+        {
+          "path": "station_control/cli.py",
+          "symbol": "_make_providers"
+        }
+      ],
+      "state": "Configuration for this run; no independent running service.",
+      "stateTypes": ["MissionConfig"]
+    },
+    {
+      "id": "scenario",
+      "title": "Scenario engine",
+      "service": "setup",
+      "icon": "calendar",
+      "summary": "Seeded starting state and scheduled world events.",
+      "responsibilities": [
+        "Validates YAML and immutable scenario definitions.",
+        "Creates a StationState containing the hidden event schedule."
+      ],
+      "sources": [
+        {
+          "path": "station_control/scenarios.py",
+          "symbol": "ScenarioDefinition"
+        },
+        {
+          "path": "station_control/scenarios.py",
+          "symbol": "create_configured_world"
+        },
+        {
+          "path": "station_control/scenarios.py",
+          "symbol": "create_world"
+        }
+      ],
+      "state": "Immutable starting configuration and future event schedule.",
+      "stateTypes": ["ScenarioDefinition", "ScheduledEvent"]
+    },
+    {
+      "id": "review",
+      "title": "Commander review",
+      "service": "setup",
+      "icon": "search",
+      "summary": "Replay saved facts and compare new experiments.",
+      "responsibilities": [
+        "Loads and validates a completed JSONL run.",
+        "Rerun starts a new mission with explicit controller configuration."
+      ],
+      "sources": [
+        {
+          "path": "station_control/persistence.py",
+          "symbol": "read_run_log"
+        },
+        {
+          "path": "station_control/persistence.py",
+          "symbol": "render_run_log"
+        },
+        {
+          "path": "station_control/cli.py",
+          "symbol": "_rerun"
+        }
+      ],
+      "state": "Saved records; rerunning creates a new run rather than changing history.",
+      "stateTypes": []
+    },
+    {
+      "id": "adversary-validation",
+      "title": "Disruption checks",
+      "service": "world",
+      "icon": "shield",
+      "summary": "Validate adversary proposals before the next turn.",
+      "responsibilities": [
+        "Checks action eligibility and remaining disruption points.",
+        "Accepted sabotage changes the schedule or delivery timing; rejected proposals leave state unchanged."
+      ],
+      "sources": [
+        {
+          "path": "station_control/adversary.py",
+          "symbol": "apply_adversary_action"
+        },
+        {
+          "path": "station_control/adversary.py",
+          "symbol": "eligible_adversary_actions"
+        }
+      ],
+      "state": "No separate store. Returns a new StationState and acceptance result.",
+      "stateTypes": ["AdversaryActionResult"]
+    },
+    {
+      "id": "world",
+      "title": "World engine",
+      "service": "world",
+      "icon": "gear",
+      "summary": "The authoritative station state and physical rules.",
+      "responsibilities": [
+        "Advances scheduled events, deliveries, oxygen, repairs, sensors and reports in order.",
+        "Owns resources, hidden faults and immutable state transitions.",
+        "Returns public Evidence separately from private WorldTransition audit facts."
+      ],
+      "sources": [
+        {
+          "path": "station_control/domain.py",
+          "symbol": "StationState"
+        },
+        {
+          "path": "station_control/domain.py",
+          "symbol": "advance_turn"
+        },
+        {
+          "path": "station_control/domain.py",
+          "symbol": "apply_action"
+        }
+      ],
+      "state": "StationState is replaced on each transition. This is the source of physical truth.",
+      "stateTypes": ["StationState", "WorldTransition", "Evidence"]
+    },
+    {
+      "id": "loop",
+      "title": "Mission loop",
+      "service": "mission",
+      "icon": "repeat",
+      "summary": "Run one bounded turn at a time.",
+      "responsibilities": [
+        "Calls the optional adversary, advances the world, screens events, reviews incidents, applies actions and evaluates the run.",
+        "Owns public history, pending event batches and the incident dictionary."
+      ],
+      "sources": [
+        {
+          "path": "station_control/application.py",
+          "symbol": "run_mission"
+        },
+        {
+          "path": "station_control/application.py",
+          "symbol": "MissionResult"
+        }
+      ],
+      "state": "In-memory mission state, history, incidents and append-only event records.",
+      "stateTypes": ["MissionConfig", "MissionResult"]
+    },
+    {
+      "id": "events",
+      "title": "Public event batches",
+      "service": "mission",
+      "icon": "layers",
+      "summary": "Project observed activity for the crew AIs.",
+      "responsibilities": [
+        "Includes station_observation, world_evidence, clarification_received and action records.",
+        "Immutable PublicEvent payloads exclude private adversary choices, world transitions and provider accounting.",
+        "Drain once before reviews and again after action outcomes, including on the final turn."
+      ],
+      "sources": [
+        {
+          "path": "station_control/application.py",
+          "symbol": "_public_event"
+        },
+        {
+          "path": "station_control/application.py",
+          "symbol": "_screen_events"
+        },
+        {
+          "path": "station_control/controllers.py",
+          "symbol": "PublicEvent"
+        }
+      ],
+      "state": "Pending PublicEvent list is cleared after each assessment. No external message broker.",
+      "stateTypes": ["PublicEvent", "StationView"]
+    },
+    {
+      "id": "routing",
+      "title": "Incident routing",
+      "service": "mission",
+      "icon": "route",
+      "summary": "Apply Jev judgments to incident review.",
+      "responsibilities": [
+        "Alerts, malformed classification and provider failure route conservatively.",
+        "Unknown subsystem, safeguard concern, unsupported diagnosis or urgency at least 55 also route.",
+        "A concerning observation can open an incident before a report exists."
+      ],
+      "sources": [
+        {
+          "path": "station_control/application.py",
+          "symbol": "_route_event_assessment"
+        },
+        {
+          "path": "station_control/application.py",
+          "symbol": "_register_evidence"
+        },
+        {
+          "path": "station_control/application.py",
+          "symbol": "_Incident"
+        }
+      ],
+      "state": "Mutable _Incident records owned by the application; synthetic observation incidents use negative IDs.",
+      "stateTypes": ["_Incident", "DispatchJudgment"]
+    },
+    {
+      "id": "monitor",
+      "title": "Monitor / follow-up",
+      "service": "mission",
+      "icon": "clock",
+      "summary": "Schedule review and preserve unresolved cases.",
+      "responsibilities": [
+        "Low-priority report incidents are reviewed four turns later when time remains.",
+        "Action-result escalation schedules further work for a later turn.",
+        "A mission can end with open incidents and no remaining review turn."
+      ],
+      "sources": [
+        {
+          "path": "station_control/application.py",
+          "symbol": "_set_follow_up"
+        },
+        {
+          "path": "station_control/application.py",
+          "symbol": "_schedule_follow_up"
+        },
+        {
+          "path": "station_control/application.py",
+          "symbol": "_next_turn"
+        }
+      ],
+      "state": "Incident.next_turn, dispatched, open and pending_clarification_turn.",
+      "stateTypes": ["_Incident"]
+    },
+    {
+      "id": "checks",
+      "title": "Action checks",
+      "service": "mission",
+      "icon": "check",
+      "summary": "Validate proposals, resources and closure evidence.",
+      "responsibilities": [
+        "Enforces inspection allowance, permitted actions and future follow-up times.",
+        "Physical actions are delegated to apply_action; close needs trusted recent evidence.",
+        "Logs accepted and rejected actions, and publishes outcomes for classification."
+      ],
+      "sources": [
+        {
+          "path": "station_control/application.py",
+          "symbol": "_perform_action"
+        },
+        {
+          "path": "station_control/application.py",
+          "symbol": "_resolves_latest_evidence"
+        }
+      ],
+      "state": "Per-turn inspection allowance; updates incidents and replaces world state.",
+      "stateTypes": ["ActionRequest", "ActionResult"]
+    },
+    {
+      "id": "adversary",
+      "title": "AI adversary",
+      "service": "models",
+      "icon": "bot",
+      "summary": "Propose one bounded disruption before each turn.",
+      "responsibilities": [
+        "Sees current hidden state but no future scenario schedule.",
+        "Can wait, start a silent leak, mask a sensor, delay delivery or issue a deceptive report.",
+        "Its selection and rationale are private audit records."
+      ],
+      "sources": [
+        {
+          "path": "station_control/adversary_provider.py",
+          "symbol": "OpenRouterAdversaryProvider"
+        },
+        {
+          "path": "station_control/adversary.py",
+          "symbol": "adversary_context"
+        }
+      ],
+      "state": "Provider configuration and shared call budget; no authority to mutate the world directly.",
+      "stateTypes": ["AdversaryContext", "AdversaryDecision"]
+    },
+    {
+      "id": "jev",
+      "title": "Jev classifier",
+      "service": "models",
+      "icon": "network",
+      "summary": "Assess public events before incident routing.",
+      "responsibilities": [
+        "Returns subsystem, safeguard-request, diagnosis-support and urgency judgments.",
+        "Classifies each public event in a batch; a batch has one aggregate assessment.",
+        "Uses the shared bounded call budget and timeout. No diagnosis claim means supported."
+      ],
+      "sources": [
+        {
+          "path": "station_control/providers.py",
+          "symbol": "JevDispatchProvider"
+        },
+        {
+          "path": "station_control/controllers.py",
+          "symbol": "DispatchProvider"
+        },
+        {
+          "path": "station_control/controllers.py",
+          "symbol": "DispatchContext"
+        },
+        {
+          "path": "station_control/controllers.py",
+          "symbol": "DispatchJudgment"
+        }
+      ],
+      "state": "Adapter/client configuration and shared CallBudget. PublicEvent batches are request inputs, not persistent model memory.",
+      "stateTypes": ["DispatchContext", "DispatchJudgment"]
+    },
+    {
+      "id": "captain",
+      "title": "Captain",
+      "service": "models",
+      "icon": "captain",
+      "summary": "Investigate escalated incidents and propose actions.",
+      "responsibilities": [
+        "Receives public evidence, event batch, available actions and inspection allowance.",
+        "Selects one action per due incident; application/world checks decide whether it executes.",
+        "Can inspect, repair, activate backup, order supplies, clarify, defer or close."
+      ],
+      "sources": [
+        {
+          "path": "station_control/providers.py",
+          "symbol": "OpenRouterCaptainProvider"
+        },
+        {
+          "path": "station_control/controllers.py",
+          "symbol": "CaptainProvider"
+        },
+        {
+          "path": "station_control/controllers.py",
+          "symbol": "CaptainContext"
+        },
+        {
+          "path": "station_control/controllers.py",
+          "symbol": "CaptainDecision"
+        }
+      ],
+      "state": "Provider configuration and shared CallBudget. Incident and world state remain application-owned.",
+      "stateTypes": ["CaptainContext", "CaptainDecision"]
+    },
+    {
+      "id": "rules",
+      "title": "Rules captain",
+      "service": "models",
+      "icon": "list",
+      "summary": "Deterministic offline comparison controller.",
+      "responsibilities": [
+        "Implements the same CaptainProvider.decide port.",
+        "Uses incident-local evidence without calling a model."
+      ],
+      "sources": [
+        {
+          "path": "station_control/rules.py",
+          "symbol": "RulesCaptain"
+        }
+      ],
+      "state": "Mission duration setting; receives current public context on every decision.",
+      "stateTypes": ["CaptainContext", "CaptainDecision"]
+    },
+    {
+      "id": "budget",
+      "title": "Shared call budget",
+      "service": "models",
+      "icon": "gauge",
+      "summary": "One finite allowance across enabled model roles.",
+      "responsibilities": [
+        "Consumes a call before an external request.",
+        "Captain and adversary also apply a per-call output-token limit; Jev has no documented equivalent."
+      ],
+      "sources": [
+        {
+          "path": "station_control/provider_support.py",
+          "symbol": "CallBudget"
+        },
+        {
+          "path": "station_control/provider_support.py",
+          "symbol": "ensure_bounded"
+        }
+      ],
+      "state": "CallBudget counters shared by Jev, captain and adversary.",
+      "stateTypes": ["CallBudget"]
+    },
+    {
+      "id": "audit",
+      "title": "Run log",
+      "service": "audit",
+      "icon": "database",
+      "summary": "Persist ordinary and malicious activity as JSONL.",
+      "responsibilities": [
+        "Records world initialization and transitions, decisions, public evidence and outcomes.",
+        "Synchronous EventSink receives defensive copies.",
+        "Start/event/end validation makes completed logs replayable."
+      ],
+      "sources": [
+        {
+          "path": "station_control/persistence.py",
+          "symbol": "RunLogWriter"
+        },
+        {
+          "path": "station_control/application.py",
+          "symbol": "_json_value"
+        }
+      ],
+      "state": "Open log file, sequence and completion bookkeeping; persisted run records are the audit trail.",
+      "stateTypes": []
+    },
+    {
+      "id": "evaluation",
+      "title": "Evaluator",
+      "service": "audit",
+      "icon": "chart",
+      "summary": "Measure mission outcomes independently of AI claims.",
+      "responsibilities": [
+        "Computes survival, resource use, incidents and model usage from facts.",
+        "Reports unavailable metrics instead of inventing values."
+      ],
+      "sources": [
+        {
+          "path": "station_control/evaluation.py",
+          "symbol": "evaluate_mission"
+        },
+        {
+          "path": "station_control/evaluation.py",
+          "symbol": "MissionEvaluation"
+        }
+      ],
+      "state": "Pure calculation over snapshots and recorded events. No mutable service state.",
+      "stateTypes": ["MissionEvaluation"]
+    },
+    {
+      "id": "api",
+      "title": "Model API",
+      "service": "external",
+      "icon": "cloud",
+      "summary": "External OpenRouter HTTPS boundary.",
+      "responsibilities": [
+        "TypeSafe SDK requests Jev judgments; OpenAI-compatible SDK requests captain/adversary tool actions.",
+        "Network failures become sanitized ProviderError results."
+      ],
+      "sources": [
+        {
+          "path": "station_control/providers.py",
+          "symbol": "JevDispatchProvider"
+        },
+        {
+          "path": "station_control/providers.py",
+          "symbol": "OpenRouterCaptainProvider"
+        },
+        {
+          "path": "station_control/adversary_provider.py",
+          "symbol": "OpenRouterAdversaryProvider"
+        }
+      ],
+      "state": "Remote provider state is outside this repository. The explorer never makes model requests.",
+      "stateTypes": []
+    }
+  ],
+  "services": [
+    {
+      "id": "setup",
+      "title": "Setup & review",
+      "subtitle": "CLI \u00b7 local files",
+      "color": "#55718e"
+    },
+    {
+      "id": "world",
+      "title": "World authority",
+      "subtitle": "Pure Python domain",
+      "color": "#1873d3"
+    },
+    {
+      "id": "mission",
+      "title": "Mission application",
+      "subtitle": "Synchronous orchestration",
+      "color": "#008c9e"
+    },
+    {
+      "id": "models",
+      "title": "Controller adapters",
+      "subtitle": "Ports \u00b7 replaceable policies",
+      "color": "#8260bc"
+    },
+    {
+      "id": "audit",
+      "title": "Audit & evaluation",
+      "subtitle": "JSONL \u00b7 pure metrics",
+      "color": "#64748b"
+    },
+    {
+      "id": "external",
+      "title": "External model API",
+      "subtitle": "HTTPS boundary",
+      "color": "#cb8128"
+    }
+  ],
+  "connections": [
+    {
+      "id": "configuration",
+      "source": "commander",
+      "target": "scenario",
+      "label": "ScenarioDefinition",
+      "kind": "command",
+      "contract": "ScenarioDefinition",
+      "description": "Resolve a named or YAML scenario and validate its initial state.",
+      "example": {
+        "id": "silent_leak",
+        "initial": {},
+        "events": [
+          {
+            "turn": 1,
+            "kind": "leak_start",
+            "message": ""
+          }
+        ]
+      },
+      "when": "Synchronous function call",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "initialize",
+      "source": "scenario",
+      "target": "world",
+      "label": "StationState",
+      "kind": "private",
+      "contract": "StationState",
+      "description": "Create initial physical state with a hidden schedule.",
+      "example": {
+        "turn": 0,
+        "oxygen": 700,
+        "leak_active": false,
+        "scheduled_events": [
+          {
+            "turn": 1,
+            "kind": "leak_start"
+          }
+        ]
+      },
+      "when": "Synchronous function call",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "adversary-context",
+      "source": "world",
+      "target": "adversary",
+      "label": "AdversaryContext",
+      "kind": "private",
+      "contract": "AdversaryContext",
+      "description": "Project current truth for the adversary, excluding future scheduled events.",
+      "example": {
+        "turn": 0,
+        "oxygen": 700,
+        "leak_active": false,
+        "disruption_budget_remaining": 3
+      },
+      "when": "Once before world advancement when enabled",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "adversary-proposal",
+      "source": "adversary",
+      "target": "adversary-validation",
+      "label": "AdversaryDecision",
+      "kind": "private",
+      "contract": "AdversaryDecision",
+      "description": "An action proposal and private rationale; it is not yet an accepted world change.",
+      "example": {
+        "action": {
+          "kind": "start_silent_leak",
+          "target": null
+        },
+        "rationale": "Reduce reserves without a public alert."
+      },
+      "when": "AdversaryProvider.decide",
+      "failure": "Invalid proposals are rejected and logged; no mutation."
+    },
+    {
+      "id": "sabotage-result",
+      "source": "adversary-validation",
+      "target": "world",
+      "label": "AdversaryActionResult",
+      "kind": "private",
+      "contract": "AdversaryActionResult",
+      "description": "Accepted disruptions update the authoritative world or its schedule.",
+      "example": {
+        "accepted": true,
+        "status": "accepted",
+        "rejection": null
+      },
+      "when": "apply_adversary_action",
+      "failure": "Rejected proposals return unchanged state."
+    },
+    {
+      "id": "observations",
+      "source": "world",
+      "target": "events",
+      "label": "Evidence + readings",
+      "kind": "public",
+      "contract": "Evidence",
+      "description": "Publish crew-visible observations and emitted evidence from TurnResult. Private transitions go only to audit.",
+      "example": {
+        "sequence": 3,
+        "turn": 2,
+        "kind": "report",
+        "message": "Maintenance blames a sensor.",
+        "code": null
+      },
+      "when": "After advance_turn",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "dispatch-context",
+      "source": "events",
+      "target": "jev",
+      "label": "DispatchContext",
+      "kind": "public",
+      "contract": "DispatchContext",
+      "description": "Supply the public batch, current StationView and permitted history.",
+      "example": {
+        "station": {
+          "turn": 1,
+          "oxygen_sensors": [
+            {
+              "sensor": "sensor_a",
+              "oxygen": 674
+            }
+          ]
+        },
+        "events": [
+          {
+            "sequence": 8,
+            "turn": 1,
+            "event_type": "station_observation",
+            "payload": "{\"evidence\":{\"oxygen_sensors\":[...]}}"
+          }
+        ]
+      },
+      "when": "At most two batches per turn",
+      "failure": "Failure, invalid output, timeout or exhausted budget routes conservatively."
+    },
+    {
+      "id": "judgment",
+      "source": "jev",
+      "target": "routing",
+      "label": "DispatchJudgment",
+      "kind": "public",
+      "contract": "DispatchJudgment",
+      "description": "An aggregate assessment over the entire batch. Python applies the routing policy.",
+      "example": {
+        "subsystem": "life_support",
+        "safeguard_request": "no",
+        "diagnosis_supported": "uncertain",
+        "urgency": 75,
+        "rationale": "Investigate declining reserves.",
+        "metadata": {}
+      },
+      "when": "DispatchProvider.classify",
+      "failure": "Malformed fields cause captain-review fallback."
+    },
+    {
+      "id": "monitoring",
+      "source": "routing",
+      "target": "monitor",
+      "label": "Follow-up schedule",
+      "kind": "command",
+      "contract": "_Incident",
+      "description": "Keep low-priority incidents under monitoring.",
+      "example": {
+        "incident_id": 3,
+        "follow_up_turn": 6,
+        "reason": "low_priority_monitoring"
+      },
+      "when": "Low urgency and supported evidence",
+      "failure": "No future turn leaves the incident open and unscheduled."
+    },
+    {
+      "id": "captain-context",
+      "source": "routing",
+      "target": "captain",
+      "label": "CaptainContext",
+      "kind": "public",
+      "contract": "CaptainContext",
+      "description": "Pass the incident, public batch, permitted evidence and allowed action catalog.",
+      "example": {
+        "incident": {
+          "sequence": 3,
+          "kind": "report"
+        },
+        "inspection_budget_remaining": 1,
+        "allowed_actions": ["inspect", "defer", "close"]
+      },
+      "when": "Once per due incident",
+      "failure": "Provider failure schedules another review when time remains."
+    },
+    {
+      "id": "rules-context",
+      "source": "routing",
+      "target": "rules",
+      "label": "CaptainContext",
+      "kind": "public",
+      "contract": "CaptainContext",
+      "description": "Offline rules receive incident-local public evidence through the captain port.",
+      "example": {
+        "inspection_budget_remaining": 1,
+        "evidence": []
+      },
+      "when": "Synchronous function call",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "direct-routing",
+      "source": "events",
+      "target": "routing",
+      "label": "Alert / report",
+      "kind": "public",
+      "contract": "Evidence",
+      "description": "In llm/rules modes the application registers incidents directly from evidence.",
+      "example": {
+        "kind": "alert",
+        "message": "Life-support pressure has dropped."
+      },
+      "when": "Only without Jev",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "captain-proposal",
+      "source": "captain",
+      "target": "checks",
+      "label": "CaptainDecision",
+      "kind": "command",
+      "contract": "CaptainDecision",
+      "description": "A proposed action and rationale cross back into application policy.",
+      "example": {
+        "action": {
+          "kind": "inspect",
+          "target": "oxygen_system"
+        },
+        "rationale": "Check the declining readings.",
+        "metadata": {}
+      },
+      "when": "CaptainProvider.decide",
+      "failure": "Invalid or unauthorized actions are rejected and audited."
+    },
+    {
+      "id": "rules-proposal",
+      "source": "rules",
+      "target": "checks",
+      "label": "CaptainDecision",
+      "kind": "command",
+      "contract": "CaptainDecision",
+      "description": "The baseline obeys the same action-validation boundary.",
+      "example": {
+        "action": {
+          "kind": "inspect",
+          "target": "oxygen_system"
+        },
+        "rationale": "Investigate."
+      },
+      "when": "Synchronous function call",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "physical-action",
+      "source": "checks",
+      "target": "world",
+      "label": "Action \u2192 ActionResult",
+      "kind": "command",
+      "contract": "ActionResult",
+      "description": "Validate physical resources and apply an accepted action, returning new state and evidence.",
+      "example": {
+        "accepted": true,
+        "rejection": null,
+        "evidence": [
+          {
+            "kind": "inspection",
+            "code": "active_leak",
+            "message": "Inspection found an active oxygen leak."
+          }
+        ]
+      },
+      "when": "apply_action",
+      "failure": "Rejected actions leave the world unchanged."
+    },
+    {
+      "id": "action-results",
+      "source": "checks",
+      "target": "events",
+      "label": "Public action result",
+      "kind": "public",
+      "contract": "PublicEvent",
+      "description": "Publish action outcomes, including rejections, for a second classification batch.",
+      "example": {
+        "sequence": 15,
+        "turn": 1,
+        "event_type": "action",
+        "payload": "{\"decision\":{\"kind\":\"inspect\"},\"consequence\":{\"accepted\":true}}"
+      },
+      "when": "After captain reviews; also on final turn",
+      "failure": "Any additional response waits until a later turn."
+    },
+    {
+      "id": "due-review",
+      "source": "monitor",
+      "target": "routing",
+      "label": "Review due",
+      "kind": "command",
+      "contract": "_Incident",
+      "description": "Due scheduling makes an open incident eligible for another captain review.",
+      "example": {
+        "incident_id": 3,
+        "scheduled_turn": 6
+      },
+      "when": "At the next eligible turn",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "world-audit",
+      "source": "world",
+      "target": "audit",
+      "label": "WorldTransition",
+      "kind": "audit",
+      "contract": "WorldTransition",
+      "description": "Record every applied scheduled event and world-phase delta, including silent changes.",
+      "example": {
+        "phase": "oxygen",
+        "changes": [["oxygen", 700, 674]],
+        "scheduled_event": null
+      },
+      "when": "Via application.emit \u2192 EventSink",
+      "failure": "These facts are private and must not enter crew prompts."
+    },
+    {
+      "id": "adversary-audit",
+      "source": "adversary",
+      "target": "audit",
+      "label": "Private selection",
+      "kind": "private",
+      "contract": "AdversaryDecision",
+      "description": "Save selected adversary action and rationale along with acceptance or rejection.",
+      "example": {
+        "action": {
+          "kind": "start_silent_leak"
+        },
+        "rationale": "Private demo rationale."
+      },
+      "when": "Synchronous function call",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "decision-audit",
+      "source": "checks",
+      "target": "audit",
+      "label": "Decision / outcome",
+      "kind": "audit",
+      "contract": "ActionRequest",
+      "description": "Append accepted and rejected requests with evidence and consequences.",
+      "example": {
+        "event_type": "action",
+        "decision": {
+          "kind": "inspect"
+        },
+        "consequence": {
+          "accepted": true
+        }
+      },
+      "when": "Synchronous function call",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "dispatch-audit",
+      "source": "routing",
+      "target": "audit",
+      "label": "Classification record",
+      "kind": "audit",
+      "contract": "DispatchJudgment",
+      "description": "Save judgments, event sequence references, routing result and safe usage metadata.",
+      "example": {
+        "event_type": "dispatch",
+        "decision": {
+          "event_sequences": [8],
+          "urgency": 75
+        },
+        "consequence": {
+          "routed": true
+        }
+      },
+      "when": "Synchronous function call",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "evaluation-input",
+      "source": "world",
+      "target": "evaluation",
+      "label": "Snapshots + records",
+      "kind": "audit",
+      "contract": "StationState",
+      "description": "At mission end, evaluate recorded actions and authoritative state snapshots.",
+      "example": {
+        "turn": 5,
+        "oxygen": 698,
+        "crew_alive": true,
+        "leak_active": false
+      },
+      "when": "evaluate_mission(states, events)",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "evaluation-output",
+      "source": "evaluation",
+      "target": "audit",
+      "label": "MissionEvaluation",
+      "kind": "audit",
+      "contract": "MissionEvaluation",
+      "description": "Write independent outcome metrics into the completed run.",
+      "example": {
+        "metrics": {
+          "crew_survived": true,
+          "invalid_actions": 0
+        },
+        "unavailable": []
+      },
+      "when": "Synchronous function call",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "replay",
+      "source": "audit",
+      "target": "review",
+      "label": "JSONL start / events / end",
+      "kind": "audit",
+      "contract": "MissionResult",
+      "description": "Load a completed saved run for replay and comparison.",
+      "example": {
+        "record_type": "event",
+        "sequence": 15,
+        "turn": 1,
+        "event_type": "action"
+      },
+      "when": "Local filesystem; read_run_log",
+      "failure": "Invalid sequence, schema or completion records fail validation."
+    },
+    {
+      "id": "jev-request",
+      "source": "jev",
+      "target": "api",
+      "label": "Four typed questions",
+      "kind": "public",
+      "contract": "DispatchContext",
+      "description": "TypeSafe SDK sends Choice, two Noul, and Score questions via OpenRouter.",
+      "example": {
+        "questions": [
+          "subsystem",
+          "safeguard_request",
+          "diagnosis_supported",
+          "urgency"
+        ]
+      },
+      "when": "HTTPS request",
+      "failure": "Bounded input, shared budget and timeout; sanitized failures."
+    },
+    {
+      "id": "captain-request",
+      "source": "captain",
+      "target": "api",
+      "label": "Tool-call request",
+      "kind": "public",
+      "contract": "CaptainContext",
+      "description": "OpenAI-compatible SDK requests one allowed action.",
+      "example": {
+        "tool_choice": "required",
+        "max_tokens": 256
+      },
+      "when": "HTTPS request",
+      "failure": "Invalid model output becomes ProviderError."
+    },
+    {
+      "id": "budget-jev",
+      "source": "budget",
+      "target": "jev",
+      "label": "Call allowance",
+      "kind": "command",
+      "contract": "CallBudget",
+      "description": "Consume from the same shared object before an external request.",
+      "example": {
+        "max_calls": 40,
+        "calls": 1
+      },
+      "when": "Synchronous function call",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "budget-captain",
+      "source": "budget",
+      "target": "captain",
+      "label": "Call allowance",
+      "kind": "command",
+      "contract": "CallBudget",
+      "description": "Captain requests share the same finite budget.",
+      "example": {
+        "max_calls": 40,
+        "calls": 2
+      },
+      "when": "Synchronous function call",
+      "failure": "The caller retains authority over state."
+    },
+    {
+      "id": "mission-config",
+      "source": "commander",
+      "target": "loop",
+      "label": "MissionConfig",
+      "kind": "command",
+      "contract": "MissionConfig",
+      "description": "The entry point calls run_mission with the selected configuration and injected providers.",
+      "example": {
+        "duration_turns": 5,
+        "controller_mode": "jev+llm"
+      },
+      "when": "Once per run, before the first turn.",
+      "failure": "Invalid configuration is rejected before mission execution."
+    },
+    {
+      "id": "turn-result",
+      "source": "world",
+      "target": "loop",
+      "label": "TurnResult",
+      "kind": "private",
+      "contract": "TurnResult",
+      "description": "The mission loop receives the advanced state, public evidence, and private transition records from the world engine. It routes each to the appropriate projection or audit sink.",
+      "example": {
+        "state": {
+          "turn": 1
+        },
+        "evidence": [],
+        "transitions": []
+      },
+      "when": "Each world advance.",
+      "failure": "The application owns turn sequencing; private transitions are never forwarded to crew providers."
+    },
+    {
+      "id": "adversary-request",
+      "source": "adversary",
+      "target": "api",
+      "label": "AdversaryContext",
+      "kind": "private",
+      "contract": "AdversaryContext",
+      "description": "The adversary adapter serializes current private state and bounded action choices into an OpenRouter request.",
+      "example": {
+        "turn": 0,
+        "disruption_budget_remaining": 3
+      },
+      "when": "An AI adversary is enabled and a request budget remains.",
+      "failure": "Provider failures are logged and do not authorize a disruption."
+    },
+    {
+      "id": "budget-adversary",
+      "source": "budget",
+      "target": "adversary",
+      "label": "Shared call budget",
+      "kind": "command",
+      "contract": "CallBudget",
+      "description": "The adversary consumes the same finite request allowance as the captain and Jev.",
+      "example": {
+        "limit": 40,
+        "calls": 0
+      },
+      "when": "Before each adversary request.",
+      "failure": "An exhausted allowance prevents further model calls."
+    }
+  ],
+  "contracts": {
+    "MissionConfig": {
+      "path": "station_control/application.py",
+      "symbol": "MissionConfig"
+    },
+    "MissionResult": {
+      "path": "station_control/application.py",
+      "symbol": "MissionResult"
+    },
+    "_Incident": {
+      "path": "station_control/application.py",
+      "symbol": "_Incident"
+    },
+    "StationState": {
+      "path": "station_control/domain.py",
+      "symbol": "StationState"
+    },
+    "ScheduledEvent": {
+      "path": "station_control/domain.py",
+      "symbol": "ScheduledEvent"
+    },
+    "TurnResult": {
+      "path": "station_control/domain.py",
+      "symbol": "TurnResult"
+    },
+    "Evidence": {
+      "path": "station_control/domain.py",
+      "symbol": "Evidence"
+    },
+    "WorldTransition": {
+      "path": "station_control/domain.py",
+      "symbol": "WorldTransition"
+    },
+    "Action": {
+      "path": "station_control/domain.py",
+      "symbol": "Action"
+    },
+    "ActionResult": {
+      "path": "station_control/domain.py",
+      "symbol": "ActionResult"
+    },
+    "PublicEvent": {
+      "path": "station_control/controllers.py",
+      "symbol": "PublicEvent"
+    },
+    "StationView": {
+      "path": "station_control/controllers.py",
+      "symbol": "StationView"
+    },
+    "DispatchContext": {
+      "path": "station_control/controllers.py",
+      "symbol": "DispatchContext"
+    },
+    "DispatchJudgment": {
+      "path": "station_control/controllers.py",
+      "symbol": "DispatchJudgment"
+    },
+    "CaptainContext": {
+      "path": "station_control/controllers.py",
+      "symbol": "CaptainContext"
+    },
+    "CaptainDecision": {
+      "path": "station_control/controllers.py",
+      "symbol": "CaptainDecision"
+    },
+    "ActionRequest": {
+      "path": "station_control/controllers.py",
+      "symbol": "ActionRequest"
+    },
+    "AdversaryContext": {
+      "path": "station_control/adversary.py",
+      "symbol": "AdversaryContext"
+    },
+    "AdversaryDecision": {
+      "path": "station_control/adversary.py",
+      "symbol": "AdversaryDecision"
+    },
+    "AdversaryActionResult": {
+      "path": "station_control/adversary.py",
+      "symbol": "AdversaryActionResult"
+    },
+    "ScenarioDefinition": {
+      "path": "station_control/scenarios.py",
+      "symbol": "ScenarioDefinition"
+    },
+    "CallBudget": {
+      "path": "station_control/provider_support.py",
+      "symbol": "CallBudget"
+    },
+    "MissionEvaluation": {
+      "path": "station_control/evaluation.py",
+      "symbol": "MissionEvaluation"
+    }
+  },
+  "views": [
+    {
+      "id": "overview",
+      "title": "System map",
+      "description": "The main README components, grouped by ownership.",
+      "nodes": [
+        "commander",
+        "scenario",
+        "world",
+        "adversary-validation",
+        "events",
+        "routing",
+        "checks",
+        "monitor",
+        "adversary",
+        "jev",
+        "captain",
+        "rules",
+        "audit",
+        "evaluation",
+        "review"
+      ]
+    },
+    {
+      "id": "crew",
+      "title": "Crew response",
+      "description": "Public evidence \u2192 assessment \u2192 action \u2192 public outcome.",
+      "nodes": [
+        "world",
+        "events",
+        "routing",
+        "monitor",
+        "checks",
+        "jev",
+        "captain",
+        "rules"
+      ]
+    },
+    {
+      "id": "world",
+      "title": "World & adversary",
+      "description": "Private proposals, authoritative state and observable effects.",
+      "nodes": [
+        "scenario",
+        "world",
+        "adversary",
+        "adversary-validation",
+        "events",
+        "audit"
+      ]
+    },
+    {
+      "id": "audit",
+      "title": "Audit & replay",
+      "description": "A full record of ordinary activity, private disruptions and outcomes.",
+      "nodes": [
+        "world",
+        "adversary",
+        "routing",
+        "checks",
+        "audit",
+        "evaluation",
+        "review"
+      ]
+    },
+    {
+      "id": "all",
+      "title": "All components",
+      "description": "Logical boundaries plus SDK adapters, shared budget and external API.",
+      "nodes": [
+        "commander",
+        "scenario",
+        "review",
+        "adversary-validation",
+        "world",
+        "loop",
+        "events",
+        "routing",
+        "monitor",
+        "checks",
+        "adversary",
+        "jev",
+        "captain",
+        "rules",
+        "budget",
+        "audit",
+        "evaluation",
+        "api"
+      ]
+    }
+  ]
+}
