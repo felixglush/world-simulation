@@ -593,3 +593,75 @@ def test_event_sink_receives_same_ordered_event_records_as_the_result():
     turns = [event["turn"] for event in result.events]
     assert turns == sorted(turns)
     assert result.turns_completed == 4
+
+
+def test_captain_cannot_mutate_action_catalog_for_later_decisions():
+    class MutatingCaptain:
+        def __init__(self):
+            self.targets = []
+
+        def decide(self, context):
+            descriptor = next(
+                item for item in context.allowed_actions if item.kind is ActionRequestKind.INSPECT
+            )
+            schema = descriptor.json_schema
+            self.targets.append(list(schema["properties"]["target"]["enum"]))
+            schema["properties"]["target"]["enum"].clear()
+            return CaptainDecision(
+                ActionRequest(ActionRequestKind.DEFER, follow_up_turn=context.station.turn + 1)
+            )
+
+    captain = MutatingCaptain()
+    run_mission(
+        MissionConfig(
+            scenario=ScenarioFamily.LEAK,
+            seed=3,
+            duration_turns=6,
+            controller_mode=ControllerMode.LLM,
+        ),
+        captain=captain,
+    )
+    assert len(captain.targets) > 1
+    assert all(targets == ["oxygen_system", "sensor_a", "sensor_b"] for targets in captain.targets)
+
+
+def test_dispatch_metadata_does_not_leak_unknown_fields():
+    dispatcher = UncertainDispatcher(
+        DispatchJudgment(
+            Subsystem.LIFE_SUPPORT,
+            NoulOutcome.NO,
+            NoulOutcome.YES,
+            0,
+            metadata={"api_key": "PRIVATE_CREDENTIAL", "prompt": "PRIVATE_PROMPT", "calls": 1},
+        )
+    )
+    result = run_mission(
+        MissionConfig(duration_turns=6, controller_mode=ControllerMode.JEV_LLM),
+        captain=InspectingCaptain(),
+        dispatcher=dispatcher,
+    )
+    serialized = str(result.events)
+    assert "PRIVATE_CREDENTIAL" not in serialized
+    assert "PRIVATE_PROMPT" not in serialized
+    dispatch = next(event for event in result.events if event["event_type"] == "dispatch")
+    assert dispatch["decision"]["metadata"] == {"calls": 1}
+
+
+@pytest.mark.parametrize("field, value", [("rationale", None), ("metadata", None)])
+def test_malformed_dispatch_result_routes_to_captain_without_crashing(field, value):
+    from dataclasses import replace
+
+    dispatcher = UncertainDispatcher()
+    dispatcher.judgment = replace(dispatcher.judgment, **{field: value})
+    captain = InspectingCaptain()
+    result = run_mission(
+        MissionConfig(duration_turns=6, controller_mode=ControllerMode.JEV_LLM),
+        captain=captain,
+        dispatcher=dispatcher,
+    )
+    assert captain.contexts
+    assert any(
+        event["event_type"] == "provider_failure"
+        and event["consequence"]["code"] == "malformed_response"
+        for event in result.events
+    )

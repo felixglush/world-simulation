@@ -6,6 +6,7 @@ selected public evidence, never the authoritative ``StationState``.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Mapping, Protocol
@@ -85,11 +86,29 @@ class StationView:
     available_crew: int
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ActionDescriptor:
+    """An action contract whose nested schema cannot be changed by consumers."""
+
     kind: ActionRequestKind
     description: str
-    json_schema: Mapping[str, object] = field(default_factory=dict)
+    _json_schema: Mapping[str, object] = field(repr=False)
+
+    def __init__(
+        self,
+        kind: ActionRequestKind,
+        description: str,
+        json_schema: Mapping[str, object] | None = None,
+    ) -> None:
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "description", description)
+        object.__setattr__(
+            self, "_json_schema", deepcopy(json_schema if json_schema is not None else {})
+        )
+
+    @property
+    def json_schema(self) -> Mapping[str, object]:
+        return deepcopy(self._json_schema)
 
 
 @dataclass(frozen=True, slots=True)
