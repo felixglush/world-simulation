@@ -13,6 +13,10 @@ from typing import Mapping, Protocol
 
 from .domain import Evidence, SensorReading
 
+QUESTION_VERSION = "jev-questions-v1"
+RUBRIC_VERSION = "jev-rubric-v1"
+INSTRUCTION_VERSION = "captain-instructions-v1"
+
 
 class Subsystem(StrEnum):
     LIFE_SUPPORT = "life_support"

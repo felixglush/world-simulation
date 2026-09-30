@@ -23,6 +23,15 @@ from typesafe_sdk import (
 )
 
 from .controllers import (
+    INSTRUCTION_VERSION as CAPTAIN_INSTRUCTION_VERSION,
+)
+from .controllers import (
+    QUESTION_VERSION as DISPATCH_QUESTION_VERSION,
+)
+from .controllers import (
+    RUBRIC_VERSION as DISPATCH_RUBRIC_VERSION,
+)
+from .controllers import (
     ActionDescriptor,
     ActionRequest,
     ActionRequestKind,
@@ -60,10 +69,7 @@ MAX_RATIONALE_CHARS = 2_000
 NOUL_YES_THRESHOLD = 0.75
 NOUL_NO_THRESHOLD = 0.25
 DISPATCH_PROMPT_VERSION = "jev-observation-v1"
-DISPATCH_QUESTION_VERSION = "jev-questions-v1"
-DISPATCH_RUBRIC_VERSION = "jev-rubric-v1"
 CAPTAIN_PROMPT_VERSION = "captain-structured-actions-v1"
-CAPTAIN_INSTRUCTION_VERSION = "captain-instructions-v1"
 
 _URGENCY_LEVELS = (
     "Routine: no current safety concern; ordinary monitoring is enough.",

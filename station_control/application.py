@@ -23,6 +23,15 @@ from .adversary import (
     apply_adversary_action,
 )
 from .controllers import (
+    INSTRUCTION_VERSION as INSTRUCTION_VERSION,
+)
+from .controllers import (
+    QUESTION_VERSION as QUESTION_VERSION,
+)
+from .controllers import (
+    RUBRIC_VERSION as RUBRIC_VERSION,
+)
+from .controllers import (
     ActionDescriptor,
     ActionRequest,
     ActionRequestKind,
@@ -65,9 +74,6 @@ from .scenarios import (
 SIMULATOR_VERSION = "0.3.1"
 MAX_MISSION_TURNS = 14 * 24
 MAX_INSPECTIONS_PER_TURN = 6
-QUESTION_VERSION = "jev-questions-v1"
-RUBRIC_VERSION = "jev-rubric-v1"
-INSTRUCTION_VERSION = "captain-instructions-v1"
 
 
 class ControllerMode(StrEnum):
