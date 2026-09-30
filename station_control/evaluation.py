@@ -136,12 +136,14 @@ def evaluate_mission(
             item.sequence for item in states[-1].evidence if item.kind == "repair_complete"
         )
 
+    evidenced_repairs = len(repair_sequences)
+    completed_repairs = states[-1].repairs_completed if states else 0
     metrics.update(
         {
             "inspections": inspections,
             "parts_consumed": parts_consumed,
             "clarification_requests": clarification_requests,
-            "repair_completions": len(repair_sequences),
+            "repair_completions": max(completed_repairs, evidenced_repairs),
             "invalid_actions": invalid_actions,
             "unresolved_incidents": len(open_incidents),
             "forgotten_incidents": sum(
