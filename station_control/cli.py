@@ -11,19 +11,26 @@ from typing import Any, Sequence
 from uuid import uuid4
 
 from .application import (
+    MAX_INSPECTIONS_PER_TURN,
+    MAX_MISSION_TURNS,
     SIMULATOR_VERSION,
     ControllerMode,
     MissionConfig,
+    MissionResult,
     mission_metadata,
     run_mission,
 )
 from .persistence import RunLogError, RunLogWriter, read_run_log, render_run_log
-from .providers import CallBudget, JevDispatchProvider, OpenRouterCaptainProvider
+from .providers import (
+    DEFAULT_CAPTAIN_BASE_URL,
+    DEFAULT_JEV_BASE_URL,
+    CallBudget,
+    JevDispatchProvider,
+    OpenRouterCaptainProvider,
+)
 from .scenarios import ScenarioFamily
 
 LIVE_CONTROLLERS = {ControllerMode.LLM.value, ControllerMode.JEV_LLM.value}
-DEFAULT_CAPTAIN_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_JEV_BASE_URL = "https://openrouter.ai/api"
 
 
 class CLIError(ValueError):
@@ -54,44 +61,42 @@ def _bounded_integer(minimum: int, maximum: int):
 
 
 def _add_config_options(parser: argparse.ArgumentParser, *, rerun: bool = False) -> None:
-    default = None if rerun else argparse.SUPPRESS
+    defaults = {} if rerun else mission_metadata(MissionConfig())
     parser.add_argument(
         "--scenario",
         choices=[scenario.value for scenario in ScenarioFamily],
-        default=default if rerun else ScenarioFamily.NORMAL.value,
+        default=defaults.get("scenario"),
         help="Scenario family to run.",
     )
-    parser.add_argument(
-        "--seed", type=int, default=default if rerun else 0, help="Replayable seed."
-    )
+    parser.add_argument("--seed", type=int, default=defaults.get("seed"), help="Replayable seed.")
     parser.add_argument(
         "--turns",
-        type=_bounded_integer(1, 14 * 24),
-        default=default if rerun else 14 * 24,
-        help="Mission duration in turns (default: 336).",
+        type=_bounded_integer(1, MAX_MISSION_TURNS),
+        default=defaults.get("duration_turns"),
+        help=f"Mission duration in turns (default: {MAX_MISSION_TURNS}).",
     )
     parser.add_argument(
         "--controller",
         choices=[mode.value for mode in ControllerMode],
-        default=default if rerun else ControllerMode.RULES.value,
+        default=defaults.get("controller"),
         help="rules is offline and is the default; model modes need a key, model, and budget.",
     )
     parser.add_argument(
         "--evidence-access",
         choices=("latest", "history"),
-        default=default if rerun else "latest",
+        default=defaults.get("evidence_access"),
         help="Evidence available to the captain.",
     )
     parser.add_argument(
         "--inspection-budget",
-        type=_bounded_integer(0, 6),
-        default=default if rerun else 1,
+        type=_bounded_integer(0, MAX_INSPECTIONS_PER_TURN),
+        default=defaults.get("inspection_budget_per_turn"),
         help="Inspection actions available to the captain per turn.",
     )
     parser.add_argument(
         "--escalation-threshold",
         type=_bounded_integer(0, 100),
-        default=default if rerun else 55,
+        default=defaults.get("escalation_threshold"),
         help="Dispatch urgency threshold from 0 to 100.",
     )
     parser.add_argument("--output", type=Path, required=rerun, help="Destination JSONL file.")
@@ -195,48 +200,32 @@ def _metadata(config: MissionConfig, settings: dict[str, Any]) -> dict[str, Any]
         "jev_base_url": os.environ.get("JEV_BASE_URL", DEFAULT_JEV_BASE_URL),
         "provider": "openrouter",
     }
-    result["instructions"] = {"captain_version": config.instruction_version}
-    result["rubrics"] = {
-        "jev_question_version": config.question_version,
-        "jev_rubric_version": config.rubric_version,
-    }
     return result
 
 
 def _run_config(
     arguments: argparse.Namespace, saved: dict[str, Any] | None = None
 ) -> MissionConfig:
-    defaults = saved or {}
-    controller = getattr(arguments, "controller", None)
-    if controller is None:
-        old_controller = defaults.get("controller", ControllerMode.RULES.value)
-        # A rerun never silently repeats a paid controller configuration.
-        controller = (
-            ControllerMode.RULES.value if old_controller in LIVE_CONTROLLERS else old_controller
-        )
-    values = {
-        "scenario": getattr(arguments, "scenario", None) or defaults.get("scenario", "normal"),
-        "seed": getattr(arguments, "seed", None)
-        if getattr(arguments, "seed", None) is not None
-        else defaults.get("seed", 0),
-        "duration_turns": getattr(arguments, "turns", None)
-        if getattr(arguments, "turns", None) is not None
-        else defaults.get("duration_turns", 14 * 24),
-        "controller_mode": controller,
-        "evidence_access": getattr(arguments, "evidence_access", None)
-        or defaults.get("evidence_access", "latest"),
-        "inspection_budget_per_turn": getattr(arguments, "inspection_budget", None)
-        if getattr(arguments, "inspection_budget", None) is not None
-        else defaults.get("inspection_budget_per_turn", 1),
-        "escalation_threshold": getattr(arguments, "escalation_threshold", None)
-        if getattr(arguments, "escalation_threshold", None) is not None
-        else defaults.get("escalation_threshold", 55),
-    }
-    run_id = str(uuid4())
-    return MissionConfig(**values, run_id=run_id)
+    defaults = saved or mission_metadata(MissionConfig())
+    # Rerunning a saved model experiment requires explicit live opt-in and budgets.
+    values = {"controller_mode": arguments.controller or ControllerMode.RULES.value}
+    for argument, field, metadata_key in (
+        ("scenario", "scenario", "scenario"),
+        ("seed", "seed", "seed"),
+        ("turns", "duration_turns", "duration_turns"),
+        ("evidence_access", "evidence_access", "evidence_access"),
+        ("inspection_budget", "inspection_budget_per_turn", "inspection_budget_per_turn"),
+        ("escalation_threshold", "escalation_threshold", "escalation_threshold"),
+    ):
+        value = getattr(arguments, argument)
+        if value is None:
+            value = defaults.get(metadata_key)
+        if value is not None:
+            values[field] = value
+    return MissionConfig(**values, run_id=str(uuid4()))
 
 
-def _evaluation_metrics(result: Any) -> dict[str, Any]:
+def _evaluation_metrics(result: MissionResult) -> dict[str, Any]:
     evaluation = result.evaluation
     return {
         "measures": evaluation.metrics,
@@ -274,14 +263,11 @@ def _run(arguments: argparse.Namespace, config: MissionConfig) -> int:
             dispatcher=dispatcher,
             event_sink=writer.write_event,
         )
-        snapshots = [snapshot for snapshot in result.debug_snapshots]
-        status = getattr(result.status, "value", result.status)
-        turns_completed = _turns_completed(result)
         writer.finish(
-            status=str(status),
+            status=result.status.value,
             metrics=_evaluation_metrics(result),
-            debug_snapshots=snapshots,
-            turns_completed=turns_completed,
+            debug_snapshots=result.debug_snapshots,
+            turns_completed=result.turns_completed,
         )
     except RunLogError:
         writer.close_incomplete()
@@ -306,24 +292,8 @@ def _run(arguments: argparse.Namespace, config: MissionConfig) -> int:
         f"Scenario: {config.scenario.value}; seed: {config.seed}; "
         f"controller: {config.controller_mode.value}"
     )
-    turns_completed = _turns_completed(result)
-    print(
-        f"Turns completed: {turns_completed}; "
-        f"status: {getattr(result.status, 'value', result.status)}"
-    )
+    print(f"Turns completed: {result.turns_completed}; status: {result.status.value}")
     print(f"Metrics: {json.dumps(_evaluation_metrics(result), sort_keys=True)}")
-    return 0
-
-
-def _turns_completed(result: Any) -> int:
-    completed = getattr(result, "turns_completed", None)
-    if type(completed) is int:
-        return completed
-    for record in reversed(result.records):
-        if record.get("record_type") == "run_end" and type(record.get("turn")) is int:
-            return record["turn"]
-    if result.debug_snapshots:
-        return max(snapshot.turn for snapshot in result.debug_snapshots)
     return 0
 
 

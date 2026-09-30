@@ -60,8 +60,6 @@ def create_world(family: ScenarioFamily | str, seed: int) -> StationState:
     oxygen = 700
     return StationState(
         turn=0,
-        scenario_family=family.value,
-        seed=seed,
         oxygen=oxygen,
         oxygen_capacity=1000,
         generation_rate=70,
@@ -69,7 +67,6 @@ def create_world(family: ScenarioFamily | str, seed: int) -> StationState:
         leak_rate=36,
         leak_active=False,
         backup_oxygen=120,
-        backup_capacity=120,
         backup_rate=30,
         backup_active=False,
         parts=2,

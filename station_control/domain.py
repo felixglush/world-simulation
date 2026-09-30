@@ -78,8 +78,6 @@ class StationState:
     """Authoritative world state; pass `observe(state)` to decision makers."""
 
     turn: int
-    scenario_family: str
-    seed: int
     oxygen: int
     oxygen_capacity: int
     generation_rate: int
@@ -87,7 +85,6 @@ class StationState:
     leak_rate: int
     leak_active: bool
     backup_oxygen: int
-    backup_capacity: int
     backup_rate: int
     backup_active: bool
     parts: int

@@ -65,8 +65,9 @@ def test_default_run_is_offline_and_writes_replayable_metadata(tmp_path: Path) -
     assert metadata["scenario"] == "leak"
     assert metadata["seed"] == 41
     assert metadata["controller"] == "rules"
-    assert metadata["instructions"]
-    assert metadata["rubrics"]
+    assert metadata["instruction_version"]
+    assert metadata["question_version"]
+    assert metadata["rubric_version"]
     assert records[-1]["record_type"] == "run_end"
     assert all(record["record_type"] == "event" for record in records[1:-1])
     assert records[-1]["event_count"] == len(records) - 2

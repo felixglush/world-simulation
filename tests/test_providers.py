@@ -133,7 +133,7 @@ def _dispatch_context() -> DispatchContext:
     )
 
 
-def _captain_context() -> CaptainContext:
+def _captain_context(action: ActionDescriptor | None = None) -> CaptainContext:
     incident = Evidence(12, 4, "maintenance", "Pressure is falling near the oxygen manifold.")
     return CaptainContext(
         incident=incident,
@@ -142,7 +142,9 @@ def _captain_context() -> CaptainContext:
         ),
         evidence=(incident,),
         allowed_actions=(
-            ActionDescriptor(
+            action
+            if action is not None
+            else ActionDescriptor(
                 ActionRequestKind.INSPECT,
                 "Inspect accessible life-support equipment.",
                 {
@@ -334,6 +336,112 @@ def test_captain_receives_only_allowed_tools_and_returns_a_validated_action() ->
     assert result.metadata["timeout_seconds"] == 1.0
     assert result.metadata["instruction_version"] == "captain-instructions-v1"
     assert result.metadata["latency_ms"] >= 0
+
+
+def test_captain_accepts_no_argument_action_schema() -> None:
+    action = ActionDescriptor(
+        ActionRequestKind.READ_HISTORY,
+        "Read accessible history.",
+        {"type": "object", "properties": {}, "additionalProperties": False},
+    )
+    requests: list[dict[str, Any]] = []
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        requests.append(json.loads(request.content))
+        return httpx2.Response(200, json=_captain_payload(name="read_history", arguments="{}"))
+
+    provider = _captain(handle)
+    try:
+        result = provider.decide(_captain_context(action))
+    finally:
+        provider.close()
+
+    schema = requests[0]["tools"][0]["function"]["parameters"]
+    assert result.action.kind is ActionRequestKind.READ_HISTORY
+    assert result.action.target is None
+    assert schema["properties"] == {}
+    assert "required" not in schema
+
+
+def test_captain_rejects_union_property_schema_before_network_io() -> None:
+    action = ActionDescriptor(
+        ActionRequestKind.INSPECT,
+        "Inspect accessible life-support equipment.",
+        {
+            "type": "object",
+            "properties": {"target": {"type": ["string", "null"]}},
+            "required": ["target"],
+            "additionalProperties": False,
+        },
+    )
+    requests = 0
+
+    def handle(_: httpx2.Request) -> httpx2.Response:
+        nonlocal requests
+        requests += 1
+        return httpx2.Response(200, json=_captain_payload())
+
+    provider = _captain(handle)
+    try:
+        with pytest.raises(ProviderError) as error:
+            provider.decide(_captain_context(action))
+    finally:
+        provider.close()
+
+    assert requests == 0
+    assert error.value.code is ProviderErrorCode.INVALID_INPUT
+
+
+@pytest.mark.parametrize(
+    ("action", "arguments"),
+    [
+        (
+            ActionDescriptor(
+                ActionRequestKind.ORDER_SUPPLIES,
+                "Order bounded supplies.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "target": {"type": "string", "enum": ["oxygen", "parts"]},
+                        "quantity": {"type": "integer", "minimum": 1, "maximum": 3},
+                    },
+                    "required": ["target", "quantity"],
+                    "additionalProperties": False,
+                },
+            ),
+            {"target": "oxygen", "quantity": True},
+        ),
+        (
+            ActionDescriptor(
+                ActionRequestKind.CLOSE,
+                "Close with cited evidence.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "reason": {"type": "string", "minLength": 1},
+                        "evidence_sequences": {"type": "array", "items": {"type": "integer"}},
+                    },
+                    "required": ["reason", "evidence_sequences"],
+                    "additionalProperties": False,
+                },
+            ),
+            {"reason": "Verified repair", "evidence_sequences": [True]},
+        ),
+    ],
+)
+def test_captain_rejects_boolean_as_integer_action_value(
+    action: ActionDescriptor, arguments: dict[str, Any]
+) -> None:
+    provider = _captain(
+        _reply(_captain_payload(name=action.kind.value, arguments=json.dumps(arguments)))
+    )
+    try:
+        with pytest.raises(ProviderError) as error:
+            provider.decide(_captain_context(action))
+    finally:
+        provider.close()
+
+    assert error.value.code is ProviderErrorCode.MALFORMED_RESPONSE
 
 
 @pytest.mark.parametrize(

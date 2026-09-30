@@ -35,14 +35,3 @@ serialized world with selected fields removed. Unknown or malformed actions are 
 provider errors never grant access or bypass action rules. Network work is bounded and
 routine tests use fake providers. Live experiments require explicit budgets and record
 configuration and model identifiers; no live model validation is implied by offline tests.
-
-## Delivery sequence
-
-1. Deterministic life-support world and four scenario families.
-2. Independent outcome evaluation from authoritative snapshots and recorded decisions.
-3. Mission orchestration, controller contracts, and incident policy.
-4. Bounded OpenRouter captain and TypeSafe Jev adapters.
-5. CLI, JSONL records, replay, and end-to-end experiment documentation.
-
-Each pull request targets the preceding slice. Review the incremental diff and merge from
-bottom to top, retargeting/rebasing remaining branches after each merge as needed.

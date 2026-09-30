@@ -26,12 +26,6 @@ from station_control.domain import StationState
 
 
 class InspectingCaptain:
-    metadata = {
-        "provider": "fake",
-        "model": "inspection-test",
-        "instruction_version": "captain-instructions-v1",
-    }
-
     def __init__(self, action=None):
         self.contexts = []
         self.action = action or ActionRequest(ActionRequestKind.INSPECT, target="oxygen_system")
@@ -42,13 +36,6 @@ class InspectingCaptain:
 
 
 class UncertainDispatcher:
-    metadata = {
-        "provider": "fake",
-        "model": "dispatch-test",
-        "question_version": "jev-questions-v1",
-        "rubric_version": "jev-rubric-v1",
-    }
-
     def __init__(self, judgment=None):
         self.contexts = []
         self.judgment = judgment or DispatchJudgment(
@@ -65,15 +52,11 @@ class UncertainDispatcher:
 
 
 class FailingCaptain:
-    metadata = {"provider": "fake", "model": "failing-test"}
-
     def decide(self, context):
         raise ProviderError(ProviderErrorCode.BUDGET_EXHAUSTED)
 
 
 class RepairWorkflowCaptain:
-    metadata = {"provider": "fake", "model": "workflow-test"}
-
     def __init__(self):
         self.contexts = []
 
@@ -98,8 +81,6 @@ class RepairWorkflowCaptain:
 
 
 class ClarifyingCaptain:
-    metadata = {"provider": "fake", "model": "clarification-test"}
-
     def __init__(self):
         self.contexts = []
 
@@ -113,8 +94,6 @@ class ClarifyingCaptain:
 
 
 class UnsupportedCloseCaptain:
-    metadata = {"provider": "fake", "model": "close-test"}
-
     def decide(self, context):
         active_leak = next(
             (
@@ -136,8 +115,6 @@ class UnsupportedCloseCaptain:
 
 
 class CherryPickingCaptain:
-    metadata = {"provider": "fake", "model": "cherry-pick-test"}
-
     def __init__(self):
         self.contexts = []
 
@@ -158,8 +135,6 @@ class CherryPickingCaptain:
 
 
 class DeferringCaptain:
-    metadata = {"provider": "fake", "model": "defer-test"}
-
     def __init__(self):
         self.turns = []
 
@@ -171,8 +146,6 @@ class DeferringCaptain:
 
 
 class EmptyReasonCaptain:
-    metadata = {"provider": "fake", "model": "empty-reason-test"}
-
     def __init__(self):
         self.inspection_sequence = None
 
@@ -527,6 +500,4 @@ def test_event_sink_receives_same_ordered_event_records_as_the_result():
     assert [event["sequence"] for event in result.events] == list(range(len(result.events)))
     turns = [event["turn"] for event in result.events]
     assert turns == sorted(turns)
-    assert result.records[0]["record_type"] == "run_start"
-    assert result.records[-1]["record_type"] == "run_end"
-    assert result.records[0]["run_id"] == result.records[-1]["run_id"]
+    assert result.turns_completed == 4

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from enum import Enum, StrEnum
 from typing import Callable, Mapping
 from uuid import uuid4
@@ -130,14 +129,10 @@ class DebugSnapshot:
 class MissionResult:
     run_id: str
     status: MissionStatus
-    records: tuple[dict[str, object], ...]
+    turns_completed: int
     events: tuple[dict[str, object], ...]
     evaluation: MissionEvaluation
     debug_snapshots: tuple[DebugSnapshot, ...]
-
-    @property
-    def turns_completed(self) -> int:
-        return int(self.records[-1]["turn"])
 
 
 EventSink = Callable[[dict[str, object]], None]
@@ -175,12 +170,8 @@ def run_mission(
         raise ValueError("Controller mode 'jev+llm' requires a dispatch provider")
 
     run_id = config.run_id or str(uuid4())
-    started_at = datetime.now(timezone.utc).isoformat()
-    metadata = mission_metadata(config)
-    metadata["providers"] = _provider_metadata(captain, dispatcher)
     state = create_world(config.scenario, config.seed)
     states = [state]
-    snapshots = [_debug_snapshot(state)]
     public_history: list[PublicEvidence] = list(state.evidence)
     events: list[dict[str, object]] = []
     incidents: dict[int, _Incident] = {}
@@ -213,7 +204,6 @@ def run_mission(
         turn_result = advance_turn(state)
         state = turn_result.state
         states.append(state)
-        snapshots.append(_debug_snapshot(state))
 
         for item in turn_result.evidence:
             public_history.append(item)
@@ -349,35 +339,17 @@ def run_mission(
                 public_history=public_history,
             )
             states[-1] = state
-            snapshots[-1] = _debug_snapshot(state)
             inspections_used += int(inspection_attempted)
 
     status = MissionStatus.COMPLETED if state.crew_alive else MissionStatus.CREW_LOST
     evaluation = evaluate_mission(states, events)
-    start_record = {
-        "record_type": "run_start",
-        "schema_version": 1,
-        "run_id": run_id,
-        "simulator_version": SIMULATOR_VERSION,
-        "started_at": started_at,
-        "metadata": metadata,
-    }
-    end_record = {
-        "record_type": "run_end",
-        "schema_version": 1,
-        "run_id": run_id,
-        "turn": state.turn,
-        "status": status.value,
-        "metrics": _json_value(evaluation),
-        "event_count": len(events),
-    }
     return MissionResult(
         run_id=run_id,
         status=status,
-        records=(start_record, *events, end_record),
+        turns_completed=state.turn,
         events=tuple(events),
         evaluation=evaluation,
-        debug_snapshots=tuple(snapshots),
+        debug_snapshots=tuple(_debug_snapshot(item) for item in states),
     )
 
 
@@ -940,22 +912,6 @@ def _debug_snapshot(state: StationState) -> DebugSnapshot:
         credits=state.credits,
         oxygen_sensors=state.sensor_readings,
     )
-
-
-def _provider_metadata(
-    captain: CaptainProvider | None,
-    dispatcher: DispatchProvider | None,
-) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for name, provider in (("captain", captain), ("dispatcher", dispatcher)):
-        if provider is None:
-            continue
-        try:
-            metadata = provider.metadata
-        except Exception:
-            metadata = {}
-        result[name] = _safe_metadata(metadata)
-    return result
 
 
 def _safe_metadata(metadata: Mapping[str, object]) -> dict[str, object]:

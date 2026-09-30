@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import math
-import threading
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -35,7 +34,6 @@ from .controllers import (
     NoulOutcome,
     ProviderError,
     ProviderErrorCode,
-    ProviderMetadata,
     Subsystem,
 )
 
@@ -76,7 +74,6 @@ class CallBudget:
     max_calls: int
     max_output_tokens_per_call: int
     _used_calls: int = field(default=0, init=False, repr=False)
-    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if type(self.max_calls) is not int or self.max_calls < 1:
@@ -84,22 +81,11 @@ class CallBudget:
         if type(self.max_output_tokens_per_call) is not int or self.max_output_tokens_per_call < 1:
             raise ValueError("max_output_tokens_per_call must be a positive integer")
 
-    @property
-    def used_calls(self) -> int:
-        with self._lock:
-            return self._used_calls
-
-    @property
-    def remaining_calls(self) -> int:
-        with self._lock:
-            return self.max_calls - self._used_calls
-
     def consume(self) -> int:
         """Spend one request before network I/O and return the captain output limit."""
-        with self._lock:
-            if self._used_calls >= self.max_calls:
-                raise ProviderError(ProviderErrorCode.BUDGET_EXHAUSTED)
-            self._used_calls += 1
+        if self._used_calls >= self.max_calls:
+            raise ProviderError(ProviderErrorCode.BUDGET_EXHAUSTED)
+        self._used_calls += 1
         return self.max_output_tokens_per_call
 
 
@@ -133,30 +119,16 @@ class JevDispatchProvider:
         self._model = model.strip()
         self._budget = budget
         self._timeout = timeout
-        self._metadata: dict[str, object] = {"provider": "typesafe", "model": self._model}
-
-    @property
-    def metadata(self) -> ProviderMetadata:
-        return dict(self._metadata)
 
     def classify(self, context: DispatchContext) -> DispatchJudgment:
-        if (
-            context.question_version != DISPATCH_QUESTION_VERSION
-            or context.rubric_version != DISPATCH_RUBRIC_VERSION
-        ):
-            raise ProviderError(
-                ProviderErrorCode.INVALID_INPUT,
-                _failure_metadata("typesafe", self._model, request_made=False, latency_ms=0),
-            )
         try:
+            if (
+                context.question_version != DISPATCH_QUESTION_VERSION
+                or context.rubric_version != DISPATCH_RUBRIC_VERSION
+            ):
+                raise ProviderError(ProviderErrorCode.INVALID_INPUT)
             state = _dispatch_state(context)
             _ensure_bounded(state)
-        except ProviderError as error:
-            raise ProviderError(
-                error.code,
-                _failure_metadata("typesafe", self._model, request_made=False, latency_ms=0),
-            ) from None
-        try:
             self._budget.consume()
         except ProviderError as error:
             raise ProviderError(
@@ -261,17 +233,10 @@ class JevDispatchProvider:
                     "typesafe", response.model, request_made=True, latency_ms=elapsed_ms
                 ),
             ) from None
-        self._metadata = dict(result.metadata)
         return result
 
     def close(self) -> None:
         self._client.close()
-
-    def __enter__(self) -> JevDispatchProvider:
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()
 
 
 class OpenRouterCaptainProvider:
@@ -301,29 +266,15 @@ class OpenRouterCaptainProvider:
         self._model = model.strip()
         self._budget = budget
         self._timeout = timeout
-        self._metadata: dict[str, object] = {"provider": "openrouter", "model": self._model}
-
-    @property
-    def metadata(self) -> ProviderMetadata:
-        return dict(self._metadata)
 
     def decide(self, context: CaptainContext) -> CaptainDecision:
-        if context.instruction_version != CAPTAIN_INSTRUCTION_VERSION:
-            raise ProviderError(
-                ProviderErrorCode.INVALID_INPUT,
-                _failure_metadata("openrouter", self._model, request_made=False, latency_ms=0),
-            )
         try:
+            if context.instruction_version != CAPTAIN_INSTRUCTION_VERSION:
+                raise ProviderError(ProviderErrorCode.INVALID_INPUT)
             descriptors = _action_descriptors(context.allowed_actions)
             user_payload = _captain_payload(context)
             tools = [_tool_descriptor(action) for action in descriptors]
             _ensure_bounded({"payload": user_payload, "tools": tools})
-        except ProviderError as error:
-            raise ProviderError(
-                error.code,
-                _failure_metadata("openrouter", self._model, request_made=False, latency_ms=0),
-            ) from None
-        try:
             max_tokens = self._budget.consume()
         except ProviderError as error:
             raise ProviderError(
@@ -387,17 +338,10 @@ class OpenRouterCaptainProvider:
                     "openrouter", self._model, request_made=True, latency_ms=elapsed_ms
                 ),
             ) from None
-        self._metadata = dict(result.metadata)
         return result
 
     def close(self) -> None:
         self._client.close()
-
-    def __enter__(self) -> OpenRouterCaptainProvider:
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()
 
 
 def _validate_configuration(
@@ -486,17 +430,25 @@ def _action_descriptors(actions: Sequence[ActionDescriptor]) -> tuple[ActionDesc
             action.description, str
         ):
             raise ProviderError(ProviderErrorCode.INVALID_INPUT)
-        if not isinstance(schema, Mapping) or schema.get("type") != "object":
+        if not isinstance(schema, Mapping):
             raise ProviderError(ProviderErrorCode.INVALID_INPUT)
         properties = schema.get("properties")
         required = schema.get("required", ())
         if (
-            not isinstance(properties, Mapping)
+            set(schema) - {"type", "properties", "required", "additionalProperties"}
+            or schema.get("type") != "object"
+            or not isinstance(properties, Mapping)
             or not isinstance(required, Sequence)
             or isinstance(required, str)
+            or not all(isinstance(name, str) for name in required)
             or schema.get("additionalProperties") is not False
             or set(properties) - _ALLOWED_ACTION_FIELDS
             or set(required) - set(properties)
+            or any(
+                not isinstance(property_schema, Mapping)
+                or not _supported_action_property_schema(property_schema)
+                for property_schema in properties.values()
+            )
         ):
             raise ProviderError(ProviderErrorCode.INVALID_INPUT)
         _ensure_bounded(schema)
@@ -581,80 +533,65 @@ def _validate_payload(value: object, schema: Mapping[str, object]) -> None:
         not isinstance(properties, Mapping)
         or not isinstance(required, Sequence)
         or isinstance(required, str)
+        or not all(isinstance(name, str) for name in required)
     ):
         raise ProviderError(ProviderErrorCode.INVALID_INPUT)
     if set(value) - set(properties) or set(required) - set(value):
         raise ProviderError(ProviderErrorCode.MALFORMED_RESPONSE)
     for name, item in value.items():
         property_schema = properties[name]
-        if not isinstance(property_schema, Mapping) or not _matches_schema(item, property_schema):
+        if (
+            not isinstance(property_schema, Mapping)
+            or not _supported_action_property_schema(property_schema)
+            or not _matches_action_property(item, property_schema)
+        ):
             raise ProviderError(ProviderErrorCode.MALFORMED_RESPONSE)
 
 
-def _matches_schema(value: object, schema: Mapping[str, object]) -> bool:
-    expected = schema.get("type")
-    allowed_types = expected if isinstance(expected, list) else [expected]
-    non_null_types = [item for item in allowed_types if item != "null"]
-    if value is None:
-        type_matches = "null" in allowed_types
-    else:
-        type_matches = any(_matches_type(value, item) for item in non_null_types)
-    if not type_matches:
-        return False
-    if "enum" in schema and value not in schema["enum"]:
-        return False
-    if "const" in schema and value != schema["const"]:
-        return False
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if not math.isfinite(value):
-            return False
-        if "minimum" in schema and value < schema["minimum"]:
-            return False
-        if "maximum" in schema and value > schema["maximum"]:
-            return False
-    if isinstance(value, str):
-        if "minLength" in schema and len(value) < schema["minLength"]:
-            return False
-        if "maxLength" in schema and len(value) > schema["maxLength"]:
-            return False
-    if isinstance(value, list):
-        if "minItems" in schema and len(value) < schema["minItems"]:
-            return False
-        if "maxItems" in schema and len(value) > schema["maxItems"]:
-            return False
-        items_schema = schema.get("items")
-        if isinstance(items_schema, Mapping) and not all(
-            _matches_schema(item, items_schema) for item in value
-        ):
-            return False
-    if isinstance(value, dict):
-        properties = schema.get("properties", {})
-        required = schema.get("required", [])
-        if not isinstance(properties, Mapping) or not isinstance(required, Sequence):
-            return False
-        if set(value) - set(properties) or set(required) - set(value):
-            return False
-        return all(
-            isinstance(properties[key], Mapping) and _matches_schema(item, properties[key])
-            for key, item in value.items()
-        )
-    return True
-
-
-def _matches_type(value: object, expected: object) -> bool:
-    match expected:
+def _supported_action_property_schema(schema: Mapping[str, object]) -> bool:
+    match schema.get("type"):
         case "string":
-            return isinstance(value, str)
+            return (
+                set(schema) <= {"type", "enum", "minLength"}
+                and (
+                    "enum" not in schema
+                    or (
+                        isinstance(schema["enum"], Sequence)
+                        and not isinstance(schema["enum"], (str, bytes))
+                        and all(isinstance(choice, str) for choice in schema["enum"])
+                    )
+                )
+                and (
+                    "minLength" not in schema
+                    or (type(schema["minLength"]) is int and schema["minLength"] >= 0)
+                )
+            )
         case "integer":
-            return type(value) is int
-        case "number":
-            return type(value) in (int, float)
-        case "boolean":
-            return isinstance(value, bool)
+            return set(schema) <= {"type", "minimum", "maximum"} and all(
+                type(schema[bound]) is int for bound in ("minimum", "maximum") if bound in schema
+            )
         case "array":
-            return isinstance(value, list)
-        case "object":
-            return isinstance(value, dict)
+            return set(schema) == {"type", "items"} and schema["items"] == {"type": "integer"}
+        case _:
+            return False
+
+
+def _matches_action_property(value: object, schema: Mapping[str, object]) -> bool:
+    match schema["type"]:
+        case "string":
+            return (
+                isinstance(value, str)
+                and ("enum" not in schema or value in schema["enum"])
+                and ("minLength" not in schema or len(value) >= schema["minLength"])
+            )
+        case "integer":
+            return (
+                type(value) is int
+                and ("minimum" not in schema or value >= schema["minimum"])
+                and ("maximum" not in schema or value <= schema["maximum"])
+            )
+        case "array":
+            return isinstance(value, list) and all(type(item) is int for item in value)
         case _:
             return False
 
