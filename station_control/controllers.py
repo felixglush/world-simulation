@@ -13,9 +13,9 @@ from typing import Mapping, Protocol
 
 from .domain import Evidence, SensorReading
 
-QUESTION_VERSION = "jev-questions-v1"
-RUBRIC_VERSION = "jev-rubric-v1"
-INSTRUCTION_VERSION = "captain-instructions-v1"
+QUESTION_VERSION = "jev-event-questions-v2"
+RUBRIC_VERSION = "jev-event-rubric-v2"
+INSTRUCTION_VERSION = "captain-event-instructions-v2"
 
 
 class Subsystem(StrEnum):
@@ -116,12 +116,23 @@ class ActionDescriptor:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicEvent:
+    """Immutable projection of an observed event; excludes private audit facts."""
+
+    sequence: int
+    turn: int
+    event_type: str
+    payload: str
+
+
+@dataclass(frozen=True, slots=True)
 class DispatchContext:
     report: Evidence
     station: StationView
     evidence: tuple[PublicEvidence, ...]
     question_version: str
     rubric_version: str
+    events: tuple[PublicEvent, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +163,7 @@ class CaptainContext:
     allowed_actions: tuple[ActionDescriptor, ...]
     inspection_budget_remaining: int
     instruction_version: str
+    events: tuple[PublicEvent, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

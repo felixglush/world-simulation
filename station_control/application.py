@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from enum import Enum, StrEnum
@@ -44,6 +45,7 @@ from .controllers import (
     NoulOutcome,
     ProviderError,
     ProviderErrorCode,
+    PublicEvent,
     PublicEvidence,
     StationView,
     Subsystem,
@@ -244,6 +246,7 @@ def run_mission(
     states = [state]
     public_history: list[PublicEvidence] = list(state.evidence)
     events: list[dict[str, object]] = []
+    pending_public_events: list[PublicEvent] = []
     incidents: dict[int, _Incident] = {}
     adversary_disruptions_used = 0
     adversary_provider_stopped = False
@@ -266,6 +269,9 @@ def run_mission(
             "consequence": _json_value(consequence),
         }
         events.append(record)
+        public_event = _public_event(record)
+        if public_event is not None:
+            pending_public_events.append(public_event)
         if event_sink is not None:
             event_sink(deepcopy(record))
         return record
@@ -304,14 +310,15 @@ def run_mission(
         emit(
             "station_observation",
             state.turn,
-            evidence=observe(state),
+            evidence=_station_view(observe(state)),
             consequence={"visibility": "public"},
         )
 
         for item in turn_result.evidence:
             public_history.append(item)
             emit("world_evidence", item.turn, evidence=item)
-            _register_evidence(item, incidents, emit)
+            if config.controller_mode is not ControllerMode.JEV_LLM:
+                _register_evidence(item, incidents, emit)
         for incident in incidents.values():
             if incident.open and incident.pending_clarification_turn == state.turn:
                 response = WorkflowEvidence(
@@ -333,6 +340,18 @@ def run_mission(
                     decision={"incident_id": incident.id},
                     consequence={"source": "scripted_maintenance"},
                 )
+        batch = tuple(pending_public_events)
+        pending_public_events.clear()
+        assessment = None
+        if config.controller_mode is ControllerMode.JEV_LLM:
+            assessment = _screen_events(
+                batch, state, tuple(public_history), config, dispatcher, emit
+            )
+        if config.controller_mode is ControllerMode.JEV_LLM:
+            for item in turn_result.evidence:
+                _register_evidence(item, incidents, emit)
+        if assessment is not None:
+            _route_event_assessment(assessment, batch, state.turn, incidents, config, emit)
         if not state.crew_alive:
             break
 
@@ -356,19 +375,6 @@ def run_mission(
                 decision={"incident_id": incident.id, "scheduled_turn": incident.next_turn},
                 consequence={"status": "reviewed"},
             )
-            if config.controller_mode is ControllerMode.JEV_LLM and not incident.dispatched:
-                if _dispatch(incident, station, config, dispatcher, emit):
-                    incident.dispatched = True
-                else:
-                    _schedule_follow_up(
-                        incident,
-                        state.turn,
-                        config.duration_turns,
-                        emit,
-                        reason="low_priority_monitoring",
-                        delay=4,
-                    )
-                    continue
 
             context = _captain_context(
                 incident,
@@ -377,6 +383,8 @@ def run_mission(
                 config,
                 inspections_remaining=config.inspection_budget_per_turn - inspections_used,
             )
+            if config.controller_mode is ControllerMode.JEV_LLM:
+                context = replace(context, events=batch)
             if config.controller_mode is ControllerMode.RULES:
                 # Preserve the baseline's incident-local history regardless of live evidence access.
                 context = replace(context, evidence=tuple(incident.related))
@@ -447,6 +455,17 @@ def run_mission(
             )
             states[-1] = state
             inspections_used += int(inspection_attempted)
+
+        # Classify action outcomes now, including the final turn. Further actions wait
+        # until the next turn so classification cannot create a recursive action loop.
+        if pending_public_events:
+            batch = tuple(pending_public_events)
+            pending_public_events.clear()
+            if config.controller_mode is ControllerMode.JEV_LLM:
+                routed = _screen_events(
+                    batch, state, tuple(public_history), config, dispatcher, emit
+                )
+                _route_event_assessment(routed, batch, state.turn + 1, incidents, config, emit)
 
     status = MissionStatus.COMPLETED if state.crew_alive else MissionStatus.CREW_LOST
     evaluation = evaluate_mission(states, events)
@@ -656,24 +675,59 @@ _ACTION_DESCRIPTORS = {
 }
 
 
-def _dispatch(
-    incident: _Incident,
-    station: StationView,
+def _public_event(record: dict[str, object]) -> PublicEvent | None:
+    """Project observable activity; never forward private audit/provider records."""
+    if record["event_type"] not in {
+        "station_observation",
+        "world_evidence",
+        "clarification_received",
+        "action",
+    }:
+        return None
+    decision = record["decision"]
+    public_decision = (
+        {key: value for key, value in decision.items() if key not in {"metadata", "rationale"}}
+        if isinstance(decision, dict)
+        else decision
+    )
+    return PublicEvent(
+        sequence=record["sequence"],
+        turn=record["turn"],
+        event_type=record["event_type"],
+        payload=json.dumps(
+            {
+                "evidence": record["evidence"],
+                "decision": public_decision,
+                "consequence": record["consequence"],
+            }
+        ),
+    )
+
+
+def _screen_events(
+    batch: tuple[PublicEvent, ...],
+    state: StationState,
+    history: tuple[PublicEvidence, ...],
     config: MissionConfig,
     dispatcher: DispatchProvider | None,
     emit: Callable[..., dict[str, object]],
 ) -> bool:
-    assert dispatcher is not None
+    assert dispatcher is not None and batch
+    station = _station_view(observe(state))
+    # Negative IDs keep event-origin incidents separate from world evidence IDs.
+    origin = Evidence(
+        -batch[0].sequence - 1,
+        state.turn,
+        "telemetry",
+        "Review the supplied public event batch.",
+    )
     context = DispatchContext(
-        report=incident.origin,
+        report=origin,
         station=station,
-        evidence=(
-            tuple(incident.related)
-            if config.evidence_access is EvidenceAccess.HISTORY
-            else (incident.origin,)
-        ),
+        evidence=history if config.evidence_access is EvidenceAccess.HISTORY else (),
         question_version=config.question_version,
         rubric_version=config.rubric_version,
+        events=batch,
     )
     try:
         judgment = dispatcher.classify(context)
@@ -690,23 +744,20 @@ def _dispatch(
         if type(urgency) is not int or not 0 <= urgency <= 100:
             raise ValueError("invalid urgency score")
     except ProviderError as error:
-        _provider_failure(
-            emit, "dispatcher", incident, station.turn, error.code.value, error.metadata
-        )
+        _event_classification_failure(batch, station.turn, emit, error.code.value, error.metadata)
         return True
     except Exception:
-        _provider_failure(
-            emit,
-            "dispatcher",
-            incident,
-            station.turn,
-            ProviderErrorCode.MALFORMED_RESPONSE.value,
-            {},
+        _event_classification_failure(
+            batch, station.turn, emit, ProviderErrorCode.MALFORMED_RESPONSE.value, {}
         )
         return True
 
     routed = (
-        incident.origin.kind == "alert"
+        any(
+            json.loads(event.payload)["evidence"].get("kind") == "alert"
+            for event in context.events
+            if isinstance(json.loads(event.payload)["evidence"], dict)
+        )
         or subsystem is Subsystem.UNKNOWN
         or safeguard is not NoulOutcome.NO
         or diagnosis is not NoulOutcome.YES
@@ -715,9 +766,9 @@ def _dispatch(
     emit(
         "dispatch",
         station.turn,
-        evidence=incident.origin,
+        evidence=context.events,
         decision={
-            "incident_id": incident.id,
+            "event_sequences": [event.sequence for event in context.events],
             "subsystem": subsystem.value,
             "safeguard_request": safeguard.value,
             "diagnosis_supported": diagnosis.value,
@@ -728,6 +779,73 @@ def _dispatch(
         consequence={"routed": routed},
     )
     return routed
+
+
+def _event_classification_failure(
+    batch: tuple[PublicEvent, ...],
+    turn: int,
+    emit: Callable[..., dict[str, object]],
+    code: str,
+    metadata: Mapping[str, object],
+) -> None:
+    emit(
+        "provider_failure",
+        turn,
+        evidence=batch,
+        decision={"event_sequences": [event.sequence for event in batch]},
+        consequence={
+            "provider": "dispatcher",
+            "code": code,
+            "metadata": _safe_metadata(metadata),
+            "routed": True,
+        },
+    )
+
+
+def _route_event_assessment(
+    routed: bool,
+    batch: tuple[PublicEvent, ...],
+    review_turn: int,
+    incidents: dict[int, _Incident],
+    config: MissionConfig,
+    emit: Callable[..., dict[str, object]],
+) -> None:
+    open_incidents = [incident for incident in incidents.values() if incident.open]
+    if routed and not open_incidents:
+        event = batch[0]
+        origin = Evidence(
+            -event.sequence - 1,
+            event.turn,
+            "telemetry",
+            "AI flagged public events: " + json.dumps([asdict(item) for item in batch]),
+        )
+        incident = _Incident(origin.sequence, origin, [origin], event.turn, None)
+        incidents[incident.id] = incident
+        open_incidents = [incident]
+        emit(
+            "incident_opened",
+            event.turn,
+            evidence=origin,
+            decision={"incident_id": incident.id},
+            consequence={"status": "open"},
+        )
+    for incident in open_incidents:
+        if routed:
+            incident.dispatched = True
+            due = review_turn if review_turn <= config.duration_turns else None
+            if incident.next_turn is None or (due is not None and due < incident.next_turn):
+                _set_follow_up(incident, batch[-1].turn, due, emit, reason="event_escalation")
+        elif not incident.dispatched and (
+            incident.next_turn is None or incident.next_turn <= review_turn
+        ):
+            _schedule_follow_up(
+                incident,
+                batch[-1].turn,
+                config.duration_turns,
+                emit,
+                reason="low_priority_monitoring",
+                delay=4,
+            )
 
 
 def _captain_context(
