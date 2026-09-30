@@ -2,19 +2,7 @@
 
 Companion Page: https://chatgpt.com/space/page_fc5b19900a188191a26a38b452913a17
 
-```mermaid
-flowchart LR
-    Adversary[AI adversary] -->|Proposes disruption| World[World engine]
-    World -->|Public observations and evidence| Jev[Jev classifies events]
-    Jev -->|Assessment| App[Application routes incidents]
-    App -->|Escalated incident and public events| Captain[Captain investigates and proposes actions]
-    Captain -->|Proposed action| Validate[Application and world validate and execute]
-    Validate -->|Public action results| Jev
-    Validate -->|State changes| World
-    World -->|All world activity| Log[Full audit log]
-    Adversary -->|Private selections and rationale| Log
-    Validate -->|Actions and outcomes| Log
-```
+![Station Control roles and decisions: public-event classification, captain response, and full audit logging](docs/images/station-control-roles.png)
 
 This flow applies to `jev+llm` mode. Jev assesses public events in batches; the captain chooses actions. The application routes alerts and classification failures to review, and validates proposals before execution. Action results return to Jev, with further actions scheduled for a later turn. The audit log also preserves private adversary activity and hidden world transitions; those records stay outside the crew AIs' inputs.
 
