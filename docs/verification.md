@@ -20,3 +20,15 @@ Final world verification: 21 world cases and the six existing environment checks
 A second RED/GREEN cycle fixed terminal crew loss: dead crew cannot act or finish work,
 and the terminal world no longer advances. Crew exhaustion, duplicate repair assignment,
 and insufficient-credit rejection are also covered. Ruff lint and formatting checks pass.
+
+## Independent evaluation slice
+
+A three-case matrix first failed at the importable `evaluate_mission` stub. The final
+four-case matrix verifies resource/action/incident measures, repair evidence deduplication,
+missing state history, and model accounting with explicitly unknown cost or usage.
+All four cases pass, alongside the world/setup tests; scoped lint and format checks pass.
+
+The evaluator consumes authoritative snapshots and recorded actions rather than controller
+self-assessment. Critical-report misses, unsupported diagnoses, and unnecessary escalation
+remain explicitly unavailable until scenario answer-key annotations are added. Model costs
+and token totals are unavailable when any attempted request lacks those measurements.

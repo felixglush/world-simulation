@@ -39,9 +39,10 @@ configuration and model identifiers; no live model validation is implied by offl
 ## Delivery sequence
 
 1. Deterministic life-support world and four scenario families.
-2. Mission orchestration, controller contracts, incident policy, and evaluation.
-3. Bounded OpenRouter captain and TypeSafe Jev adapters.
-4. CLI, JSONL records, replay, and end-to-end experiment documentation.
+2. Independent outcome evaluation from authoritative snapshots and recorded decisions.
+3. Mission orchestration, controller contracts, and incident policy.
+4. Bounded OpenRouter captain and TypeSafe Jev adapters.
+5. CLI, JSONL records, replay, and end-to-end experiment documentation.
 
 Each pull request targets the preceding slice. Review the incremental diff and merge from
 bottom to top, retargeting/rebasing remaining branches after each merge as needed.
