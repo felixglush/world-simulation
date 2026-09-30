@@ -629,7 +629,11 @@ def _dispatch(
     )
     try:
         judgment = dispatcher.classify(context)
-        if not isinstance(judgment, DispatchJudgment):
+        if (
+            not isinstance(judgment, DispatchJudgment)
+            or not isinstance(judgment.rationale, str)
+            or not isinstance(judgment.metadata, Mapping)
+        ):
             raise ValueError("malformed dispatch result")
         subsystem = Subsystem(judgment.subsystem)
         safeguard = NoulOutcome(judgment.safeguard_request)
@@ -671,7 +675,7 @@ def _dispatch(
             "diagnosis_supported": diagnosis.value,
             "urgency": urgency,
             "rationale": judgment.rationale[:500],
-            "metadata": judgment.metadata,
+            "metadata": _safe_metadata(judgment.metadata),
         },
         consequence={"routed": routed},
     )
