@@ -701,3 +701,22 @@ def test_openrouter_captain_repairs_leak_through_real_mission_loop(
         ).leak_active
         is False
     )
+
+
+@pytest.mark.parametrize("ambiguous", ["duplicate_arguments", "multiple_choices"])
+def test_captain_rejects_ambiguous_decisions(ambiguous):
+    payload = _captain_payload()
+    if ambiguous == "duplicate_arguments":
+        payload["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = (
+            '{"target":"sensor_a","target":"oxygen_system"}'
+        )
+    else:
+        payload["choices"].append(payload["choices"][0])
+    provider = _captain(_reply(payload))
+    try:
+        with pytest.raises(ProviderError) as error:
+            provider.decide(_captain_context())
+    finally:
+        provider.close()
+    assert error.value.code is ProviderErrorCode.MALFORMED_RESPONSE
+    assert error.value.metadata["request_made"] is True
