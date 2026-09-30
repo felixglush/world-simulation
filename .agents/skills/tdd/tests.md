@@ -1,5 +1,11 @@
 # Good and Bad Tests
 
+## Functional Evidence Over Line Coverage
+
+Prefer an end-to-end test that proves a complete caller-visible workflow over a collection of unit tests that only exercise its implementation pieces. For example, creating an order and verifying that it is persisted and retrievable proves more than separately testing constructors, setters, and repository call counts.
+
+Use focused tests when they prove meaningful edge cases, invariants, or failure behavior more precisely. Do not write tests whose only purpose is executing uncovered lines. Use coverage gaps to ask which relevant behavior is unproven, and add a test only when there is a meaningful answer.
+
 ## Good Tests
 
 **Integration-style**: Test through real interfaces, not mocks of internal parts.

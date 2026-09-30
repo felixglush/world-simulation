@@ -13,6 +13,8 @@ description: Risk-calibrated test-driven development with red-green-refactor, fa
 
 **Bad tests** are coupled to implementation. They mock internal collaborators, test private methods, or assert incidental call order. The warning sign: a refactor breaks the test even though public behavior did not change.
 
+Prefer end-to-end tests that exercise relevant functionality through real application entry points over enumerating unit tests for individual methods or lines. Each test should prove a meaningful user outcome, invariant, or failure behavior. Do not add tests solely to raise line coverage; coverage is a diagnostic signal, not the objective.
+
 See [tests.md](tests.md) for examples and [mocking.md](mocking.md) for mocking guidelines.
 
 ## Choose the TDD Shape from the Risk
@@ -111,12 +113,14 @@ Rules:
 
 ### 5. Verify at the Right Layers
 
-Use the fewest layers that prove the claims:
+Prefer end-to-end evidence for complete workflows, with assertions on relevant functionality and meaningful failure outcomes. Choose the fewest additional layers needed to prove distinct risks:
 
-- **Focused tests** for pure calculations and difficult local state transitions
-- **Integration tests** through the public application or HTTP interface as the default
-- **Process or container end-to-end tests** for networking, packaging, configuration, startup, shutdown, and real dependency wiring
+- **End-to-end tests** through the real CLI, HTTP, or UI entry point for complete workflows; use processes or containers when packaging, networking, startup, shutdown, or dependency wiring matters
+- **Integration tests** through the public application interface when they adequately prove the behavior without a full deployed environment
+- **Focused tests** for meaningful calculations, invariants, or difficult state transitions that benefit from precise boundary cases
 - **Remote acceptance tests** only when the claim depends on the real external system
+
+Do not enumerate unit tests for every method, getter, constructor, or branch merely to increase line coverage. Avoid duplicating the same claim across layers unless each test addresses a distinct risk. A focused test is useful when it proves relevant behavior, even if it also improves coverage.
 
 Do not use an in-process test to claim that a container, network, deployment, or remote service works.
 
