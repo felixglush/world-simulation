@@ -84,6 +84,8 @@ def test_evaluation_reports_evidenced_metrics_and_names_unsupported_metrics():
         "backup_oxygen_used": 60,
         "credits_spent": 55,
         "invalid_actions": 2,
+        "adversary_disruptions": 0,
+        "adversary_rejected_actions": 0,
         "unresolved_incidents": 1,
         "forgotten_incidents": 1,
         "incident_resolution_turns": 1,

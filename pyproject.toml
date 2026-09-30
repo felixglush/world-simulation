@@ -5,6 +5,7 @@ description = "Station Control: deterministic world simulation and agent evaluat
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "openai>=3.22.1",
+    "pyyaml>=6.0.3",
     "typesafe-sdk>=0.7.2",
 ]
 

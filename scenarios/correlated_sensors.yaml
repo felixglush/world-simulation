@@ -1,0 +1,22 @@
+schema_version: 1
+id: correlated_sensors
+description: Both oxygen instruments report from one source after an unannounced change.
+initial:
+  oxygen: 780
+  leak_rate: 26
+events:
+  - turn: 1
+    kind: telemetry
+  - turn: 2
+    kind: sensor_correlated
+    target: sensor_a
+    message: ""
+  - turn: 3
+    kind: leak_start
+    message: ""
+  - turn: 4
+    kind: telemetry
+  - turn: 7
+    kind: telemetry
+  - turn: 10
+    kind: telemetry

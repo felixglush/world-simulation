@@ -8,13 +8,19 @@ process makes deterministic experiments cheap while preserving replaceable integ
 
 - **World engine and scenarios:** own authoritative resources, hidden faults, sensors,
   scheduled external disruptions, and physical action validation. Only completed work
-  changes equipment condition. Seeded disruptions do not depend on controller choices.
+  changes equipment condition. Authored scenario schedules are seeded; an optional
+  adversary can introduce additional disruptions in response to current state.
+- **YAML scenario adapter:** parses bounded, validated data into the world's scenario
+  definition. Scenario selection and saved snapshots belong to the CLI; the world does
+  not read files. Public messages may be deceptive, but cannot directly mutate reality.
 - **Mission application:** owns the turn loop, incident lifecycle, routing, follow-up,
   observation history, and action budgets. Controllers propose commands; the application
-  and world validate them. Provider inputs contain observations, never authoritative state.
+  and world validate them. Captain and dispatch inputs contain only public observations.
+  The adversary receives a separate projection of current truth, excluding future events.
 - **Controllers and provider ports:** express decisions over agent-visible evidence.
   Rules are the offline baseline. Captain and dispatch integrations implement contracts
-  defined by the consuming application; SDK types stay outside those contracts.
+  defined by the consuming application; SDK types stay outside those contracts. The
+  optional adversary has its own decision port and a finite disruption action space.
 - **Evaluation:** computes separate outcome and decision measures from recorded facts.
   It can use world truth, but does not feed that truth back to controllers. Investigation
   evidence matters; correctly guessing a hidden fault is not itself proof of good reasoning.
@@ -30,19 +36,10 @@ subsystems extend world rules and observations; new model vendors replace adapte
 ## Trust and failure handling
 
 External reports are evidence, not instructions or proof of physical repairs. Hidden fault
-labels belong in debug records only. Agents receive explicit projections rather than a
+labels stay out of captain and dispatch inputs. The adversary can inspect current faults;
+its private context and decisions are audit records, never crew evidence. Agents receive
+explicit projections rather than a
 serialized world with selected fields removed. Unknown or malformed actions are rejected;
 provider errors never grant access or bypass action rules. Network work is bounded and
 routine tests use fake providers. Live experiments require explicit budgets and record
 configuration and model identifiers; no live model validation is implied by offline tests.
-
-## Delivery sequence
-
-1. Deterministic life-support world and four scenario families.
-2. Independent outcome evaluation from authoritative snapshots and recorded decisions.
-3. Mission orchestration, controller contracts, and incident policy.
-4. Bounded OpenRouter captain and TypeSafe Jev adapters.
-5. CLI, JSONL records, replay, and end-to-end experiment documentation.
-
-Each pull request targets the preceding slice. Review the incremental diff and merge from
-bottom to top, retargeting/rebasing remaining branches after each merge as needed.

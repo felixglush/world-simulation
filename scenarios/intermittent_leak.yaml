@@ -1,0 +1,44 @@
+schema_version: 1
+id: intermittent_leak
+description: Several oxygen-loss periods recur, with the last one remaining active.
+initial:
+  oxygen: 750
+  parts: 3
+  credits: 100
+  leak_rate: 45
+events:
+  - turn: 1
+    kind: telemetry
+  - turn: 2
+    kind: leak_start
+    message: ""
+  - turn: 8
+    kind: leak_stop
+    message: ""
+  - turn: 12
+    kind: telemetry
+  - turn: 14
+    kind: leak_start
+    message: ""
+  - turn: 18
+    kind: telemetry
+  - turn: 20
+    kind: leak_stop
+    message: ""
+  - turn: 23
+    kind: telemetry
+  - turn: 25
+    kind: leak_start
+    message: ""
+  - turn: 29
+    kind: telemetry
+  - turn: 32
+    kind: leak_stop
+    message: ""
+  - turn: 35
+    kind: telemetry
+  - turn: 37
+    kind: leak_start
+    message: ""
+  - turn: 40
+    kind: telemetry

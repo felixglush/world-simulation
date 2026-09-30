@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, is_dataclass
-from datetime import date, datetime
-from enum import Enum
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -16,27 +14,10 @@ class RunLogError(ValueError):
     """A run log could not be created, read, or validated safely."""
 
 
-def json_value(value: Any) -> Any:
-    """Convert application values to plain JSON values without leaking SDK objects."""
-    if is_dataclass(value) and not isinstance(value, type):
-        return json_value(asdict(value))
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {str(key): json_value(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [json_value(item) for item in value]
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    raise TypeError(f"Unsupported run log value: {type(value).__name__}")
-
-
 def _line(record: dict[str, Any]) -> str:
     try:
         return json.dumps(
-            json_value(record), ensure_ascii=False, separators=(",", ":"), allow_nan=False
+            record, default=asdict, ensure_ascii=False, separators=(",", ":"), allow_nan=False
         )
     except (TypeError, ValueError) as error:
         raise RunLogError(f"Run contains data that cannot be written as JSON: {error}") from error
@@ -98,10 +79,10 @@ class RunLogWriter:
                 f"Cannot write run output {self.path}: {error.strerror or error}"
             ) from error
 
-    def write_event(self, event: Any) -> None:
+    def write_event(self, event: dict[str, Any]) -> None:
         if self._finished:
             raise RunLogError("Cannot add an event after the run log is finished")
-        data = json_value(event)
+        data = event
         if not isinstance(data, dict):
             raise RunLogError("Mission events must be objects")
         if data.get("record_type") != "event":
@@ -173,16 +154,6 @@ class RunLogWriter:
                 self._stream.close()
             except OSError:
                 pass
-
-    def __enter__(self) -> RunLogWriter:
-        return self
-
-    def __exit__(self, exception_type: Any, exception: Any, traceback: Any) -> None:
-        if not self._finished:
-            if exception_type is None:
-                self.finish()
-            else:
-                self.close_incomplete()
 
 
 def _duplicate_free_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -312,6 +283,7 @@ def render_run_log(records: list[dict[str, Any]]) -> str:
     }
     for record in events:
         lines.append(f"Turn {record['turn']}:")
+        lines.append(f"  Event: {_display(record.get('event_type'))}")
         lines.append(f"  Evidence: {_display(record.get('evidence', []))}")
         lines.append(f"  Decision: {_display(record.get('decision'))}")
         lines.append(f"  Consequence: {_display(record.get('consequence'))}")

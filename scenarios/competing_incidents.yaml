@@ -1,0 +1,20 @@
+schema_version: 1
+id: competing_incidents
+description: A physical oxygen incident coincides with unrelated crew reassignment.
+initial:
+  oxygen: 830
+  leak_rate: 28
+events:
+  - turn: 1
+    kind: telemetry
+  - turn: 2
+    kind: leak_start
+  - turn: 2
+    kind: crew_busy
+    value: 5
+    message: ""
+  - turn: 4
+    kind: telemetry
+  - turn: 7
+    kind: crew_release
+    value: 2

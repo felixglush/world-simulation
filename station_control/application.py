@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from enum import Enum, StrEnum
 from typing import Callable, Mapping
 from uuid import uuid4
 
+from .adversary import (
+    ADVERSARY_PROMPT_VERSION,
+    DEFAULT_ADVERSARY_DISRUPTIONS,
+    MAX_ADVERSARY_DISRUPTIONS,
+    MAX_ADVERSARY_RATIONALE_CHARS,
+    AdversaryAction,
+    AdversaryActionKind,
+    AdversaryContext,
+    AdversaryDecision,
+    AdversaryMode,
+    AdversaryProvider,
+    adversary_context,
+    apply_adversary_action,
+)
 from .controllers import (
     ActionDescriptor,
     ActionRequest,
@@ -38,9 +51,15 @@ from .domain import (
     observe,
 )
 from .evaluation import MissionEvaluation, evaluate_mission
-from .scenarios import ScenarioFamily, create_world
+from .scenarios import (
+    ScenarioDefinition,
+    ScenarioFamily,
+    create_configured_world,
+    create_world,
+    scenario_definition_to_dict,
+)
 
-SIMULATOR_VERSION = "0.1.0"
+SIMULATOR_VERSION = "0.3.0"
 MAX_MISSION_TURNS = 14 * 24
 MAX_INSPECTIONS_PER_TURN = 6
 QUESTION_VERSION = "jev-questions-v1"
@@ -77,12 +96,21 @@ class MissionConfig:
     question_version: str = QUESTION_VERSION
     rubric_version: str = RUBRIC_VERSION
     instruction_version: str = INSTRUCTION_VERSION
+    adversary_mode: AdversaryMode | str = AdversaryMode.OFF
+    adversary_disruption_budget: int = DEFAULT_ADVERSARY_DISRUPTIONS
+    scenario_definition: ScenarioDefinition | None = None
 
     def __post_init__(self) -> None:
         try:
-            object.__setattr__(self, "scenario", ScenarioFamily(self.scenario))
+            if self.scenario_definition is None:
+                object.__setattr__(self, "scenario", ScenarioFamily(self.scenario))
+            elif not isinstance(self.scenario_definition, ScenarioDefinition):
+                raise ValueError("Scenario definition must be a validated ScenarioDefinition")
+            else:
+                object.__setattr__(self, "scenario", self.scenario_definition.id)
             object.__setattr__(self, "controller_mode", ControllerMode(self.controller_mode))
             object.__setattr__(self, "evidence_access", EvidenceAccess(self.evidence_access))
+            object.__setattr__(self, "adversary_mode", AdversaryMode(self.adversary_mode))
         except ValueError as error:
             raise ValueError(f"Unsupported mission configuration: {error}") from error
         if type(self.seed) is not int:
@@ -111,6 +139,13 @@ class MissionConfig:
             raise ValueError(
                 f"Unsupported captain instruction version: {self.instruction_version!r}"
             )
+        if (
+            type(self.adversary_disruption_budget) is not int
+            or not 0 <= self.adversary_disruption_budget <= MAX_ADVERSARY_DISRUPTIONS
+        ):
+            raise ValueError(
+                f"Adversary disruption budget must be between 0 and {MAX_ADVERSARY_DISRUPTIONS}"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,14 +165,10 @@ class DebugSnapshot:
 class MissionResult:
     run_id: str
     status: MissionStatus
-    records: tuple[dict[str, object], ...]
+    turns_completed: int
     events: tuple[dict[str, object], ...]
     evaluation: MissionEvaluation
     debug_snapshots: tuple[DebugSnapshot, ...]
-
-    @property
-    def turns_completed(self) -> int:
-        return int(self.records[-1]["turn"])
 
 
 EventSink = Callable[[dict[str, object]], None]
@@ -145,8 +176,12 @@ EventSink = Callable[[dict[str, object]], None]
 
 def mission_metadata(config: MissionConfig) -> dict[str, object]:
     """Return the versioned, serializable settings used to compose a mission."""
-    return {
-        "scenario": config.scenario.value,
+    metadata: dict[str, object] = {
+        "scenario": (
+            config.scenario.value
+            if isinstance(config.scenario, ScenarioFamily)
+            else config.scenario
+        ),
         "seed": config.seed,
         "duration_turns": config.duration_turns,
         "controller": config.controller_mode.value,
@@ -156,7 +191,13 @@ def mission_metadata(config: MissionConfig) -> dict[str, object]:
         "question_version": config.question_version,
         "rubric_version": config.rubric_version,
         "instruction_version": config.instruction_version,
+        "adversary": config.adversary_mode.value,
+        "adversary_disruption_budget": config.adversary_disruption_budget,
+        "adversary_prompt_version": ADVERSARY_PROMPT_VERSION,
     }
+    if config.scenario_definition is not None:
+        metadata["scenario_definition"] = scenario_definition_to_dict(config.scenario_definition)
+    return metadata
 
 
 def run_mission(
@@ -164,6 +205,7 @@ def run_mission(
     *,
     captain: CaptainProvider | None = None,
     dispatcher: DispatchProvider | None = None,
+    adversary: AdversaryProvider | None = None,
     event_sink: EventSink | None = None,
 ) -> MissionResult:
     """Run one bounded station mission with caller-supplied controller ports."""
@@ -173,17 +215,21 @@ def run_mission(
         )
     if config.controller_mode is ControllerMode.JEV_LLM and dispatcher is None:
         raise ValueError("Controller mode 'jev+llm' requires a dispatch provider")
+    if config.adversary_mode is AdversaryMode.LLM and adversary is None:
+        raise ValueError("Adversary mode 'llm' requires an adversary provider")
 
     run_id = config.run_id or str(uuid4())
-    started_at = datetime.now(timezone.utc).isoformat()
-    metadata = mission_metadata(config)
-    metadata["providers"] = _provider_metadata(captain, dispatcher)
-    state = create_world(config.scenario, config.seed)
+    state = (
+        create_configured_world(config.scenario_definition, config.seed)
+        if config.scenario_definition is not None
+        else create_world(config.scenario, config.seed)
+    )
     states = [state]
-    snapshots = [_debug_snapshot(state)]
     public_history: list[PublicEvidence] = list(state.evidence)
     events: list[dict[str, object]] = []
     incidents: dict[int, _Incident] = {}
+    adversary_disruptions_used = 0
+    adversary_provider_stopped = False
 
     def emit(
         event_type: str,
@@ -210,10 +256,21 @@ def run_mission(
     for _ in range(config.duration_turns):
         if not state.crew_alive:
             break
+        if config.adversary_mode is AdversaryMode.LLM:
+            remaining = config.adversary_disruption_budget - adversary_disruptions_used
+            if remaining > 0 and not adversary_provider_stopped:
+                state, disruption_cost, stop_provider = _adversary_turn(
+                    state,
+                    adversary,
+                    remaining,
+                    emit,
+                )
+                adversary_disruptions_used += disruption_cost
+                adversary_provider_stopped = adversary_provider_stopped or stop_provider
+                states[-1] = state
         turn_result = advance_turn(state)
         state = turn_result.state
         states.append(state)
-        snapshots.append(_debug_snapshot(state))
 
         for item in turn_result.evidence:
             public_history.append(item)
@@ -349,36 +406,114 @@ def run_mission(
                 public_history=public_history,
             )
             states[-1] = state
-            snapshots[-1] = _debug_snapshot(state)
             inspections_used += int(inspection_attempted)
 
     status = MissionStatus.COMPLETED if state.crew_alive else MissionStatus.CREW_LOST
     evaluation = evaluate_mission(states, events)
-    start_record = {
-        "record_type": "run_start",
-        "schema_version": 1,
-        "run_id": run_id,
-        "simulator_version": SIMULATOR_VERSION,
-        "started_at": started_at,
-        "metadata": metadata,
-    }
-    end_record = {
-        "record_type": "run_end",
-        "schema_version": 1,
-        "run_id": run_id,
-        "turn": state.turn,
-        "status": status.value,
-        "metrics": _json_value(evaluation),
-        "event_count": len(events),
-    }
     return MissionResult(
         run_id=run_id,
         status=status,
-        records=(start_record, *events, end_record),
+        turns_completed=state.turn,
         events=tuple(events),
         evaluation=evaluation,
-        debug_snapshots=tuple(snapshots),
+        debug_snapshots=tuple(_debug_snapshot(item) for item in states),
     )
+
+
+def _adversary_turn(
+    state: StationState,
+    provider: AdversaryProvider,
+    disruption_budget_remaining: int,
+    emit: EventSink,
+) -> tuple[StationState, int, bool]:
+    """Request, validate, audit, and apply one proposal before world advancement."""
+    context = adversary_context(state, disruption_budget_remaining)
+    try:
+        proposal = provider.decide(context)
+        if (
+            not isinstance(proposal, AdversaryDecision)
+            or not isinstance(proposal.action, AdversaryAction)
+            or not isinstance(proposal.rationale, str)
+            or not isinstance(proposal.metadata, Mapping)
+        ):
+            raise ProviderError(ProviderErrorCode.MALFORMED_RESPONSE)
+    except ProviderError as error:
+        _adversary_provider_failure(emit, state.turn, context, error.code.value, error.metadata)
+        return state, 0, error.code is ProviderErrorCode.BUDGET_EXHAUSTED
+    except Exception:
+        _adversary_provider_failure(
+            emit,
+            state.turn,
+            context,
+            ProviderErrorCode.PROVIDER_UNAVAILABLE.value,
+            {},
+        )
+        return state, 0, False
+
+    action = proposal.action
+    rationale = proposal.rationale[:MAX_ADVERSARY_RATIONALE_CHARS]
+    metadata = proposal.metadata
+
+    result = apply_adversary_action(
+        state,
+        action,
+        max(0, disruption_budget_remaining),
+    )
+    disruption_cost = int(
+        result.accepted and _adversary_action_kind(action) is not AdversaryActionKind.WAIT
+    )
+    emit(
+        "adversary_decision",
+        state.turn,
+        evidence=context,
+        decision={
+            "action": _adversary_action_record(action),
+            "rationale": rationale,
+            "metadata": _safe_metadata(metadata),
+        },
+        consequence={
+            "status": result.status,
+            "accepted": result.accepted,
+            "rejection": result.rejection,
+            "disruption_budget_remaining": max(0, disruption_budget_remaining - disruption_cost),
+        },
+    )
+    return result.state, disruption_cost, False
+
+
+def _adversary_provider_failure(
+    emit: EventSink,
+    turn: int,
+    context: AdversaryContext,
+    code: str,
+    metadata: Mapping[str, object],
+) -> None:
+    emit(
+        "provider_failure",
+        turn,
+        evidence=context,
+        decision={"provider": "adversary"},
+        consequence={
+            "provider": "adversary",
+            "code": code,
+            "metadata": _safe_metadata(metadata),
+        },
+    )
+
+
+def _adversary_action_kind(action: AdversaryAction) -> AdversaryActionKind | None:
+    try:
+        return AdversaryActionKind(action.kind)
+    except (TypeError, ValueError):
+        return None
+
+
+def _adversary_action_record(action: AdversaryAction) -> dict[str, object]:
+    kind = _adversary_action_kind(action)
+    return {
+        "kind": kind.value if kind is not None else "invalid_action",
+        "target": action.target if isinstance(action.target, str) else None,
+    }
 
 
 @dataclass(slots=True)
@@ -940,22 +1075,6 @@ def _debug_snapshot(state: StationState) -> DebugSnapshot:
         credits=state.credits,
         oxygen_sensors=state.sensor_readings,
     )
-
-
-def _provider_metadata(
-    captain: CaptainProvider | None,
-    dispatcher: DispatchProvider | None,
-) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for name, provider in (("captain", captain), ("dispatcher", dispatcher)):
-        if provider is None:
-            continue
-        try:
-            metadata = provider.metadata
-        except Exception:
-            metadata = {}
-        result[name] = _safe_metadata(metadata)
-    return result
 
 
 def _safe_metadata(metadata: Mapping[str, object]) -> dict[str, object]:

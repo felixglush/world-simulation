@@ -139,14 +139,8 @@ class CaptainDecision:
 
 
 class DispatchProvider(Protocol):
-    @property
-    def metadata(self) -> ProviderMetadata: ...
-
     def classify(self, context: DispatchContext) -> DispatchJudgment: ...
 
 
 class CaptainProvider(Protocol):
-    @property
-    def metadata(self) -> ProviderMetadata: ...
-
     def decide(self, context: CaptainContext) -> CaptainDecision: ...

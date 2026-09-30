@@ -8,17 +8,17 @@ Use misleading-maintenance-report seeds 1 and 2 for development. Disable inspect
 in a 48-turn mission, replay the failure, then rerun with one inspection slot per turn:
 
 ```bash
-uv run --frozen python -m station_control run --scenario misleading_report --seed 1 --turns 48 --inspection-budget 0 --output runs/dev-1-no-inspections.jsonl
+uv run --frozen python -m station_control run --controller rules --scenario misleading_report --seed 1 --turns 48 --inspection-budget 0 --output runs/dev-1-no-inspections.jsonl
 uv run --frozen python -m station_control replay runs/dev-1-no-inspections.jsonl
-uv run --frozen python -m station_control rerun runs/dev-1-no-inspections.jsonl --inspection-budget 1 --output runs/dev-1-inspections.jsonl
+uv run --frozen python -m station_control rerun runs/dev-1-no-inspections.jsonl --controller rules --inspection-budget 1 --output runs/dev-1-inspections.jsonl
 ```
 
 Check the same fixed change on held-out seeds 101 and 202 (do not tune against them):
 
 ```bash
 for seed in 101 202; do
-  uv run --frozen python -m station_control run --scenario misleading_report --seed "$seed" --turns 48 --inspection-budget 0 --output "runs/heldout-$seed-no-inspections.jsonl"
-  uv run --frozen python -m station_control rerun "runs/heldout-$seed-no-inspections.jsonl" --inspection-budget 1 --output "runs/heldout-$seed-inspections.jsonl"
+  uv run --frozen python -m station_control run --controller rules --scenario misleading_report --seed "$seed" --turns 48 --inspection-budget 0 --output "runs/heldout-$seed-no-inspections.jsonl"
+  uv run --frozen python -m station_control rerun "runs/heldout-$seed-no-inspections.jsonl" --controller rules --inspection-budget 1 --output "runs/heldout-$seed-inspections.jsonl"
 done
 ```
 

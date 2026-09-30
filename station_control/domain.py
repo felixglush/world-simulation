@@ -25,6 +25,8 @@ class Evidence:
 class SensorReading:
     sensor: str
     oxygen: int
+    sampled_turn: int = 0
+    source: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +66,8 @@ class ScheduledEvent:
     turn: int
     kind: str
     target: str | None = None
+    message: str | None = None
+    value: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +75,7 @@ class Delivery:
     due_turn: int
     supply: str
     quantity: int
+    fill_percent: int = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,8 +83,6 @@ class StationState:
     """Authoritative world state; pass `observe(state)` to decision makers."""
 
     turn: int
-    scenario_family: str
-    seed: int
     oxygen: int
     oxygen_capacity: int
     generation_rate: int
@@ -87,7 +90,6 @@ class StationState:
     leak_rate: int
     leak_active: bool
     backup_oxygen: int
-    backup_capacity: int
     backup_rate: int
     backup_active: bool
     parts: int
@@ -102,6 +104,14 @@ class StationState:
     scheduled_events: tuple[ScheduledEvent, ...]
     deliveries: tuple[Delivery, ...]
     evidence: tuple[Evidence, ...]
+    sensor_mode: str = "independent"
+    reserved_crew: int = 0
+    repair_duration_turns: int = 2
+    delivery_delay_turns: int = 0
+    delivery_fill_percent: int = 100
+    repair_notice_delay_turns: int = 0
+    duplicate_notice_delay_turns: int = 0
+    repairs_completed: int = 0
 
 
 def observe(state: StationState) -> StationObservation:
@@ -155,6 +165,7 @@ def advance_turn(state: StationState) -> TurnResult:
     turn = state.turn + 1
     next_state = replace(state, turn=turn)
     emitted: list[Evidence] = []
+    scheduled_messages: list[tuple[str, str | None, str]] = []
 
     remaining_events = []
     for event in state.scheduled_events:
@@ -163,34 +174,168 @@ def advance_turn(state: StationState) -> TurnResult:
             continue
         if event.kind == "leak_start":
             next_state = replace(next_state, leak_active=True)
-            next_state, item = _emit(
-                next_state,
+            _queue_scheduled_message(
+                scheduled_messages,
+                event,
                 "alert",
                 "Life-support pressure has dropped below its normal range.",
             )
-            emitted.append(item)
+        elif event.kind == "leak_stop":
+            next_state = replace(next_state, leak_active=False)
+            _queue_scheduled_message(
+                scheduled_messages,
+                event,
+                "alert",
+                "Life-support pressure has returned to its normal range.",
+            )
         elif event.kind == "sensor_fault":
-            next_state = replace(next_state, sensor_fault=event.target)
-            next_state, item = _emit(
+            target = event.target
+            stuck = (
+                _reading_for(next_state, target).oxygen
+                if target in {"sensor_a", "sensor_b"}
+                else next_state.oxygen
+            )
+            next_state = replace(
                 next_state,
+                sensor_mode="independent",
+                sensor_fault=target,
+                sensor_stuck_reading=stuck,
+            )
+            _queue_scheduled_message(
+                scheduled_messages,
+                event,
                 "alert",
                 "The independent oxygen sensors are reporting different levels.",
             )
-            emitted.append(item)
-        elif event.kind == "misleading_report":
-            next_state, item = _emit(
+        elif event.kind == "sensor_stale":
+            target = event.target
+            stuck = _reading_for(
                 next_state,
+                target if target in {"sensor_a", "sensor_b"} else "sensor_a",
+            ).oxygen
+            next_state = replace(
+                next_state,
+                sensor_mode="stale",
+                sensor_fault=target,
+                sensor_stuck_reading=stuck,
+            )
+            _queue_scheduled_message(
+                scheduled_messages,
+                event,
+                "alert",
+                "An oxygen sensor is retaining an older sample.",
+            )
+        elif event.kind == "sensor_correlated":
+            source_sensor = event.target if event.target in {"sensor_a", "sensor_b"} else "sensor_a"
+            sample = _reading_for(next_state, source_sensor)
+            source = f"shared:{source_sensor}"
+            next_state = replace(
+                next_state,
+                sensor_mode="correlated",
+                sensor_fault=None,
+                sensor_stuck_reading=sample.oxygen,
+                sensor_readings=tuple(
+                    SensorReading(
+                        sensor=sensor,
+                        oxygen=sample.oxygen,
+                        sampled_turn=sample.sampled_turn,
+                        source=source,
+                    )
+                    for sensor in ("sensor_a", "sensor_b")
+                ),
+            )
+            _queue_scheduled_message(
+                scheduled_messages,
+                event,
+                "alert",
+                "The oxygen sensors are receiving data from a shared source.",
+            )
+        elif event.kind == "sensor_restore":
+            next_state = replace(
+                next_state,
+                sensor_mode="independent",
+                sensor_fault=None,
+                sensor_stuck_reading=next_state.oxygen,
+            )
+            _queue_scheduled_message(
+                scheduled_messages,
+                event,
+                "alert",
+                "Independent oxygen sensor sampling has been restored.",
+            )
+        elif event.kind == "crew_busy":
+            count = event.value if type(event.value) is int and event.value > 0 else 0
+            available_slots = max(
+                0,
+                next_state.crew_count
+                - next_state.reserved_crew
+                - int(next_state.repair_turns_remaining > 0),
+            )
+            applied = min(count, available_slots)
+            next_state = replace(
+                next_state,
+                reserved_crew=next_state.reserved_crew + applied,
+            )
+            _queue_scheduled_message(
+                scheduled_messages,
+                event,
+                "alert",
+                f"{applied} crew member(s) have been reassigned to other work.",
+            )
+        elif event.kind == "crew_release":
+            count = (
+                next_state.reserved_crew
+                if event.value is None
+                else max(0, event.value)
+                if type(event.value) is int
+                else 0
+            )
+            released = min(next_state.reserved_crew, count)
+            next_state = replace(next_state, reserved_crew=next_state.reserved_crew - released)
+            _queue_scheduled_message(
+                scheduled_messages,
+                event,
+                "alert",
+                f"{released} crew member(s) are available for station work again.",
+            )
+        elif event.kind == "telemetry":
+            if event.message != "":
+                scheduled_messages.append(("telemetry", event.message, "Telemetry"))
+        elif event.kind == "report":
+            _queue_scheduled_message(
+                scheduled_messages,
+                event,
+                "report",
+                "A maintenance report was received.",
+            )
+        elif event.kind == "_repair_notice":
+            _queue_scheduled_message(
+                scheduled_messages,
+                event,
+                "report",
+                "Maintenance reports a past repair completion; verify current system status.",
+            )
+        elif event.kind == "_repair_duplicate_notice":
+            _queue_scheduled_message(
+                scheduled_messages,
+                event,
+                "report",
+                "Duplicate maintenance notice: the oxygen system repair is complete.",
+            )
+        elif event.kind == "misleading_report":
+            _queue_scheduled_message(
+                scheduled_messages,
+                event,
                 "report",
                 "Maintenance says the oxygen loop is stable and blames the sensor reading.",
             )
-            emitted.append(item)
         elif event.kind == "routine_report":
-            next_state, item = _emit(
-                next_state,
+            _queue_scheduled_message(
+                scheduled_messages,
+                event,
                 "report",
                 "Routine maintenance reports the oxygen system operating normally.",
             )
-            emitted.append(item)
     next_state = replace(next_state, scheduled_events=tuple(remaining_events))
 
     deliveries = []
@@ -198,12 +343,14 @@ def advance_turn(state: StationState) -> TurnResult:
         if delivery.due_turn != turn:
             deliveries.append(delivery)
             continue
+        fill_percent = max(0, min(100, delivery.fill_percent))
         if delivery.supply == "parts":
-            next_state = replace(next_state, parts=next_state.parts + delivery.quantity)
-            detail = f"{delivery.quantity} spare part(s) arrived."
+            quantity = delivery.quantity * fill_percent // 100
+            next_state = replace(next_state, parts=next_state.parts + quantity)
+            detail = f"{quantity} spare part(s) arrived."
         else:
             delivered_oxygen = min(
-                delivery.quantity * OXYGEN_ORDER_SIZE,
+                delivery.quantity * OXYGEN_ORDER_SIZE * fill_percent // 100,
                 next_state.oxygen_capacity - next_state.oxygen,
             )
             next_state = replace(next_state, oxygen=next_state.oxygen + delivered_oxygen)
@@ -254,34 +401,108 @@ def advance_turn(state: StationState) -> TurnResult:
         remaining_work = next_state.repair_turns_remaining - 1
         next_state = replace(next_state, repair_turns_remaining=remaining_work)
         if remaining_work == 0:
-            next_state = replace(next_state, leak_active=False)
-            next_state, item = _emit(
+            next_state = replace(
                 next_state,
-                "repair_complete",
-                "The oxygen system repair is complete; the leak has stopped.",
+                leak_active=False,
+                repairs_completed=next_state.repairs_completed + 1,
             )
-            emitted.append(item)
+            completion_message = "The oxygen system repair is complete; the leak has stopped."
+            notice_delay = max(0, next_state.repair_notice_delay_turns)
+            if notice_delay == 0:
+                next_state, item = _emit(next_state, "repair_complete", completion_message)
+                emitted.append(item)
+            else:
+                next_state = replace(
+                    next_state,
+                    scheduled_events=next_state.scheduled_events
+                    + (
+                        ScheduledEvent(
+                            turn=turn + notice_delay,
+                            kind="_repair_notice",
+                            message=(
+                                f"Maintenance reports the oxygen system repair completed at turn "
+                                f"{turn}; verify current system status."
+                            ),
+                        ),
+                    ),
+                )
+            duplicate_delay = max(0, next_state.duplicate_notice_delay_turns)
+            if duplicate_delay > 0:
+                next_state = replace(
+                    next_state,
+                    scheduled_events=next_state.scheduled_events
+                    + (
+                        ScheduledEvent(
+                            turn=turn + duplicate_delay,
+                            kind="_repair_duplicate_notice",
+                            message=(
+                                "Duplicate maintenance notice: the oxygen system repair is "
+                                "complete."
+                            ),
+                        ),
+                    ),
+                )
 
-    sensor_readings = tuple(
-        SensorReading(
-            sensor=sensor,
-            oxygen=(
-                next_state.sensor_stuck_reading
-                if next_state.sensor_fault == sensor
-                else next_state.oxygen
-            ),
+    previous_readings = {reading.sensor: reading for reading in next_state.sensor_readings}
+    if next_state.sensor_mode == "correlated":
+        sensor_readings = next_state.sensor_readings
+    elif next_state.sensor_mode == "stale":
+        sensor_readings = tuple(
+            previous_readings[sensor]
+            if next_state.sensor_fault in {sensor, "both"}
+            else SensorReading(
+                sensor=sensor,
+                oxygen=next_state.oxygen,
+                sampled_turn=turn,
+                source=sensor,
+            )
+            for sensor in ("sensor_a", "sensor_b")
         )
-        for sensor in ("sensor_a", "sensor_b")
-    )
+    else:
+        sensor_readings = tuple(
+            SensorReading(
+                sensor=sensor,
+                oxygen=next_state.sensor_stuck_reading,
+                sampled_turn=turn,
+                source=sensor,
+            )
+            if next_state.sensor_fault in {sensor, "both"}
+            else SensorReading(
+                sensor=sensor,
+                oxygen=next_state.oxygen,
+                sampled_turn=turn,
+                source=sensor,
+            )
+            for sensor in ("sensor_a", "sensor_b")
+        )
     next_state = replace(
         next_state,
         sensor_readings=sensor_readings,
         available_crew=(
-            next_state.crew_count - int(next_state.repair_turns_remaining > 0)
+            max(
+                0,
+                next_state.crew_count
+                - next_state.reserved_crew
+                - int(next_state.repair_turns_remaining > 0),
+            )
             if next_state.crew_alive
             else 0
         ),
     )
+    for kind, message, default_message in scheduled_messages:
+        if kind == "telemetry":
+            prefix = default_message if message is None else message
+            summary = "; ".join(
+                f"{reading.sensor}={reading.oxygen} "
+                f"(sampled turn {reading.sampled_turn}, source {reading.source})"
+                for reading in next_state.sensor_readings
+            )
+            kind = "report"
+            message = f"{prefix}: {summary}."
+        elif message is None:
+            message = default_message
+        next_state, item = _emit(next_state, kind, message)
+        emitted.append(item)
     return TurnResult(state=next_state, evidence=tuple(emitted))
 
 
@@ -308,7 +529,17 @@ def _inspect(state: StationState, action: Action) -> ActionResult:
             if state.leak_active
             else "Inspection found the oxygen system operating normally."
         )
-    elif state.sensor_fault == action.target:
+    elif state.sensor_mode == "correlated":
+        detail = (
+            f"Independent inspection measured oxygen at {state.oxygen} units; "
+            "both sensors share a data source."
+        )
+    elif state.sensor_mode == "stale" and state.sensor_fault in {action.target, "both"}:
+        detail = (
+            f"Inspection found a stale sample in {action.target}; "
+            f"independent measurement is {state.oxygen} units."
+        )
+    elif state.sensor_fault in {action.target, "both"}:
         detail = f"Inspection found a calibration fault in {action.target}."
     else:
         detail = f"Inspection found {action.target} within calibration range."
@@ -329,13 +560,17 @@ def _assign_repair(state: StationState, action: Action) -> ActionResult:
         return _rejected(state, "insufficient_parts")
     if state.available_crew < 1:
         return _rejected(state, "crew_unavailable")
+    duration = state.repair_duration_turns
+    if type(duration) is not int or duration < 1:
+        duration = 1
     updated = replace(
         state,
         parts=state.parts - 1,
         available_crew=state.available_crew - 1,
-        repair_turns_remaining=REPAIR_DURATION_TURNS,
+        repair_turns_remaining=duration,
     )
-    return _accepted(updated, "Oxygen system repair assigned; completion takes two turns.")
+    unit = "turn" if duration == 1 else "turns"
+    return _accepted(updated, f"Oxygen system repair assigned; completion takes {duration} {unit}.")
 
 
 def _order_supplies(state: StationState, action: Action) -> ActionResult:
@@ -349,9 +584,10 @@ def _order_supplies(state: StationState, action: Action) -> ActionResult:
         return _rejected(state, "insufficient_credits")
 
     delivery = Delivery(
-        due_turn=state.turn + ORDER_LEAD_TURNS,
+        due_turn=state.turn + ORDER_LEAD_TURNS + max(0, state.delivery_delay_turns),
         supply=action.target,
         quantity=action.quantity,
+        fill_percent=max(0, min(100, state.delivery_fill_percent)),
     )
     updated = replace(
         state,
@@ -386,3 +622,18 @@ def _emit(state: StationState, kind: str, message: str) -> tuple[StationState, E
         message=message,
     )
     return replace(state, evidence=state.evidence + (evidence,)), evidence
+
+
+def _queue_scheduled_message(
+    scheduled_messages: list[tuple[str, str | None, str]],
+    event: ScheduledEvent,
+    kind: str,
+    default_message: str,
+) -> None:
+    if event.message == "":
+        return
+    scheduled_messages.append((kind, event.message, default_message))
+
+
+def _reading_for(state: StationState, sensor: str) -> SensorReading:
+    return next(reading for reading in state.sensor_readings if reading.sensor == sensor)

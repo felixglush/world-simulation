@@ -1,0 +1,11 @@
+schema_version: 1
+id: delayed_repair_notice
+description: Physical repair completion precedes its maintenance notification.
+initial:
+  oxygen: 780
+  repair_notice_delay_turns: 3
+events:
+  - turn: 1
+    kind: telemetry
+  - turn: 2
+    kind: leak_start

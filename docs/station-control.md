@@ -30,7 +30,7 @@ The characters provide personality, but each corresponds to a clear system respo
 | **Dispatch officer — Jev** | Classify reports, recognize requests and uncertainty, and route incidents. | Narrow classification questions |
 | **Captain — LLM** | Investigate incidents, weigh options, and propose actions. | Generative model with a bounded tool set |
 | **Crew and vendors** | Send maintenance reports, requests, explanations, and offers. | Scripted characters initially; optional generated dialogue later |
-| **Saboteur — you or the scenario engine** | Introduce disruptions and misleading information. | Controlled event mutations |
+| **Saboteur — scenario engine or optional AI adversary** | Introduce disruptions and misleading information. | Bounded, validated mutations; AI selects using current world state |
 | **World engine — Python** | Maintain the true station state, apply consequences, and enforce action rules. | Deterministic simulation |
 | **Evaluator — Python** | Compare decisions and outcomes with scenario expectations. | Checks and run metrics independent of the agents |
 
@@ -38,15 +38,18 @@ The world engine owns reality. A character saying “the leak is fixed” does n
 
 ## 3. What each participant can see
 
-There are three distinct views:
+There are four distinct views:
 
 | <p>View</p> | <p>Contains</p> | <p>Who sees it</p> |
 | - | - | - |
 | **Actual station state** | Real oxygen levels, hidden faults, sensor reliability, scheduled disruptions | World engine and evaluator |
 | **Observed station state** | Sensor readings, reports, inspection results, accessible records | Jev and the captain |
+| **Adversary state** | Current resources, faults, sensors, repairs, and pending deliveries; no future scenario schedule | Optional AI adversary |
 | **Debug view** | Actual state alongside observations, decisions, and consequences | You, during debugging or after a mission |
 
-Hidden faults and sabotage labels never enter the agents’ context.
+Hidden faults and sabotage labels never enter the captain or Jev's context. The optional
+adversary receives current authoritative facts, including hidden faults, but no future
+scenario schedule. Its decisions and rationale remain separate from crew-visible evidence.
 
 If the evidence is insufficient to identify a fault, the expected behavior can be to investigate. The evaluator should not reward lucky guesses about hidden truth.
 
@@ -54,7 +57,9 @@ If the evidence is insufficient to identify a fault, the expected behavior can b
 
 Each simulation turn represents a fixed interval of station time.
 
-1. The world advances: oxygen is consumed, repairs progress, and deliveries approach.
+1. If enabled, the adversary observes current state and proposes one bounded disruption.
+   Python validates it against eligibility and the remaining disruption budget. The world
+   then advances: oxygen is consumed, repairs progress, and deliveries approach.
 
 2. Scheduled events produce reports or alerts.
 
@@ -168,11 +173,13 @@ Not every problem has a unique correct plan. Evaluation should distinguish manda
 
 - Events must be valid under the world’s rules.
 
-- The same seed and event configuration reproduce the same external disruptions.
+- The same seed and event configuration reproduce authored external disruptions.
+  An AI adversary reacts to state and may choose differently on a rerun; replay retains
+  the actual recorded decisions. Disable it for comparisons requiring fixed disruptions.
 
 - Mutations are recorded separately from agent-visible evidence.
 
-- Begin with one mutation at a time; introduce combinations later.
+- YAML scenarios can be composed in one run; an optional adversary can act alongside them.
 
 - Include clean missions and legitimate unusual requests so the agent cannot succeed by treating everything as suspicious.
 
