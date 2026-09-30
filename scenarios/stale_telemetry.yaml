@@ -1,0 +1,18 @@
+schema_version: 1
+id: stale_telemetry
+description: One sensor silently retains an earlier sample while fresh telemetry arrives.
+initial:
+  oxygen: 740
+events:
+  - turn: 1
+    kind: telemetry
+  - turn: 2
+    kind: sensor_stale
+    target: sensor_a
+    message: ""
+  - turn: 4
+    kind: telemetry
+  - turn: 7
+    kind: telemetry
+  - turn: 9
+    kind: sensor_restore

@@ -1,0 +1,21 @@
+schema_version: 1
+id: recurring_leak
+description: The leak stops once, then returns and remains active until the crew acts.
+initial:
+  oxygen: 750
+  parts: 3
+  credits: 100
+  leak_rate: 45
+events:
+  - turn: 1
+    kind: telemetry
+  - turn: 2
+    kind: leak_start
+  - turn: 5
+    kind: leak_stop
+  - turn: 7
+    kind: telemetry
+  - turn: 8
+    kind: leak_start
+  - turn: 10
+    kind: telemetry

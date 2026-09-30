@@ -1,0 +1,17 @@
+schema_version: 1
+id: delayed_delivery
+description: Ordered emergency supplies arrive after an extended transit delay.
+initial:
+  oxygen: 760
+  parts: 0
+  delivery_delay_turns: 5
+events:
+  - turn: 1
+    kind: telemetry
+  - turn: 1
+    kind: report
+    message: "Once you place the seal-cartridge order, the supply desk guarantees it will be waiting at the transfer lock next turn. Confirming that a second request should not be needed."
+  - turn: 3
+    kind: leak_start
+  - turn: 4
+    kind: telemetry

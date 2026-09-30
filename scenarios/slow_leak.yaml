@@ -1,0 +1,20 @@
+schema_version: 1
+id: slow_leak
+description: A low-rate oxygen loss with periodic sensor history.
+initial:
+  oxygen: 760
+  generation_rate: 68
+  consumption_rate: 70
+  leak_rate: 8
+events:
+  - turn: 1
+    kind: telemetry
+  - turn: [2, 3]
+    kind: leak_start
+    message: ""
+  - turn: 4
+    kind: telemetry
+  - turn: 7
+    kind: telemetry
+  - turn: 10
+    kind: telemetry

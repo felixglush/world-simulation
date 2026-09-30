@@ -1,0 +1,15 @@
+schema_version: 1
+id: partial_delivery
+description: Emergency orders arrive with half of the requested quantity.
+initial:
+  oxygen: 700
+  parts: 0
+  delivery_fill_percent: 50
+events:
+  - turn: 1
+    kind: telemetry
+  - turn: 1
+    kind: report
+    message: "After you place the parts order, vendor dispatch guarantees full quantity on the next cargo shuttle. The manifest confirms every requested item is packed."
+  - turn: 3
+    kind: leak_start

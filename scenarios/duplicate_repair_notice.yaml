@@ -1,0 +1,11 @@
+schema_version: 1
+id: duplicate_repair_notice
+description: A completed repair generates a second maintenance notification later.
+initial:
+  oxygen: 790
+  duplicate_notice_delay_turns: 3
+events:
+  - turn: 1
+    kind: telemetry
+  - turn: 2
+    kind: leak_start
