@@ -283,6 +283,7 @@ def render_run_log(records: list[dict[str, Any]]) -> str:
     }
     for record in events:
         lines.append(f"Turn {record['turn']}:")
+        lines.append(f"  Event: {_display(record.get('event_type'))}")
         lines.append(f"  Evidence: {_display(record.get('evidence', []))}")
         lines.append(f"  Decision: {_display(record.get('decision'))}")
         lines.append(f"  Consequence: {_display(record.get('consequence'))}")

@@ -141,11 +141,33 @@ def test_provider_sends_current_truth_and_only_eligible_fixed_tools() -> None:
     sensor_schema = body["tools"][1]["function"]["parameters"]["properties"]["target"]
     assert sensor_schema["enum"] == ["sensor_a"]
     user_payload = json.loads(body["messages"][1]["content"])
-    assert user_payload["current_truth"]["oxygen"] == 693
-    assert user_payload["current_truth"]["sensor_readings"][0]["sampled_turn"] == 4
-    assert user_payload["current_truth"]["pending_deliveries"] == [
-        {"supply": "oxygen", "quantity": 2, "due_turn": 7}
-    ]
+    truth = user_payload["current_truth"]
+    assert set(truth) == {
+        "turn",
+        "oxygen",
+        "oxygen_capacity",
+        "generation_rate",
+        "consumption_rate",
+        "leak_active",
+        "leak_rate",
+        "repair_turns_remaining",
+        "sensor_mode",
+        "sensor_fault",
+        "sensor_readings",
+        "backup_oxygen",
+        "backup_active",
+        "parts",
+        "credits",
+        "available_crew",
+        "pending_deliveries",
+    }
+    assert truth["oxygen"] == 693
+    assert truth["leak_active"] is False
+    assert truth["repair_turns_remaining"] == 0
+    assert truth["sensor_mode"] == "independent"
+    assert truth["sensor_fault"] is None
+    assert truth["sensor_readings"][0]["sampled_turn"] == 4
+    assert truth["pending_deliveries"] == [{"supply": "oxygen", "quantity": 2, "due_turn": 7}]
     assert user_payload["disruption_budget_remaining"] == 2
     assert "scheduled_events" not in json.dumps(user_payload)
     system_prompt = body["messages"][0]["content"].lower()

@@ -69,7 +69,7 @@ _ALLOWED_ACTION_FIELDS = {
 
 @dataclass(slots=True)
 class CallBudget:
-    """Shared finite provider-call budget and per-call captain output ceiling."""
+    """Shared finite provider-call budget and per-call output-token ceiling."""
 
     max_calls: int
     max_output_tokens_per_call: int
@@ -82,7 +82,7 @@ class CallBudget:
             raise ValueError("max_output_tokens_per_call must be a positive integer")
 
     def consume(self) -> int:
-        """Spend one request before network I/O and return the captain output limit."""
+        """Spend one request before network I/O and return its output-token limit."""
         if self._used_calls >= self.max_calls:
             raise ProviderError(ProviderErrorCode.BUDGET_EXHAUSTED)
         self._used_calls += 1

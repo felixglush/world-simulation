@@ -56,7 +56,7 @@ UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control rer
   --max-output-tokens-per-call 256 --output runs/RUN_ID-history.jsonl
 ```
 
-For a model-backed run, configure the key and selected model identifiers in the environment and pass explicit finite call and output-token budgets. The CLI records model identifiers and budgets without recording the API key. Both adapters share the call limit; the token limit applies to the captain because Jev exposes no documented output-token limit. This is not a dollar cap. Live endpoint interoperability was not exercised during offline verification:
+For a model-backed run, configure the key and selected model identifiers in the environment and pass explicit finite call and output-token budgets. The CLI records model identifiers and budgets without recording the API key. All enabled model adapters share the call limit; the token limit applies to the captain and adversary because Jev exposes no documented output-token limit. This is not a dollar cap. Live endpoint interoperability was not exercised during offline verification:
 
 ```bash
 # Configure OPENROUTER_API_KEY, CAPTAIN_MODEL, and JEV_MODEL in the environment first.
@@ -66,6 +66,11 @@ UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control run
 ```
 
 See [the reproducible offline experiment](docs/mvp-experiment.md) and [service boundaries](docs/architecture.md).
+
+Add `--adversary llm --adversary-budget 3` and configure `ADVERSARY_MODEL` to introduce
+an AI opponent that reads current world state and selects bounded disruptions alongside
+your scenarios. Its private context stays separate from captain evidence. It shares the
+model-call budget with the crew. See [the adversary action space and run guide](docs/adversary.md).
 
 For a controlled comparison, keep the scenario and seed fixed across controller configurations so the external events match. Use one seed set for tuning, then report results on a separate held-out set; keep every run in its own output file. For example, use seeds `1, 2, 3` while adjusting settings and seeds `101, 102, 103` for the held-out comparison. Add the explicit budgets above to every live-controller invocation. No benchmark service or shared mutable run state is needed.
 
