@@ -39,10 +39,12 @@ def records_at(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
-def test_default_run_is_offline_and_writes_replayable_metadata(tmp_path: Path) -> None:
+def test_explicit_rules_run_is_offline_and_writes_replayable_metadata(tmp_path: Path) -> None:
     output = tmp_path / "baseline.jsonl"
     result = run_cli(
         "run",
+        "--controller",
+        "rules",
         "--scenario",
         "leak",
         "--seed",
@@ -73,10 +75,25 @@ def test_default_run_is_offline_and_writes_replayable_metadata(tmp_path: Path) -
     assert records[-1]["event_count"] == len(records) - 2
 
 
+def test_default_run_requires_live_configuration_and_does_not_create_a_log(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "default-run.jsonl"
+
+    result = run_cli("run", "--output", str(output))
+
+    assert result.returncode != 0
+    assert "budget" in result.stderr.lower()
+    assert "Traceback" not in result.stderr
+    assert not output.exists()
+
+
 def test_replay_connects_observed_evidence_decision_and_consequence(tmp_path: Path) -> None:
     output = tmp_path / "mission.jsonl"
     saved = run_cli(
         "run",
+        "--controller",
+        "rules",
         "--scenario",
         "misleading_report",
         "--seed",
@@ -104,6 +121,8 @@ def test_rerun_reuses_scenario_and_seed_but_writes_a_separate_run(tmp_path: Path
     rerun = tmp_path / "rerun.jsonl"
     first = run_cli(
         "run",
+        "--controller",
+        "rules",
         "--scenario",
         "faulty_sensor",
         "--seed",
@@ -116,7 +135,16 @@ def test_rerun_reuses_scenario_and_seed_but_writes_a_separate_run(tmp_path: Path
     assert first.returncode == 0, first.stderr
     original_bytes = original.read_bytes()
 
-    repeated = run_cli("rerun", str(original), "--turns", "1", "--output", str(rerun))
+    repeated = run_cli(
+        "rerun",
+        str(original),
+        "--controller",
+        "rules",
+        "--turns",
+        "1",
+        "--output",
+        str(rerun),
+    )
 
     assert repeated.returncode == 0, repeated.stderr
     assert original.read_bytes() == original_bytes
@@ -133,6 +161,8 @@ def test_same_seed_keeps_external_evidence_fixed_across_offline_configs(tmp_path
     ablation = tmp_path / "ablation.jsonl"
     first = run_cli(
         "run",
+        "--controller",
+        "rules",
         "--scenario",
         "leak",
         "--seed",
@@ -144,6 +174,8 @@ def test_same_seed_keeps_external_evidence_fixed_across_offline_configs(tmp_path
     )
     second = run_cli(
         "run",
+        "--controller",
+        "rules",
         "--scenario",
         "leak",
         "--seed",
@@ -169,6 +201,32 @@ def test_same_seed_keeps_external_evidence_fixed_across_offline_configs(tmp_path
     assert external_evidence(baseline) == external_evidence(ablation)
     assert records_at(baseline)[0]["metadata"]["inspection_budget_per_turn"] == 1
     assert records_at(ablation)[0]["metadata"]["inspection_budget_per_turn"] == 0
+
+
+def test_default_rerun_requires_live_configuration_even_from_a_rules_run(
+    tmp_path: Path,
+) -> None:
+    original = tmp_path / "original-rules.jsonl"
+    rerun = tmp_path / "default-rerun.jsonl"
+    saved = run_cli(
+        "run",
+        "--controller",
+        "rules",
+        "--scenario",
+        "normal",
+        "--turns",
+        "1",
+        "--output",
+        str(original),
+    )
+    assert saved.returncode == 0, saved.stderr
+
+    result = run_cli("rerun", str(original), "--output", str(rerun))
+
+    assert result.returncode != 0
+    assert "budget" in result.stderr.lower()
+    assert "Traceback" not in result.stderr
+    assert not rerun.exists()
 
 
 def test_live_controller_requires_explicit_finite_budget_and_configuration(tmp_path: Path) -> None:

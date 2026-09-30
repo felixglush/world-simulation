@@ -12,7 +12,7 @@ bash scripts/setup-cloud.sh
 
 Use this same command as the Codex Cloud install command. It installs uv 0.12.21 when needed, syncs dependencies, and runs offline SDK, credential-handling tests, lint, and formatting checks. The simulator, mission, adapter, and CLI checks run offline with fake model transports.
 
-For live experiments, supply `OPENROUTER_API_KEY` through the environment and allow HTTPS access to `openrouter.ai`. Both Jev and the captain use OpenRouter. `.env.example` documents the planned model configuration; it is not automatically loaded. Select a captain model with tool calling for live missions.
+The CLI defaults `run` and `rerun` to the AI captain (`llm`). A live mission requires `OPENROUTER_API_KEY`, `CAPTAIN_MODEL`, `--max-calls`, and `--max-output-tokens-per-call`; if any are missing, it stops before creating a run log and never switches to rules. The `jev+llm` controller also requires `JEV_MODEL`. Supply credentials through the environment and allow HTTPS access to `openrouter.ai`. Both Jev and the captain use OpenRouter. `.env.example` documents the planned model configuration; it is not automatically loaded. Select a captain model with tool calling for live missions.
 
 The checker reads `OPENROUTER_API_KEY` from the process environment and never prints it. To require that the cloud value is present:
 
@@ -26,12 +26,17 @@ The project's TDD skill and supporting guides are stored in `.agents/skills/tdd`
 
 ## Run, replay, and compare missions
 
-Run a short mission offline with the rules controller. Rules are the default, so this sends no model requests and needs no API key. The CLI saves a versioned JSONL run under `runs/` unless `--output` names another path:
+Run a short AI-led mission with the default `llm` controller. The CLI saves a versioned JSONL run under `runs/` unless `--output` names another path:
 
 ```bash
+export OPENROUTER_API_KEY=...
+export CAPTAIN_MODEL=...
 UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control run \
-  --scenario leak --seed 41 --turns 48
+  --scenario leak --seed 41 --turns 48 \
+  --max-calls 40 --max-output-tokens-per-call 256
 ```
+
+For offline runs and rules benchmarks, select rules explicitly with `--controller rules`. These runs need no key or model budget and make no model requests.
 
 The available scenarios are `normal`, `leak`, `faulty_sensor`, and `misleading_report`. Each log stores the scenario, seed, simulator and controller configuration, instruction and rubric versions, model identifiers, per-turn observed evidence and decisions, consequences, debug state, and evaluation metrics.
 
@@ -43,11 +48,12 @@ UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control rep
 
 Logs with the current JSONL schema remain replayable across simulator versions. Rerunning requires the same simulator version because scenario behavior may have changed.
 
-Rerun the saved scenario and seed with a changed setting into a new file. A rerun defaults to the offline rules controller, including when the saved run used a live controller. Existing output files are never replaced.
+Rerun the saved scenario and seed with a changed setting into a new file. A rerun defaults to the AI controller, including when the saved run used rules; provide the live configuration and budgets above. To keep a rerun offline, pass `--controller rules` explicitly. Existing output files are never replaced.
 
 ```bash
 UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control rerun runs/RUN_ID.jsonl \
-  --evidence-access history --turns 48 --output runs/RUN_ID-history.jsonl
+  --evidence-access history --turns 48 --max-calls 40 \
+  --max-output-tokens-per-call 256 --output runs/RUN_ID-history.jsonl
 ```
 
 For a model-backed run, configure the key and selected model identifiers in the environment and pass explicit finite call and output-token budgets. The CLI records model identifiers and budgets without recording the API key. Both adapters share the call limit; the token limit applies to the captain because Jev exposes no documented output-token limit. This is not a dollar cap. Live endpoint interoperability was not exercised during offline verification:

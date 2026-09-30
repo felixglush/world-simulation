@@ -78,8 +78,8 @@ def _add_config_options(parser: argparse.ArgumentParser, *, rerun: bool = False)
     parser.add_argument(
         "--controller",
         choices=[mode.value for mode in ControllerMode],
-        default=defaults.get("controller"),
-        help="rules is offline and is the default; model modes need a key, model, and budget.",
+        default=ControllerMode.LLM.value,
+        help="llm is the default; rules is available for explicit offline benchmarks.",
     )
     parser.add_argument(
         "--evidence-access",
@@ -115,19 +115,19 @@ def _add_config_options(parser: argparse.ArgumentParser, *, rerun: bool = False)
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="station-control",
-        description=(
-            "Run a deterministic station mission, save JSONL, and replay the evidence chain."
-        ),
+        description=("Run an AI-led station mission, save JSONL, and replay the evidence chain."),
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
-    run_parser = commands.add_parser("run", help="Run a new mission (rules/offline by default).")
+    run_parser = commands.add_parser("run", help="Run a new mission (LLM controller by default).")
     _add_config_options(run_parser)
 
     replay_parser = commands.add_parser("replay", help="Validate and display a saved mission log.")
     replay_parser.add_argument("log", type=Path)
 
-    rerun_parser = commands.add_parser("rerun", help="Run a saved scenario again into a new log.")
+    rerun_parser = commands.add_parser(
+        "rerun", help="Run a saved scenario with a new LLM-controlled mission by default."
+    )
     rerun_parser.add_argument("log", type=Path)
     _add_config_options(rerun_parser, rerun=True)
     return parser
@@ -207,8 +207,7 @@ def _run_config(
     arguments: argparse.Namespace, saved: dict[str, Any] | None = None
 ) -> MissionConfig:
     defaults = saved or mission_metadata(MissionConfig())
-    # Rerunning a saved model experiment requires explicit live opt-in and budgets.
-    values = {"controller_mode": arguments.controller or ControllerMode.RULES.value}
+    values = {"controller_mode": arguments.controller}
     for argument, field, metadata_key in (
         ("scenario", "scenario", "scenario"),
         ("seed", "seed", "seed"),

@@ -487,6 +487,8 @@ def test_provider_budget_failure_fails_closed_and_is_recorded_without_stopping_m
     assert failures[0]["consequence"]["provider"] == "captain"
     assert failures[0]["consequence"]["code"] == "budget_exhausted"
     assert result.evaluation.metrics["invalid_actions"] == 0
+    assert not any(record["event_type"] == "captain_decision" for record in result.events)
+    assert not any(record["event_type"] == "action" for record in result.events)
 
 
 def test_event_sink_receives_same_ordered_event_records_as_the_result():
