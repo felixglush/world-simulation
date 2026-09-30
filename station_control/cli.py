@@ -29,7 +29,7 @@ from .providers import (
     OpenRouterCaptainProvider,
 )
 from .scenario_library import list_scenarios, load_library_scenario, load_scenario
-from .scenarios import ScenarioFamily, scenario_definition_from_dict
+from .scenarios import ScenarioFamily, compose_scenarios, scenario_definition_from_dict
 
 LIVE_CONTROLLERS = {ControllerMode.LLM.value, ControllerMode.JEV_LLM.value}
 
@@ -45,6 +45,16 @@ def _positive_integer(value: str) -> int:
         raise argparse.ArgumentTypeError("must be an integer") from error
     if parsed < 1:
         raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
+
+
+def _nonnegative_integer(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be an integer") from error
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be a nonnegative integer")
     return parsed
 
 
@@ -66,15 +76,24 @@ def _add_config_options(parser: argparse.ArgumentParser, *, rerun: bool = False)
     scenario_options = parser.add_mutually_exclusive_group()
     scenario_options.add_argument(
         "--scenario",
+        action="append",
         default=None,
         metavar="NAME",
-        help="Legacy scenario family or YAML scenario-library ID.",
+        help="Legacy scenario family or YAML scenario-library ID; repeat YAML IDs to compose.",
     )
     scenario_options.add_argument(
         "--scenario-file",
+        action="append",
         type=Path,
+        default=None,
         metavar="PATH",
-        help="Run a validated custom scenario from a YAML file.",
+        help="Run a validated custom YAML scenario; repeat paths to compose.",
+    )
+    parser.add_argument(
+        "--scenario-spacing",
+        type=_nonnegative_integer,
+        default=None,
+        help="Offset each selected scenario's event turns by this amount (default: 0).",
     )
     parser.add_argument("--seed", type=int, default=defaults.get("seed"), help="Replayable seed.")
     parser.add_argument(
@@ -219,20 +238,49 @@ def _run_config(
     defaults = saved or mission_metadata(MissionConfig())
     values = {"controller_mode": arguments.controller}
     scenario_definition = None
-    if arguments.scenario_file is not None:
-        try:
-            scenario_definition = load_scenario(arguments.scenario_file)
-        except OSError:
-            raise CLIError(f"Cannot read scenario file: {arguments.scenario_file}") from None
+    selected_names = arguments.scenario or []
+    selected_files = arguments.scenario_file or []
+    selected_count = len(selected_names) + len(selected_files)
+    if arguments.scenario_spacing is not None and selected_count < 2:
+        raise CLIError("--scenario-spacing requires multiple explicit scenario selectors.")
+
+    if selected_count > 1:
+        if selected_files:
+            try:
+                definitions = [load_scenario(path) for path in selected_files]
+            except OSError as error:
+                raise CLIError(f"Cannot read scenario file: {error}") from None
+        else:
+            legacy_names = {family.value for family in ScenarioFamily}
+            if any(name in legacy_names for name in selected_names):
+                raise CLIError(
+                    "Multiple scenario selection can compose YAML library IDs or files; "
+                    "legacy families are supported singly."
+                )
+            definitions = []
+            for name in selected_names:
+                try:
+                    definitions.append(load_library_scenario(name))
+                except KeyError:
+                    raise CLIError(f"Unknown scenario: {name!r}") from None
+        scenario_definition = compose_scenarios(
+            definitions, spacing=arguments.scenario_spacing or 0
+        )
         scenario = scenario_definition.id
-    elif arguments.scenario is not None:
+    elif selected_files:
         try:
-            scenario = ScenarioFamily(arguments.scenario)
+            scenario_definition = load_scenario(selected_files[0])
+        except OSError:
+            raise CLIError(f"Cannot read scenario file: {selected_files[0]}") from None
+        scenario = scenario_definition.id
+    elif selected_names:
+        try:
+            scenario = ScenarioFamily(selected_names[0])
         except ValueError:
             try:
-                scenario_definition = load_library_scenario(arguments.scenario)
+                scenario_definition = load_library_scenario(selected_names[0])
             except KeyError:
-                raise CLIError(f"Unknown scenario: {arguments.scenario!r}") from None
+                raise CLIError(f"Unknown scenario: {selected_names[0]!r}") from None
             scenario = scenario_definition.id
     elif "scenario_definition" in defaults:
         snapshot = defaults["scenario_definition"]

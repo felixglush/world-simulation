@@ -38,7 +38,7 @@ UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control run
 
 For offline runs and rules benchmarks, select rules explicitly with `--controller rules`. These runs need no key or model budget and make no model requests.
 
-The original scenarios are `normal`, `leak`, `faulty_sensor`, and `misleading_report`. The [YAML scenario library](docs/scenarios.md) adds harder and deceptive missions; list them with `python -m station_control scenarios`, select an ID with `--scenario`, or load a custom file with `--scenario-file`. Each log stores the scenario, seed, simulator and controller configuration, instruction and rubric versions, model identifiers, per-turn observed evidence and decisions, consequences, debug state, and evaluation metrics.
+The original scenarios are `normal`, `leak`, `faulty_sensor`, and `misleading_report`. The [YAML scenario library](docs/scenarios.md) adds harder and deceptive missions; list them with `python -m station_control scenarios`, select an ID with `--scenario`, or load a custom file with `--scenario-file`. Repeat either selector to combine YAML scenarios in one shared station; `--scenario-spacing 8` staggers successive event schedules by eight turns. Each log stores the scenario, seed, simulator and controller configuration, instruction and rubric versions, model identifiers, per-turn observed evidence and decisions, consequences, debug state, and evaluation metrics.
 
 Replay validates a completed log and displays each turn's evidence, decision, consequence, and separate world-state debug view:
 

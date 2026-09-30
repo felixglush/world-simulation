@@ -36,6 +36,41 @@ scenario definition alongside its seed. Rerun uses that saved snapshot even if t
 file is edited or removed. An explicit scenario selection replaces the snapshot. A seed
 change re-resolves timing windows. Replay does not read the source YAML or contact models.
 
+## Combine scenarios in one mission
+
+Repeat `--scenario` to combine YAML library entries in one station:
+
+```bash
+uv run --frozen python -m station_control run \
+  --scenario false_authority --scenario partial_delivery --scenario correlated_sensors \
+  --scenario-spacing 8 --seed 101 --turns 48 \
+  --max-calls 120 --max-output-tokens-per-call 512
+```
+
+This starts the first scenario's events at their authored turns, shifts the second by
+8 turns and the third by 16. Omit `--scenario-spacing` to overlap their schedules.
+Repeat `--scenario-file` instead to combine custom YAML files. Named selection and file
+selection remain mutually exclusive. The four legacy families remain single-selection
+shortcuts; use the YAML library for combinations.
+
+All selected events act on the same station. Resources, repairs and incidents persist;
+there are no episode resets or independent copies of the life-support system. Starting
+settings are merged once in selection order: a later explicitly supplied field wins,
+while an omitted field does not overwrite an earlier setting. Those settings, including
+repair and delivery parameters, apply from mission start; spacing shifts events only.
+The merged configuration is validated, so conflicting settings that form an invalid
+world are rejected. Tied event times preserve selection order and each file's event order.
+
+The complete merged schedule and starting configuration are embedded in the log. Rerun
+therefore reproduces the combination without reopening its source files. A new seed
+re-resolves the retained timing windows. To change spacing on rerun, explicitly select
+the source scenarios again; an embedded merged snapshot cannot recover their boundaries.
+
+Choose enough turns for the selected schedules. Crew loss still ends the mission early.
+Events shifted beyond the simulator's 336-turn limit and overly large compositions are
+rejected rather than silently dropped. Combining all presets is possible within these
+bounds, but deliberate overlaps are more useful for understanding a failure.
+
 ## Included presets
 
 | IDs | Challenge |

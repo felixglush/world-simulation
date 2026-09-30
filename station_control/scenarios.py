@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from random import Random
 from types import MappingProxyType
-from typing import Mapping
+from typing import Iterable, Mapping
 
 from .domain import ScheduledEvent, SensorReading, StationState
 
@@ -256,6 +256,53 @@ def scenario_definition_to_dict(definition: ScenarioDefinition) -> dict[str, obj
         "initial": dict(definition.initial),
         "events": events,
     }
+
+
+def compose_scenarios(
+    definitions: Iterable[ScenarioDefinition], spacing: int = 0
+) -> ScenarioDefinition:
+    """Combine validated scenario sources into one starting state and event schedule."""
+    if type(spacing) is not int or spacing < 0:
+        raise ValueError("scenario spacing must be a nonnegative integer")
+    try:
+        sources = tuple(definitions)
+    except TypeError as error:
+        raise ValueError("definitions must be a sequence of scenario definitions") from error
+    if not sources:
+        raise ValueError("at least one scenario definition is required")
+
+    validated_sources = []
+    for source in sources:
+        if not isinstance(source, ScenarioDefinition):
+            raise ValueError("definitions must contain ScenarioDefinition values")
+        validated_sources.append(scenario_definition_from_dict(scenario_definition_to_dict(source)))
+
+    initial: dict[str, int] = {}
+    events: list[ScenarioEventSpec] = []
+    for index, source in enumerate(validated_sources):
+        initial.update(source.initial)
+        offset = index * spacing
+        for event in source.events:
+            turn = (
+                (event.turn[0] + offset, event.turn[1] + offset)
+                if isinstance(event.turn, tuple)
+                else event.turn + offset
+            )
+            events.append(replace(event, turn=turn))
+
+    description = "Composition: " + ", ".join(
+        f"{source.id}@+{index * spacing}" for index, source in enumerate(validated_sources)
+    )
+    if len(description) > _MAX_DESCRIPTION_LENGTH:
+        description = description[: _MAX_DESCRIPTION_LENGTH - 3] + "..."
+
+    composed = ScenarioDefinition(
+        id="composite",
+        description=description,
+        initial=initial,
+        events=tuple(events),
+    )
+    return scenario_definition_from_dict(scenario_definition_to_dict(composed))
 
 
 def create_configured_world(definition: ScenarioDefinition, seed: int) -> StationState:
