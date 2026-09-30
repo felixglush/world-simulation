@@ -1,0 +1,25 @@
+[project]
+name = "world-simulation"
+version = "0.1.0"
+description = "Station Control: deterministic world simulation and agent evaluation"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "openai>=3.22.1",
+    "typesafe-sdk>=0.7.2",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.9",
+]
