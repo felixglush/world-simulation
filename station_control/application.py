@@ -60,6 +60,7 @@ from .domain import (
     advance_turn,
     apply_action,
     observe,
+    world_transition,
 )
 from .evaluation import MissionEvaluation, evaluate_mission
 from .rules import RulesCaptain
@@ -72,7 +73,7 @@ from .scenarios import (
     scenario_definition_to_dict,
 )
 
-SIMULATOR_VERSION = "0.3.1"
+SIMULATOR_VERSION = "0.3.2"
 MAX_MISSION_TURNS = MAX_SCENARIO_TURNS
 MAX_INSPECTIONS_PER_TURN = 6
 
@@ -269,6 +270,12 @@ def run_mission(
             event_sink(deepcopy(record))
         return record
 
+    emit(
+        "world_initialized",
+        state.turn,
+        consequence={"visibility": "private", "state": asdict(state)},
+    )
+
     for _ in range(config.duration_turns):
         if not state.crew_alive:
             break
@@ -287,6 +294,19 @@ def run_mission(
         turn_result = advance_turn(state)
         state = turn_result.state
         states.append(state)
+
+        for transition in turn_result.transitions:
+            emit(
+                "world_transition",
+                state.turn,
+                consequence={"visibility": "private", **asdict(transition)},
+            )
+        emit(
+            "station_observation",
+            state.turn,
+            evidence=observe(state),
+            consequence={"visibility": "public"},
+        )
 
         for item in turn_result.evidence:
             public_history.append(item)
@@ -496,6 +516,14 @@ def _adversary_turn(
             "accepted": result.accepted,
             "rejection": result.rejection,
             "disruption_budget_remaining": max(0, disruption_budget_remaining - disruption_cost),
+        },
+    )
+    emit(
+        "world_transition",
+        state.turn,
+        consequence={
+            "visibility": "private",
+            **asdict(world_transition("adversary_action", state, result.state)),
         },
     )
     return result.state, disruption_cost, False
@@ -913,6 +941,14 @@ def _perform_action(
         evidence=result.evidence or incident.origin,
         decision=decision,
         consequence={"accepted": result.accepted, "rejection": result.rejection},
+    )
+    emit(
+        "world_transition",
+        state.turn,
+        consequence={
+            "visibility": "private",
+            **asdict(world_transition("captain_action", state, result.state)),
+        },
     )
     if result.accepted:
         delay = (

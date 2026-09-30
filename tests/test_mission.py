@@ -754,3 +754,42 @@ def test_custom_sensor_alert_wording_does_not_change_valid_closure():
     reworded = run("Sensor A needs an independent inspection.")
     assert standard.evaluation.metrics["unresolved_incidents"] == 0
     assert reworded.evaluation.metrics["unresolved_incidents"] == 0
+
+
+def test_audit_records_routine_phases_and_hidden_scheduled_events_without_leaking_to_captain():
+    definition = ScenarioDefinition(
+        id="audit_events",
+        description="Quiet sabotage and ordinary telemetry",
+        initial={},
+        events=(
+            ScenarioEventSpec(turn=1, kind="leak_start", message=""),
+            ScenarioEventSpec(turn=2, kind="report", message="Routine check requested"),
+        ),
+    )
+    captain = InspectingCaptain()
+    result = run_mission(
+        MissionConfig(
+            scenario="audit_events",
+            scenario_definition=definition,
+            duration_turns=3,
+            controller_mode=ControllerMode.LLM,
+        ),
+        captain=captain,
+    )
+    audit = [event for event in result.events if event["event_type"] == "world_transition"]
+    assert any(
+        event["consequence"]["scheduled_event"]["kind"] == "leak_start"
+        for event in audit
+        if event["consequence"].get("scheduled_event")
+    )
+    assert {event["consequence"]["phase"] for event in audit} >= {"oxygen", "sensors_and_crew"}
+    observations = [
+        event for event in result.events if event["event_type"] == "station_observation"
+    ]
+    assert len(observations) == result.turns_completed
+    assert captain.contexts
+    assert all(
+        not hasattr(evidence, "scheduled_event")
+        for context in captain.contexts
+        for evidence in context.evidence
+    )

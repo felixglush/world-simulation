@@ -270,3 +270,9 @@ Start with a small test. Before an action, record the result that the captain ex
 Later, a separate model could learn from saved missions. The captain could use it to compare action sequences before it chooses one. Test prediction accuracy, uncertainty, survival, resource use, and decision cost on separate missions. Compare these results with the current controller to measure the benefit.
 
 This research is optional. The first playable version does not require a learned world model.
+
+## Complete world audit
+
+Simulator `0.3.2` logs the initial authoritative state, each scheduled event (including events that suppress their public message), ordered world-phase changes, per-turn crew-visible station observations, and state changes from captain and adversary actions. Existing decision, rejection, provider-failure, incident, and public-evidence records remain available. Ordinary activity and sabotage are both recorded; these facts do not pre-classify intent for the crew.
+
+`world_initialized` and `world_transition` records have private visibility and belong to the audit/debug stream. They contain hidden world facts and must never become captain or Jev evidence. `station_observation` is public. The current providers still receive public evidence and station observations through their existing contracts; this change does not yet make Jev classify every event. Replay continues to accept earlier schema-1 logs; rerun requires the exact simulator version.

@@ -160,4 +160,6 @@ Docker check containers remove themselves with `--rm`. We have no background ser
 
 ## Structured evidence compatibility
 
-Simulator `0.3.1` records optional public evidence codes used by closure validation and the rules captain. Replay still accepts schema-1 logs without codes; rerun retains the existing exact simulator-version requirement. Verify wording-independent closure and rejection of deceptive report claims with `uv run --frozen pytest tests/test_mission.py tests/test_providers.py`.
+Simulator `0.3.2` records optional public evidence codes used by closure validation and the rules captain. Replay still accepts schema-1 logs without codes; rerun retains the existing exact simulator-version requirement. Verify wording-independent closure and rejection of deceptive report claims with `uv run --frozen pytest tests/test_mission.py tests/test_providers.py`.
+
+Full audit verification: `uv run --frozen pytest tests/test_mission.py tests/test_adversary.py tests/test_persistence.py tests/test_cli.py`. Private world-transition records must stay out of crew provider contexts.

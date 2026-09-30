@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from enum import StrEnum
 
 
@@ -74,6 +74,33 @@ class ActionResult:
 class TurnResult:
     state: StationState
     evidence: tuple[Evidence, ...]
+    transitions: tuple[WorldTransition, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class WorldTransition:
+    """Private audit facts; never a crew-facing evidence source."""
+
+    phase: str
+    changes: tuple[tuple[str, object, object], ...]
+    scheduled_event: ScheduledEvent | None = None
+
+
+def world_transition(
+    phase: str,
+    before: StationState,
+    after: StationState,
+    scheduled_event: ScheduledEvent | None = None,
+) -> WorldTransition:
+    return WorldTransition(
+        phase,
+        tuple(
+            (field.name, getattr(before, field.name), getattr(after, field.name))
+            for field in fields(before)
+            if getattr(before, field.name) != getattr(after, field.name)
+        ),
+        scheduled_event,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,13 +204,29 @@ def advance_turn(state: StationState) -> TurnResult:
     """Apply the world's ordered phases through one authoritative transition."""
     if not state.crew_alive:
         return TurnResult(state=state, evidence=())
-    updated, messages = _apply_scheduled_events(replace(state, turn=state.turn + 1))
-    updated, arrivals = _deliver_supplies(updated)
-    updated, oxygen_alerts = _update_oxygen(updated, previous_oxygen=state.oxygen)
-    updated, repairs = _advance_repairs(updated)
+    transitions: list[WorldTransition] = []
+    updated = replace(state, turn=state.turn + 1)
+    transitions.append(world_transition("turn_started", state, updated))
+    before = updated
+    updated, messages = _apply_scheduled_events(updated, transitions)
+    transitions.append(world_transition("scheduled_events", before, updated))
+    evidence: tuple[Evidence, ...] = ()
+    for phase, operation in (
+        ("deliveries", _deliver_supplies),
+        ("oxygen", lambda current: _update_oxygen(current, previous_oxygen=state.oxygen)),
+        ("repairs", _advance_repairs),
+    ):
+        before = updated
+        updated, emitted = operation(updated)
+        evidence += emitted
+        transitions.append(world_transition(phase, before, updated))
+    before = updated
     updated = _update_sensors_and_crew(updated)
+    transitions.append(world_transition("sensors_and_crew", before, updated))
+    before = updated
     updated, reports = _publish_scheduled_messages(updated, messages)
-    return TurnResult(updated, arrivals + oxygen_alerts + repairs + reports)
+    transitions.append(world_transition("scheduled_messages", before, updated))
+    return TurnResult(updated, evidence + reports, tuple(transitions))
 
 
 _ScheduledMessage = tuple[str, str | None, str, EvidenceCode | None]
@@ -191,6 +234,7 @@ _ScheduledMessage = tuple[str, str | None, str, EvidenceCode | None]
 
 def _apply_scheduled_events(
     state: StationState,
+    transitions: list[WorldTransition],
 ) -> tuple[StationState, list[_ScheduledMessage]]:
     next_state = state
     turn = state.turn
@@ -200,6 +244,7 @@ def _apply_scheduled_events(
         if event.turn != turn:
             remaining_events.append(event)
             continue
+        before = next_state
         if event.kind == "leak_start":
             next_state = replace(next_state, leak_active=True)
             _queue_scheduled_message(
@@ -364,6 +409,7 @@ def _apply_scheduled_events(
                 "report",
                 "Routine maintenance reports the oxygen system operating normally.",
             )
+        transitions.append(world_transition("scheduled_event", before, next_state, event))
     next_state = replace(next_state, scheduled_events=tuple(remaining_events))
     return next_state, scheduled_messages
 
