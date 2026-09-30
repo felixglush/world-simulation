@@ -1,6 +1,6 @@
 # Working on Station Control
 
-Read docs/station-control.md for the product contract and README.md for setup.
+Read README.md for the product contract. Setup and operating commands are below.
 
 For testing and test-first implementation, use the $tdd skill at .agents/skills/tdd/SKILL.md.
 For architecture design or review, use $clean-architecture at .agents/skills/clean-architecture/SKILL.md.

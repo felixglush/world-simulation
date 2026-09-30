@@ -244,7 +244,7 @@ Available features include the station simulation, original missions, 15 YAML pr
 
 Remaining work includes scenario answer keys, difficulty calibration, and live AI evaluation on separate test missions. Interactive player sabotage, graphical mission controls, custom generated adversary dialogue, and learned predictive world models remain future work. Offline tests do not establish live model compatibility or performance.
 
-See [AGENTS.md](AGENTS.md) for setup, run commands, and development checks. See [the detailed product document](docs/station-control.md) for the full mission examples.
+See [AGENTS.md](AGENTS.md) for setup, run commands, and development checks.
 
 Implementation and operating references:
 
