@@ -371,7 +371,14 @@ def run_mission(
                         incident, state.turn, config.duration_turns, emit, reason="provider_failure"
                     )
                     continue
-                if not isinstance(decision, CaptainDecision):
+                if (
+                    not isinstance(decision, CaptainDecision)
+                    or not isinstance(decision.action, ActionRequest)
+                    or not isinstance(decision.rationale, str)
+                    or not isinstance(decision.metadata, Mapping)
+                    or not isinstance(decision.action.evidence_sequences, tuple)
+                    or any(type(item) is not int for item in decision.action.evidence_sequences)
+                ):
                     _provider_failure(
                         emit,
                         "captain",

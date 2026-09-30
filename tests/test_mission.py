@@ -684,3 +684,36 @@ def test_event_sink_cannot_change_mission_history_or_evaluation():
     actual = run_mission(config, event_sink=modifying_sink)
     assert actual.events == expected.events
     assert actual.evaluation == expected.evaluation
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("action", None),
+        ("metadata", None),
+        ("rationale", None),
+        ("action", ActionRequest(ActionRequestKind.CLOSE, evidence_sequences=None)),
+        ("action", ActionRequest(ActionRequestKind.CLOSE, evidence_sequences=({},))),
+    ],
+)
+def test_malformed_captain_decision_is_recorded_and_followed_up(field, value):
+    from dataclasses import replace
+
+    class MalformedCaptain:
+        def decide(self, context):
+            proposal = CaptainDecision(ActionRequest(ActionRequestKind.INSPECT, "oxygen_system"))
+            return replace(proposal, **{field: value})
+
+    result = run_mission(
+        MissionConfig(duration_turns=6, controller_mode=ControllerMode.LLM),
+        captain=MalformedCaptain(),
+    )
+    failures = [event for event in result.events if event["event_type"] == "provider_failure"]
+    assert failures
+    assert all(event["consequence"]["code"] == "malformed_response" for event in failures)
+    assert not any(event["event_type"] == "action" for event in result.events)
+    assert any(
+        event["event_type"] == "follow_up_scheduled"
+        and event["consequence"]["reason"] == "provider_failure"
+        for event in result.events
+    )
