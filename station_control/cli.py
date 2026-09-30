@@ -27,10 +27,10 @@ from .application import (
     run_mission,
 )
 from .persistence import RunLogError, RunLogWriter, read_run_log, render_run_log
+from .provider_support import CallBudget
 from .providers import (
     DEFAULT_CAPTAIN_BASE_URL,
     DEFAULT_JEV_BASE_URL,
-    CallBudget,
     JevDispatchProvider,
     OpenRouterCaptainProvider,
 )

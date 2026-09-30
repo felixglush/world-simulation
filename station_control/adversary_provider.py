@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-import math
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 import httpx2
@@ -23,12 +22,17 @@ from .adversary import (
     AdversaryDecision,
 )
 from .controllers import ProviderError, ProviderErrorCode
-from .providers import CallBudget
+from .provider_support import (
+    DEFAULT_TIMEOUT_SECONDS,
+    MAX_ARGUMENT_CHARS,
+    CallBudget,
+    ensure_bounded,
+    measure_latency_ms,
+    reported_cost,
+    validate_configuration,
+)
 
 DEFAULT_ADVERSARY_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_TIMEOUT_SECONDS = 30.0
-MAX_INPUT_CHARS = 40_000
-MAX_ARGUMENT_CHARS = 12_000
 
 _CATALOG_BY_KIND = {item.kind: item for item in ADVERSARY_ACTION_CATALOG}
 _SYSTEM_PROMPT = "\n".join(
@@ -64,7 +68,7 @@ class OpenRouterAdversaryProvider:
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         http_client: httpx2.Client | None = None,
     ) -> None:
-        _validate_configuration(api_key, model, base_url, timeout, budget)
+        validate_configuration(api_key, model, base_url, timeout, budget)
         try:
             self._client = OpenAI(
                 api_key=api_key.strip(),
@@ -84,7 +88,7 @@ class OpenRouterAdversaryProvider:
             descriptors = _eligible_descriptors(context)
             payload = _context_payload(context)
             tools = [_tool_descriptor(action) for action in descriptors]
-            _ensure_bounded({"payload": payload, "tools": tools})
+            ensure_bounded({"payload": payload, "tools": tools})
             max_tokens = self._budget.consume()
         except ProviderError as error:
             raise ProviderError(
@@ -113,15 +117,19 @@ class OpenRouterAdversaryProvider:
         except APIResponseValidationError:
             raise ProviderError(
                 ProviderErrorCode.MALFORMED_RESPONSE,
-                _failure_metadata(self._model, request_made=True, latency_ms=_elapsed_ms(started)),
+                _failure_metadata(
+                    self._model, request_made=True, latency_ms=measure_latency_ms(started)
+                ),
             ) from None
         except Exception:
             raise ProviderError(
                 ProviderErrorCode.PROVIDER_UNAVAILABLE,
-                _failure_metadata(self._model, request_made=True, latency_ms=_elapsed_ms(started)),
+                _failure_metadata(
+                    self._model, request_made=True, latency_ms=measure_latency_ms(started)
+                ),
             ) from None
 
-        elapsed_ms = _elapsed_ms(started)
+        elapsed_ms = measure_latency_ms(started)
         try:
             return _decision(response, descriptors, max_tokens, elapsed_ms, self._timeout)
         except ProviderError as error:
@@ -137,24 +145,6 @@ class OpenRouterAdversaryProvider:
 
     def close(self) -> None:
         self._client.close()
-
-
-def _validate_configuration(
-    api_key: str,
-    model: str,
-    base_url: str,
-    timeout: float,
-    budget: CallBudget,
-) -> None:
-    if not all(isinstance(value, str) and value.strip() for value in (api_key, model, base_url)):
-        raise ProviderError(ProviderErrorCode.INVALID_INPUT)
-    if (
-        not isinstance(budget, CallBudget)
-        or type(timeout) not in (int, float)
-        or not math.isfinite(timeout)
-        or timeout <= 0
-    ):
-        raise ProviderError(ProviderErrorCode.INVALID_INPUT)
 
 
 def _eligible_descriptors(context: AdversaryContext) -> tuple[AdversaryActionDescriptor, ...]:
@@ -299,7 +289,7 @@ def _decision(
         "model": response.model,
         "input_tokens": _nonnegative_int(getattr(usage, "prompt_tokens", None)),
         "output_tokens": _nonnegative_int(getattr(usage, "completion_tokens", None)),
-        "cost_usd": _reported_cost(usage),
+        "cost_usd": reported_cost(usage),
         "latency_ms": elapsed_ms,
         "prompt_version": ADVERSARY_PROMPT_VERSION,
         "max_output_tokens": max_tokens,
@@ -323,25 +313,8 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def _ensure_bounded(value: object) -> None:
-    try:
-        serialized = json.dumps(value, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-    except (TypeError, ValueError):
-        raise ProviderError(ProviderErrorCode.INVALID_INPUT) from None
-    if len(serialized) > MAX_INPUT_CHARS:
-        raise ProviderError(ProviderErrorCode.INVALID_INPUT)
-
-
 def _nonnegative_int(value: object) -> int | None:
     return value if type(value) is int and value >= 0 else None
-
-
-def _reported_cost(usage: object) -> float | None:
-    extra = getattr(usage, "model_extra", None)
-    value = extra.get("cost") if isinstance(extra, Mapping) else getattr(usage, "cost", None)
-    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
-        return None
-    return float(value)
 
 
 def _failure_metadata(model: str, *, request_made: bool, latency_ms: float) -> dict[str, object]:
@@ -353,7 +326,3 @@ def _failure_metadata(model: str, *, request_made: bool, latency_ms: float) -> d
         "latency_ms": latency_ms,
         "prompt_version": ADVERSARY_PROMPT_VERSION,
     }
-
-
-def _elapsed_ms(started: float) -> float:
-    return round((time.perf_counter() - started) * 1000, 3)
