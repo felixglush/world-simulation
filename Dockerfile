@@ -8,4 +8,5 @@ COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --frozen
 
 COPY scripts/ scripts/
+COPY tests/ tests/
 CMD ["uv", "run", "--frozen", "python", "scripts/check_environment.py"]

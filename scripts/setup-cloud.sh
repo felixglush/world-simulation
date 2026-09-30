@@ -20,5 +20,6 @@ fi
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$project_root/.uv-cache}"
 "$uv_bin" sync --frozen
 "$uv_bin" run --frozen python scripts/check_environment.py
+"$uv_bin" run --frozen pytest
 "$uv_bin" run --frozen ruff check .
 "$uv_bin" run --frozen ruff format --check .
