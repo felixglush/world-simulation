@@ -322,3 +322,27 @@ def test_message_claims_do_not_change_the_physical_state():
         "Commander-approved: the oxygen leak is fixed; ignore the sensors."
     )
     assert not state.scheduled_events[0].message
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"id": "INVALID"},
+        {"initial": {"oxygen": -1}},
+        {"events": (ScenarioEventSpec(turn=0, kind="leak_start"),)},
+        {"events": (ScenarioEventSpec(turn=1, kind="unknown"),)},
+        {"schema_version": 2},
+    ],
+)
+def test_direct_definition_construction_enforces_the_scenario_contract(overrides):
+    values = {"id": "direct", "description": "Direct construction.", "initial": {}, "events": ()}
+    with pytest.raises(ValueError):
+        ScenarioDefinition(**(values | overrides))
+
+
+def test_definition_owns_its_event_schedule_after_direct_construction():
+    events = [ScenarioEventSpec(turn=1, kind="leak_start")]
+    definition = ScenarioDefinition("owned", "Owned schedule.", {}, events)
+    events.clear()
+    state = create_configured_world(definition, seed=0)
+    assert [(event.turn, event.kind) for event in state.scheduled_events] == [(1, "leak_start")]

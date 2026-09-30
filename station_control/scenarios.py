@@ -40,7 +40,15 @@ class ScenarioDefinition:
     schema_version: int = 1
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "initial", MappingProxyType(dict(self.initial)))
+        if not isinstance(self.initial, Mapping):
+            raise ValueError("initial must be a mapping")
+        if not isinstance(self.events, (list, tuple)) or any(
+            not isinstance(event, ScenarioEventSpec) for event in self.events
+        ):
+            raise ValueError("events must contain ScenarioEventSpec values")
+        validated = _validated_definition_fields(scenario_definition_to_dict(self))
+        object.__setattr__(self, "initial", MappingProxyType(validated["initial"]))
+        object.__setattr__(self, "events", validated["events"])
 
 
 _MAX_TURN = 336
@@ -158,6 +166,11 @@ def create_world(family: ScenarioFamily | str, seed: int) -> StationState:
 
 def scenario_definition_from_dict(data: object) -> ScenarioDefinition:
     """Validate a YAML or saved-log mapping and return its typed definition."""
+    return ScenarioDefinition(**_validated_definition_fields(data))
+
+
+def _validated_definition_fields(data: object) -> dict[str, object]:
+    """Normalize scenario fields using the same contract for every construction path."""
     root = _mapping(data, "scenario")
     _require_fields(root, {"schema_version", "id", "description", "initial", "events"}, "scenario")
     version = root["schema_version"]
@@ -221,13 +234,13 @@ def scenario_definition_from_dict(data: object) -> ScenarioDefinition:
         raise ValueError(f"events must be a sequence of at most {_MAX_EVENTS} items")
     events = tuple(_event_from_value(value, index) for index, value in enumerate(raw_events))
 
-    return ScenarioDefinition(
-        id=scenario_id,
-        description=description,
-        initial=initial,
-        events=events,
-        schema_version=version,
-    )
+    return {
+        "id": scenario_id,
+        "description": description,
+        "initial": initial,
+        "events": events,
+        "schema_version": version,
+    }
 
 
 def scenario_definition_to_dict(definition: ScenarioDefinition) -> dict[str, object]:
@@ -275,7 +288,7 @@ def compose_scenarios(
     for source in sources:
         if not isinstance(source, ScenarioDefinition):
             raise ValueError("definitions must contain ScenarioDefinition values")
-        validated_sources.append(scenario_definition_from_dict(scenario_definition_to_dict(source)))
+        validated_sources.append(source)
 
     initial: dict[str, int] = {}
     events: list[ScenarioEventSpec] = []
@@ -302,14 +315,16 @@ def compose_scenarios(
         initial=initial,
         events=tuple(events),
     )
-    return scenario_definition_from_dict(scenario_definition_to_dict(composed))
+    return composed
 
 
 def create_configured_world(definition: ScenarioDefinition, seed: int) -> StationState:
     """Create a seeded world from validated settings and authored event order."""
     if type(seed) is not int:
         raise ValueError("Scenario seed must be an integer")
-    validated = scenario_definition_from_dict(scenario_definition_to_dict(definition))
+    if not isinstance(definition, ScenarioDefinition):
+        raise ValueError("definition must be a ScenarioDefinition")
+    validated = definition
     state = create_world(ScenarioFamily.NORMAL, seed)
     overrides = dict(validated.initial)
     oxygen = overrides.get("oxygen", state.oxygen)
