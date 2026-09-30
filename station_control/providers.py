@@ -480,7 +480,12 @@ def _captain_result(
     max_tokens: int,
     timeout_seconds: float,
 ) -> CaptainDecision:
-    if not isinstance(response.model, str) or not response.model.strip() or not response.choices:
+    if (
+        not isinstance(response.model, str)
+        or not response.model.strip()
+        or not isinstance(response.choices, Sequence)
+        or len(response.choices) != 1
+    ):
         raise ProviderError(ProviderErrorCode.MALFORMED_RESPONSE)
     message = response.choices[0].message
     calls = message.tool_calls
@@ -495,7 +500,7 @@ def _captain_result(
     if not isinstance(raw_arguments, str) or len(raw_arguments) > MAX_ARGUMENT_CHARS:
         raise ProviderError(ProviderErrorCode.MALFORMED_RESPONSE)
     try:
-        payload = json.loads(raw_arguments)
+        payload = json.loads(raw_arguments, object_pairs_hook=_unique_action_arguments)
     except (TypeError, ValueError):
         raise ProviderError(ProviderErrorCode.MALFORMED_RESPONSE) from None
     _validate_payload(payload, descriptor.json_schema)
@@ -527,6 +532,15 @@ def _captain_result(
     return CaptainDecision(
         action=action, rationale=rationale[:MAX_RATIONALE_CHARS], metadata=metadata
     )
+
+
+def _unique_action_arguments(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON argument")
+        result[key] = value
+    return result
 
 
 def _validate_payload(value: object, schema: Mapping[str, object]) -> None:
