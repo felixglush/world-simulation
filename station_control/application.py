@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from enum import Enum, StrEnum
 from typing import Callable, Mapping
 from uuid import uuid4
@@ -52,6 +52,7 @@ from .domain import (
     observe,
 )
 from .evaluation import MissionEvaluation, evaluate_mission
+from .rules import RulesCaptain
 from .scenarios import (
     ScenarioDefinition,
     ScenarioFamily,
@@ -219,6 +220,12 @@ def run_mission(
     if config.adversary_mode is AdversaryMode.LLM and adversary is None:
         raise ValueError("Adversary mode 'llm' requires an adversary provider")
 
+    decision_provider = (
+        RulesCaptain(config.duration_turns)
+        if config.controller_mode is ControllerMode.RULES
+        else captain
+    )
+    assert decision_provider is not None
     run_id = config.run_id or str(uuid4())
     state = (
         create_configured_world(config.scenario_definition, config.seed)
@@ -335,65 +342,63 @@ def run_mission(
                     )
                     continue
 
+            context = _captain_context(
+                incident,
+                station,
+                tuple(public_history),
+                config,
+                inspections_remaining=config.inspection_budget_per_turn - inspections_used,
+            )
             if config.controller_mode is ControllerMode.RULES:
-                decision = _rules_decision(incident, station, config.duration_turns)
-                rationale = "deterministic rules policy v1"
-                provider_metadata: Mapping[str, object] = {}
-            else:
-                assert captain is not None
-                context = _captain_context(
-                    incident,
-                    station,
-                    tuple(public_history),
-                    config,
-                    inspections_remaining=config.inspection_budget_per_turn - inspections_used,
+                # Preserve the baseline's incident-local history regardless of live evidence access.
+                context = replace(context, evidence=tuple(incident.related))
+            try:
+                decision = decision_provider.decide(context)
+            except ProviderError as error:
+                _provider_failure(
+                    emit, "captain", incident, state.turn, error.code.value, error.metadata
                 )
-                try:
-                    decision = captain.decide(context)
-                except ProviderError as error:
-                    _provider_failure(
-                        emit, "captain", incident, state.turn, error.code.value, error.metadata
-                    )
-                    _schedule_follow_up(
-                        incident, state.turn, config.duration_turns, emit, reason="provider_failure"
-                    )
-                    continue
-                except Exception:
-                    _provider_failure(
-                        emit,
-                        "captain",
-                        incident,
-                        state.turn,
-                        ProviderErrorCode.PROVIDER_UNAVAILABLE.value,
-                        {},
-                    )
-                    _schedule_follow_up(
-                        incident, state.turn, config.duration_turns, emit, reason="provider_failure"
-                    )
-                    continue
-                if (
-                    not isinstance(decision, CaptainDecision)
-                    or not isinstance(decision.action, ActionRequest)
-                    or not isinstance(decision.rationale, str)
-                    or not isinstance(decision.metadata, Mapping)
-                    or not isinstance(decision.action.evidence_sequences, tuple)
-                    or any(type(item) is not int for item in decision.action.evidence_sequences)
-                ):
-                    _provider_failure(
-                        emit,
-                        "captain",
-                        incident,
-                        state.turn,
-                        ProviderErrorCode.MALFORMED_RESPONSE.value,
-                        {},
-                    )
-                    _schedule_follow_up(
-                        incident, state.turn, config.duration_turns, emit, reason="provider_failure"
-                    )
-                    continue
-                rationale = decision.rationale
-                provider_metadata = decision.metadata
-                decision = decision.action
+                _schedule_follow_up(
+                    incident, state.turn, config.duration_turns, emit, reason="provider_failure"
+                )
+                continue
+            except Exception:
+                _provider_failure(
+                    emit,
+                    "captain",
+                    incident,
+                    state.turn,
+                    ProviderErrorCode.PROVIDER_UNAVAILABLE.value,
+                    {},
+                )
+                _schedule_follow_up(
+                    incident, state.turn, config.duration_turns, emit, reason="provider_failure"
+                )
+                continue
+            if (
+                not isinstance(decision, CaptainDecision)
+                or not isinstance(decision.action, ActionRequest)
+                or not isinstance(decision.rationale, str)
+                or not isinstance(decision.metadata, Mapping)
+                or not isinstance(decision.action.evidence_sequences, tuple)
+                or any(type(item) is not int for item in decision.action.evidence_sequences)
+            ):
+                _provider_failure(
+                    emit,
+                    "captain",
+                    incident,
+                    state.turn,
+                    ProviderErrorCode.MALFORMED_RESPONSE.value,
+                    {},
+                )
+                _schedule_follow_up(
+                    incident, state.turn, config.duration_turns, emit, reason="provider_failure"
+                )
+                continue
+            rationale = decision.rationale
+            provider_metadata = decision.metadata
+            decision = decision.action
+            if config.controller_mode is not ControllerMode.RULES:
                 emit(
                     "captain_decision",
                     state.turn,
@@ -401,7 +406,6 @@ def run_mission(
                     decision=_request_record(incident.id, decision, rationale, provider_metadata),
                     consequence={"accepted_as_proposal": True},
                 )
-
             state, inspection_attempted = _perform_action(
                 decision,
                 incident,
@@ -776,46 +780,6 @@ def _register_evidence(
                     decision={"incident_id": incident.id},
                     consequence={"status": "new_evidence"},
                 )
-
-
-def _rules_decision(incident: _Incident, station: StationView, duration: int) -> ActionRequest:
-    recent = incident.related[-1] if incident.related else incident.origin
-    if recent.kind == "repair_complete":
-        return ActionRequest(
-            ActionRequestKind.CLOSE,
-            reason="repair completion was recorded",
-            evidence_sequences=(recent.sequence,),
-        )
-    if recent.kind == "inspection":
-        message = recent.message.lower()
-        if "active oxygen leak" in message:
-            return ActionRequest(ActionRequestKind.ASSIGN_REPAIR, target="oxygen_system")
-        if "calibration fault" in message:
-            return ActionRequest(
-                ActionRequestKind.DEFER,
-                follow_up_turn=min(station.turn + 4, duration),
-            )
-        if "within calibration range" in message or "operating normally" in message:
-            return ActionRequest(
-                ActionRequestKind.CLOSE,
-                reason="inspection produced supporting evidence",
-                evidence_sequences=(recent.sequence,),
-            )
-    if recent.kind == "action" and "repair assigned" in recent.message.lower():
-        follow_up = min(station.turn + 1, duration)
-        if follow_up > station.turn:
-            return ActionRequest(ActionRequestKind.DEFER, follow_up_turn=follow_up)
-    combined = " ".join(item.message.lower() for item in incident.related)
-    if ("critical" in combined or "exhausted" in combined) and station.backup_oxygen > 0:
-        if not any("backup oxygen activated" in item.message.lower() for item in incident.related):
-            return ActionRequest(ActionRequestKind.ACTIVATE_BACKUP)
-    if (
-        len(station.oxygen_sensors) == 2
-        and station.oxygen_sensors[0].oxygen != station.oxygen_sensors[1].oxygen
-    ):
-        sensor = min(station.oxygen_sensors, key=lambda reading: reading.oxygen).sensor
-        return ActionRequest(ActionRequestKind.INSPECT, target=sensor)
-    return ActionRequest(ActionRequestKind.INSPECT, target="oxygen_system")
 
 
 def _perform_action(
