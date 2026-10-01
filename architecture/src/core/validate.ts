@@ -22,11 +22,11 @@ export function validateProject(project: ArchitectureProject) {
   )
     fail("invalid defaults");
   const ref = (r: SourceRef) => {
-    if (!d.sources[`${r.path}:${r.symbol}`])
+    if (!Object.hasOwn(d.sources, `${r.path}:${r.symbol}`))
       fail(`missing source ${r.path}:${r.symbol}`);
   };
   const contract = (name: string) => {
-    if (!d.contracts[name]) fail(`missing contract ${name}`);
+    if (!Object.hasOwn(d.contracts, name)) fail(`missing contract ${name}`);
     ref(d.contracts[name]);
   };
   const checkModes = (values?: string[]) =>
@@ -43,8 +43,9 @@ export function validateProject(project: ArchitectureProject) {
   d.connections.forEach((e) => {
     if (!components.has(e.source) || !components.has(e.target))
       fail(`broken connection ${e.id}`);
-    if (!d.messageKinds[e.kind]) fail(`unknown message kind ${e.kind}`);
-    contract(e.contract);
+    if (!Object.hasOwn(d.messageKinds, e.kind))
+      fail(`unknown message kind ${e.kind}`);
+    if (e.contract !== undefined) contract(e.contract);
     checkModes(e.modes);
   });
   d.views.forEach((v) =>

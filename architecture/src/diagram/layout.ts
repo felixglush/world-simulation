@@ -55,15 +55,15 @@ export async function layoutDiagram(
       children: items
         .filter((item) => item.service === service.id)
         .map((item) => ({
-          id: item.id,
+          id: `component:${item.id}`,
           width: CARD_WIDTH,
           height: CARD_HEIGHT,
         })),
     })),
     edges: links.map((link) => ({
-      id: link.id,
-      sources: [link.source],
-      targets: [link.target],
+      id: `connection:${link.id}`,
+      sources: [`component:${link.source}`],
+      targets: [`component:${link.target}`],
       labels: link.label
         ? [
             {
@@ -76,9 +76,9 @@ export async function layoutDiagram(
         : [],
     })),
   });
-  const positions: Record<string, Point> = {};
+  const positions: Record<string, Point> = Object.create(null);
   const boundaries: Record<string, Point & { width: number; height: number }> =
-    {};
+    Object.create(null);
   const offsets: Record<string, Point> = { "diagram-root": { x: 0, y: 0 } };
   const edges: ElkExtendedEdge[] = [];
   function flatten(node: ElkNode, offset: Point) {
@@ -90,12 +90,13 @@ export async function layoutDiagram(
         width: node.width!,
         height: node.height!,
       };
-    else if (node.id !== "diagram-root") positions[node.id] = point;
+    else if (node.id.startsWith("component:"))
+      positions[node.id.slice(10)] = point;
     edges.push(...(node.edges ?? []));
     node.children?.forEach((child) => flatten(child, point));
   }
   flatten(graph, { x: 0, y: 0 });
-  const routes: Record<string, DiagramRoute> = {};
+  const routes: Record<string, DiagramRoute> = Object.create(null);
   const ports: Record<string, DiagramPort[]> = Object.fromEntries(
     items.map((item) => [item.id, []]),
   );
@@ -140,7 +141,8 @@ export async function layoutDiagram(
         center = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
       }
     }
-    routes[edge.id] = {
+    const id = edge.id.slice(11);
+    routes[id] = {
       points,
       label:
         label?.x != null && label.y != null
@@ -150,9 +152,9 @@ export async function layoutDiagram(
             }
           : center,
     };
-    const link = links.find((link) => link.id === edge.id)!;
-    addPort(link.source, `out-${edge.id}`, "source", points[0]);
-    addPort(link.target, `in-${edge.id}`, "target", points[points.length - 1]);
+    const link = links.find((link) => link.id === id)!;
+    addPort(link.source, `out-${id}`, "source", points[0]);
+    addPort(link.target, `in-${id}`, "target", points[points.length - 1]);
   }
   return {
     positions,

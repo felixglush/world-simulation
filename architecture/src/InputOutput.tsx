@@ -30,14 +30,14 @@ export function InputOutput({
   );
   const recorded =
     componentId && run
-      ? project.replay?.recordedIO(componentId, run, cursor)
+      ? project.replay?.recordedIO?.(componentId, run, cursor)
       : undefined;
   return (
     <div className="io-inspector">
       <p className="lead">Input → component → output</p>
       <p className="muted">
-        Directed message contracts across all configured modes. Each connection
-        has its own schema; these are not a single function signature.
+        Directed connections across all configured modes. Schemas and examples
+        appear when supplied by the project.
       </p>
       {connection ? (
         <>
@@ -67,7 +67,7 @@ export function InputOutput({
                     {recorded.note}
                   </p>
                   <details>
-                    <summary>Recorded input · evidence/context</summary>
+                    <summary>Recorded input</summary>
                     <SourceBlock
                       code={format(recorded.input ?? null)}
                       language="json"
@@ -75,16 +75,16 @@ export function InputOutput({
                     />
                   </details>
                   <details>
-                    <summary>Recorded output · decision</summary>
+                    <summary>Recorded output</summary>
                     <SourceBlock
                       code={format(recorded.output ?? null)}
                       language="json"
-                      title="Recorded decision"
+                      title="Recorded output"
                     />
                   </details>
                 </>
               ) : (
-                <p>No recorded decision yet at this replay point.</p>
+                <p>No recorded input/output yet at this replay point.</p>
               )}
             </section>
           )}
@@ -107,7 +107,7 @@ export function InputOutput({
               {edges.map((edge) => (
                 <details className="io-contract" key={edge.id}>
                   <summary>
-                    <span>{edge.contract}</span>
+                    <span>{edge.contract ?? edge.label}</span>
                     <small>
                       {title === "Inputs"
                         ? `From ${byId[edge.source].title}`
@@ -133,33 +133,44 @@ export function InputOutput({
 }
 function Contract({ edge }: { edge: Connection }) {
   const { model, kindLabels, sourceFor, sourceUrl } = useProject();
-  const ref = model.contracts[edge.contract];
+  const ref =
+    edge.contract === undefined ? undefined : model.contracts[edge.contract];
   return (
     <div className="io-contract-body">
       <Badge variant="outline">{kindLabels[edge.kind]}</Badge>
       <p>{edge.description}</p>
-      <h4>Schema · {edge.contract}</h4>
-      <p className="muted">
-        Field types extracted from the backing definition.
-      </p>
-      <Fields reference={ref} />
-      <a
-        className="source-file"
-        href={sourceUrl(sourceFor(ref))}
-        target="_blank"
-        rel="noreferrer"
-      >
-        {ref.symbol} definition <ExternalLink size={13} />
-      </a>
-      <h4>Example</h4>
-      <p className="muted">
-        Illustrative selected fields, not a complete serialized instance.
-      </p>
-      <SourceBlock
-        code={format(edge.example)}
-        language="json"
-        title={`${edge.contract} example`}
-      />
+      {ref ? (
+        <>
+          <h4>Schema · {edge.contract}</h4>
+          <p className="muted">
+            Field types extracted from the backing definition.
+          </p>
+          <Fields reference={ref} />
+          <a
+            className="source-file"
+            href={sourceUrl(sourceFor(ref))}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {ref.symbol} definition <ExternalLink size={13} />
+          </a>
+        </>
+      ) : (
+        <p className="muted">No schema provided for this connection.</p>
+      )}
+      {edge.example !== undefined && (
+        <>
+          <h4>Example</h4>
+          <p className="muted">
+            Illustrative selected fields, not a complete serialized instance.
+          </p>
+          <SourceBlock
+            code={format(edge.example)}
+            language="json"
+            title={`${edge.contract ?? edge.label} example`}
+          />
+        </>
+      )}
     </div>
   );
 }

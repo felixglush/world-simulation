@@ -17,7 +17,7 @@ make them reusable. This refactor makes the project-specific boundary explicit.
 
 ```mermaid
 flowchart LR
-  Extraction[Code analysis or future skill] --> Document[ArchitectureDocument v1]
+  Extraction[Codex or Claude skill] --> Document[ArchitectureDocument v1]
   Logs[Project logs] --> Adapter[Project replay adapter]
   Adapter --> Replay[Normalized replay events and projections]
   Document --> Host[Composition root]
@@ -43,11 +43,13 @@ renderer with both projects and with no replay adapter.
 ## Add a project
 
 1. Create an `ArchitectureDocument` with `schemaVersion: 1`: components, services,
-   directed connections, source definitions, field schemas, message kinds, views,
-   modes, and defaults. IDs are local to that document. Source URLs are optional.
+   directed connections, source definitions, optional field schemas, connection kinds, views,
+   modes, and defaults. IDs are local to each document namespace. Source URLs and connection
+   contracts/examples are optional; calls and dependencies need no payload schema.
 2. Pass `{ document }` as `App`'s `project` prop. No replay data is necessary.
 3. If recorded execution exists, implement `ReplayAdapter`. Supply normalized
-   runs/events, labels, defaults, `snapshot`, `metrics`, and `recordedIO`.
+   runs/events, labels, and defaults. `snapshot`, `metrics`, and `recordedIO`
+   are optional: omit unavailable evidence rather than fabricating it.
    `recordedIO` returns `undefined` when unsupported, `null` before a record exists,
    or an input/output pair with provenance. Import/export are optional capabilities.
 4. Put raw log parsing, filtering, state reconstruction, and domain classifications
@@ -67,15 +69,18 @@ other languages render as plain text. `SourceBlock` is the presentation boundary
 for adding more offline grammars.
 
 Try `/` for Station Control, `/?project=example` for the job queue, and
-`/?project=static-example` for architecture without recorded execution.
+`/?project=static-example` for architecture without recorded execution, and
+`/?project=http-example` for a Go HTTP handler with an explicitly illustrative
+flow, no message schema, and no state/metrics/I/O projections.
 
 ## What remains before packaging a generic skill/plugin
 
 This is a reusable renderer and adapter contract, not an automatic analyzer for
 arbitrary repositories. `scripts/generate.py` is still the Station Control Python
-extractor and fixture generator. A future skill must analyze a repository, establish
+extractor and fixture generator. The repository skill at `.agents/skills/architecture-explorer/SKILL.md` guides
+Codex or Claude agents to analyze a repository, establish
 source/provenance references, generate a validated document, and decide whether a
-runtime adapter is possible. Project adapters are trusted application code; the
+runtime adapter is possible. It is an agent workflow, not a language parser. Project adapters are trusted application code; the
 current validator checks internal consistency, not arbitrary untrusted JSON shapes.
 
 Remaining product work includes language-specific extraction, a distribution/host

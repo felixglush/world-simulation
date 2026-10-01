@@ -379,7 +379,7 @@ test("component I/O shows directional schemas, examples, and cursor-bounded reco
     .getByRole("button", { name: "Inspect Jev classifier", exact: true })
     .click();
   await inspector.getByRole("tab", { name: "I/O", exact: true }).click();
-  await expect(inspector).toContainText("No recorded decision yet");
+  await expect(inspector).toContainText("No recorded input/output yet");
   const dispatch = events.findIndex((r: any) => r.event_type === "dispatch");
   await page
     .getByRole("slider", { name: "Run progress" })
@@ -400,6 +400,6 @@ test("component I/O shows directional schemas, examples, and cursor-bounded reco
     .click();
   await expect(recorded).toContainText("scripted-demo-jev");
   await page.getByRole("slider", { name: "Run progress" }).fill("0");
-  await expect(recorded).toContainText("No recorded decision yet");
+  await expect(recorded).toContainText("No recorded input/output yet");
   await expect(recorded.locator("pre")).toHaveCount(0);
 });

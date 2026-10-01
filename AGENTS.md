@@ -235,3 +235,13 @@ and offline bundling when changing the layout adapter.
 Opening the replay's Recorded message expands the bottom panel; closing it restores
 its compact height. Keep code readable and playback controls visible on desktop and
 mobile; verify the recorded-message case in `tests/presentation.spec.ts`.
+
+For agent-generated architecture overviews, use
+`.agents/skills/architecture-explorer/SKILL.md`. Codex/Claude agents produce the
+versioned document and project-specific replay adapter; the shared renderer must
+stay independent of their repository analysis. Connection schemas/examples and
+replay snapshots/metrics/I/O are optional capabilities. Preserve explicit evidence
+provenance, especially illustrative flows. The Go HTTP example at
+`?project=http-example` exercises event-only replay, schema-less calls, external
+components, and plaintext fallback; include `tests/reuse.spec.ts` when changing
+these contracts. Distribution to other agents is separate packaging work.

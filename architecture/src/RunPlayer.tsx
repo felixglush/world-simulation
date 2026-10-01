@@ -59,7 +59,7 @@ export function RunPlayer({
   );
   const previousDecision = decisionIndices.findLast((index) => index < cursor);
   const nextDecision = decisionIndices.find((index) => index > cursor);
-  const metrics = adapter.metrics(run, cursor);
+  const metrics = adapter.metrics?.(run, cursor);
   const indices = events
     .map((_, index) => index)
     .filter((index) =>
@@ -101,7 +101,7 @@ export function RunPlayer({
     if (!file) return;
     try {
       if (file.size > 5_000_000)
-        throw new Error("Use a JSONL run smaller than 5 MB.");
+        throw new Error("Use a run file smaller than 5 MB.");
       const imported = validateRun(
         project,
         adapter.import!.parse(await file.text(), file.name),
@@ -202,40 +202,42 @@ export function RunPlayer({
           {error}
         </div>
       )}
-      <div className="decision-navigation">
-        <span>Decision review</span>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={previousDecision == null}
-          onClick={() => {
-            setPlaying(false);
-            setCursor(previousDecision!);
-          }}
-        >
-          Previous decision
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={nextDecision == null}
-          onClick={() => {
-            setPlaying(false);
-            setCursor(nextDecision!);
-          }}
-        >
-          Next decision
-        </Button>
-        <label>
-          <input
-            type="checkbox"
-            checked={pauseAtDecisions}
-            onChange={(event) => setPauseAtDecisions(event.target.checked)}
-          />
-          Pause at decisions
-        </label>
-        <small>{adapter.labels.decisionHelp}</small>
-      </div>
+      {decisionIndices.length > 0 && (
+        <div className="decision-navigation">
+          <span>Decision review</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={previousDecision == null}
+            onClick={() => {
+              setPlaying(false);
+              setCursor(previousDecision!);
+            }}
+          >
+            Previous decision
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={nextDecision == null}
+            onClick={() => {
+              setPlaying(false);
+              setCursor(nextDecision!);
+            }}
+          >
+            Next decision
+          </Button>
+          <label>
+            <input
+              type="checkbox"
+              checked={pauseAtDecisions}
+              onChange={(event) => setPauseAtDecisions(event.target.checked)}
+            />
+            Pause at decisions
+          </label>
+          <small>{adapter.labels.decisionHelp}</small>
+        </div>
+      )}
       <div className="run-main">
         <div className="event-journal" hidden={!journalOpen}>
           <div className="journal-heading">
@@ -311,31 +313,33 @@ export function RunPlayer({
             <code>{format(event?.payload)}</code>
           </details>
         </div>
-        <div className="run-metrics">
-          <div className="journal-heading">
-            {metrics.title} <span>at this event</span>
-          </div>
-          {metrics.values.map(({ id, title, value, delta = 0 }) => (
-            <div className="metric" key={id}>
-              <span>{title}</span>
-              <strong data-testid={`metric-${id}`}>{value}</strong>
-              {delta !== 0 && (
-                <b className={delta < 0 ? "down" : "up"}>
-                  {delta > 0 ? "+" : ""}
-                  {delta}
-                </b>
-              )}
+        {metrics && (
+          <div className="run-metrics">
+            <div className="journal-heading">
+              {metrics.title} <span>at this event</span>
             </div>
-          ))}
-          <div className="run-flags">
-            {metrics.flags.map((flag, index) => (
-              <span key={index} className={flag.tone}>
-                {flag.label}
-              </span>
+            {metrics.values.map(({ id, title, value, delta = 0 }) => (
+              <div className="metric" key={id}>
+                <span>{title}</span>
+                <strong data-testid={`metric-${id}`}>{value}</strong>
+                {delta !== 0 && (
+                  <b className={delta < 0 ? "down" : "up"}>
+                    {delta > 0 ? "+" : ""}
+                    {delta}
+                  </b>
+                )}
+              </div>
             ))}
+            <div className="run-flags">
+              {metrics.flags.map((flag, index) => (
+                <span key={index} className={flag.tone}>
+                  {flag.label}
+                </span>
+              ))}
+            </div>
+            <small>{metrics.note}</small>
           </div>
-          <small>{metrics.note}</small>
-        </div>
+        )}
       </div>
       <div className="transport">
         <Button
