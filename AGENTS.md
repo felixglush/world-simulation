@@ -215,3 +215,12 @@ GitHub Pages deploys only `architecture/dist` through
 Verify `?run=<id>` links remain paused and navigable; never bundle private logs or
 credentials. PR builds validate without deploying. See `architecture/README.md`
 for the required GitHub Actions Pages setting and temporary bootstrap branch.
+
+Keep the canvas quiet: one graph, data-driven focus presets, optional implementation
+detail, a collapsed component browser, and one replay entry point. Maintain replay
+position when hiding/reopening; following must reveal actors outside the selected
+focus. Keep I/O, code, state, event journal, and payloads accessible on demand.
+The field-notebook presentation lives in `architecture/src/notebook.css`; controls
+are separated into `CanvasToolbar` and `ComponentBrowser`. Verify desktop/mobile,
+keyboard navigation, generic adapters, and `tests/presentation.spec.ts` when changing
+this layout. Preserve the separate README infographic style.

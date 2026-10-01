@@ -61,8 +61,19 @@ require a connection; browsing the bundled code does not.
 
 ## Explore and follow a run
 
-- Drag to pan, scroll to zoom, or use the fit/focus controls and minimap.
-- Choose a focused view or search for a component, Python symbol, or message.
+- Drag to pan, scroll to zoom, or use the fit/focus controls.
+- Use one canvas with four **Focus** presets: Everything, Crew response, World &
+  adversary, and Logging & evaluation. The old System map / All components split
+  is now **Display → Implementation details**.
+- Open **Find a component** (or press `/`) to search for a component, symbol, or
+  message. The browser closes after selection; the selected component is revealed
+  without changing your focus preset. Press Escape to close the browser/inspector.
+- **Display** contains controller mode, message labels, private flows, and replay
+  following. Labels are hidden until a connection is focused, or you enable them.
+- **Walk through a turn** opens the replay notebook. Hide/reopen preserves the run
+  and position. **Event journal** expands the full timeline; **Recorded message**
+  expands the payload. Following reveals actors outside the current focus preset.
+  The inspector opens only when you select a component or connection.
 - Click a component for its responsibilities and connections. **Code** opens actual
   Python definitions with line numbers; **State** shows state ownership, schemas, and
   values at the selected replay event. Click the code icon for direct source access.
@@ -161,3 +172,14 @@ A project supplies a versioned architecture document and an optional replay adap
 The TypeScript job-queue example at `/?project=example` exercises the same UI;
 `/?project=static-example` demonstrates operation without any runtime recordings.
 `npm run check` enforces the shared UI → contracts dependency boundary.
+
+## Presentation design
+
+Inspired by [PR Lens](https://prlens.dev/)'s diagram-first canvas and progressive
+inspection, with an original field-notebook treatment: warm paper, muted ink,
+serif section titles, numbered replay notes, and color concentrated on decisions.
+No remote fonts, assets, or PR Lens runtime are required. `CanvasToolbar` owns focus
+and display controls; `ComponentBrowser` owns the searchable drawer; `Graph` and
+`RunPlayer` retain rendering and replay responsibilities. `notebook.css` is the
+presentation skin over shared explorer controls. Project metadata marks optional
+infrastructure with `Component.detail: "implementation"`; shared UI uses no actor IDs.

@@ -5,7 +5,6 @@ import {
   EdgeLabelRenderer,
   Handle,
   MarkerType,
-  MiniMap,
   Position,
   ReactFlow,
   getSmoothStepPath,
@@ -163,8 +162,8 @@ const MessageEdge = memo((props: EdgeProps<Edge<WireData>>) => {
         path={path}
         markerEnd={props.markerEnd}
         style={{
-          stroke: colors[data!.message.kind],
-          strokeWidth: data?.active ? 3 : 1.65,
+          stroke: data?.active ? colors[data!.message.kind] : "#a8aaa4",
+          strokeWidth: data?.active ? 2.5 : 1.2,
           opacity: data?.dim ? 0.1 : 0.65,
           strokeDasharray: model.messageKinds[data!.message.kind].private
             ? "7 5"
@@ -181,7 +180,7 @@ const MessageEdge = memo((props: EdgeProps<Edge<WireData>>) => {
           <animateMotion dur="1.8s" repeatCount="indefinite" path={path} />
         </circle>
       )}
-      {data?.labels && (
+      {(data?.labels || data?.active) && (
         <EdgeLabelRenderer>
           <button
             className={`wire-label nodrag nopan ${data.active ? "is-active" : ""}`}
@@ -206,6 +205,7 @@ const edgeTypes = { message: MessageEdge };
 interface Props {
   decision: DecisionHighlight | null;
   view: string;
+  showDetails: boolean;
   mode: Mode;
   privateFlows: boolean;
   labels: boolean;
@@ -219,6 +219,7 @@ interface Props {
 export function Graph({
   decision,
   view,
+  showDetails,
   mode,
   privateFlows,
   labels,
@@ -236,7 +237,32 @@ export function Graph({
   const initialized = useNodesInitialized();
   const { zoom } = useViewport();
   const { nodes, edges } = useMemo(() => {
-    const components = visibleComponents(view, mode);
+    const revealed = new Set(follow ? activeNodes : []);
+    if (follow)
+      model.connections
+        .filter((e) => activeEdges.includes(e.id))
+        .forEach((e) => {
+          revealed.add(e.source);
+          revealed.add(e.target);
+        });
+    if (selected?.kind === "component") revealed.add(selected.id);
+    if (selected?.kind === "message")
+      model.connections
+        .filter((e) => e.id === selected.id)
+        .forEach((e) => {
+          revealed.add(e.source);
+          revealed.add(e.target);
+        });
+    const base = new Set(
+      visibleComponents(view, mode)
+        .filter((c) => showDetails || !c.detail)
+        .map((c) => c.id),
+    );
+    const components = model.components.filter(
+      (c) =>
+        (base.has(c.id) || revealed.has(c.id)) &&
+        (!c.modes || c.modes.includes(mode)),
+    );
     const services = model.services.filter((service) =>
       components.some((node) => node.service === service.id),
     );
@@ -277,16 +303,16 @@ export function Graph({
       graphNodes.push({
         id: `boundary-${service.id}`,
         type: "boundary",
-        position: { x: column * 324, y: 0 },
+        position: { x: column * 304, y: 0 },
         data: { ...service, external: service.external ?? false },
-        style: { width: 286, height: members.length * 155 + 88 },
+        style: { width: 268, height: members.length * 122 + 82 },
         selectable: false,
         draggable: false,
         focusable: false,
         zIndex: -1,
       });
       members.forEach((component, row) => {
-        const position = { x: column * 324 + 18, y: 76 + row * 155 };
+        const position = { x: column * 304 + 18, y: 72 + row * 122 };
         positions[component.id] = { ...position, column };
         graphNodes.push({
           id: component.id,
@@ -300,7 +326,7 @@ export function Graph({
             dim: focus && !focusNodes.has(component.id),
             onCode: (id: string) => onSelect("component", id, true),
           },
-          style: { width: 250 },
+          style: { width: 232 },
           ariaLabel: `Component ${component.title}`,
           draggable: false,
         });
@@ -312,7 +338,7 @@ export function Graph({
       const forward = to.column > from.column;
       const vertical = to.column === from.column;
       const bypass =
-        vertical && (from.y > to.y || Math.abs(from.y - to.y) > 160);
+        vertical && (from.y > to.y || Math.abs(from.y - to.y) > 130);
       return {
         id: message.id,
         type: "message",
@@ -329,7 +355,7 @@ export function Graph({
         },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          color: colors[message.kind],
+          color: focusEdges.has(message.id) ? colors[message.kind] : "#a8aaa4",
           width: 16,
           height: 16,
         },
@@ -340,6 +366,8 @@ export function Graph({
     return { nodes: graphNodes, edges: graphEdges };
   }, [
     view,
+    follow,
+    showDetails,
     mode,
     privateFlows,
     labels,
@@ -375,7 +403,7 @@ export function Graph({
       maxZoom: 1.15,
       duration: 350,
     });
-  }, [activeKey, follow, initialized, api]);
+  }, [activeKey, follow, initialized, view, showDetails, api]);
   const focusSelection = () => {
     const ids =
       selected?.kind === "component"
@@ -418,18 +446,7 @@ export function Graph({
         deleteKeyCode={null}
         proOptions={{ hideAttribution: true }}
       >
-        <Background gap={22} size={1} color="#c8d5df" />
-        <MiniMap
-          nodeColor={(node) =>
-            node.type === "boundary"
-              ? "#e8eff3"
-              : (byId[node.id]?.color ?? "#70b1c4")
-          }
-          nodeStrokeWidth={0}
-          pannable
-          zoomable
-          ariaLabel="Diagram minimap"
-        />
+        <Background gap={22} size={1} color="#d9d8ce" />
       </ReactFlow>
       <div className="canvas-controls">
         <button

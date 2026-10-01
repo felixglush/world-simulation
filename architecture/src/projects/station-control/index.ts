@@ -72,9 +72,12 @@ export const stationProject: ArchitectureProject = {
       { id: "llm", title: "AI captain only" },
       { id: "rules", title: "Rules baseline" },
     ],
-    defaults: { view: "crew", mode: "jev+llm", allView: "all" },
+    defaults: { view: "all", mode: "jev+llm", allView: "all" },
     components: runtime.model.components.map((c) => ({
       ...c,
+      detail: ["loop", "budget", "api"].includes(c.id)
+        ? ("implementation" as const)
+        : undefined,
       icon: c.icon === "captain" ? "user" : c.icon,
       ...(c.id === "jev"
         ? { modes: ["jev+llm"] }
@@ -121,7 +124,7 @@ export const stationProject: ArchitectureProject = {
       decisionHelp:
         "Malicious = disruptive action type · benign = wait · acceptance shown separately",
     },
-    defaults: { view: "overview", component: "world", cursor: 1 },
+    defaults: { view: "all", component: "world", cursor: 1 },
     import: {
       accept: ".jsonl,.ndjson,.json",
       label: "Load JSONL",
