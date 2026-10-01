@@ -29,33 +29,62 @@ import {
 import type { ArchitectureProject } from "./core/types";
 import type { DemoRun, MessageKind, Mode } from "./core/project";
 
-export default function App({ project }: { project: ArchitectureProject }) {
+export default function App({
+  project,
+  initialRunId,
+}: {
+  project: ArchitectureProject;
+  initialRunId?: string;
+}) {
   return (
     <ProjectProvider project={project}>
       <ReactFlowProvider>
-        <Explorer key={`${project.document.id}:${project.document.version}`} />
+        <Explorer
+          key={`${project.document.id}:${project.document.version}`}
+          initialRunId={initialRunId}
+        />
       </ReactFlowProvider>
     </ProjectProvider>
   );
 }
-function Explorer() {
+function Explorer({ initialRunId }: { initialRunId?: string }) {
   const { project, model, byId, kindLabels, visibleComponents } = useProject();
   const adapter = project.replay;
   const demoRuns = adapter?.runs ?? [];
+  const initialRun = demoRuns.find((run) => run.id === initialRunId);
   const canReplay = Boolean(adapter && demoRuns.length);
-  const [view, setView] = useState(model.defaults.view);
-  const [mode, setMode] = useState<Mode>(model.defaults.mode);
-  const [selected, setSelected] = useState<Selection | null>(null);
-  const [tab, setTab] = useState<InspectorTab>("overview");
+  const [view, setView] = useState(
+    initialRun ? adapter!.defaults.view : model.defaults.view,
+  );
+  const [mode, setMode] = useState<Mode>(
+    initialRun?.mode ?? model.defaults.mode,
+  );
+  const [selected, setSelected] = useState<Selection | null>(
+    initialRun && adapter?.defaults.component
+      ? { kind: "component", id: adapter.defaults.component }
+      : null,
+  );
+  const [tab, setTab] = useState<InspectorTab>(
+    initialRun ? "state" : "overview",
+  );
   const [query, setQuery] = useState("");
   const [privateFlows, setPrivateFlows] = useState(true);
   const [labels, setLabels] = useState(true);
   const [follow, setFollow] = useState(true);
   const [sidebar, setSidebar] = useState(false);
-  const [replay, setReplay] = useState(false);
+  const [replay, setReplay] = useState(Boolean(initialRun));
   const [runs, setRuns] = useState<DemoRun[]>(demoRuns);
-  const [run, setRun] = useState<DemoRun | undefined>(demoRuns[0]);
-  const [cursor, setCursor] = useState(0);
+  const [run, setRun] = useState<DemoRun | undefined>(
+    initialRun ?? demoRuns[0],
+  );
+  const [cursor, setCursor] = useState(
+    initialRun
+      ? Math.max(
+          0,
+          Math.min(adapter!.defaults.cursor, initialRun.events.length - 1),
+        )
+      : 0,
+  );
   const [playing, setPlaying] = useState(false);
   const search = useRef<HTMLInputElement>(null);
   const events = useMemo(() => eventsOf(run), [run]);
