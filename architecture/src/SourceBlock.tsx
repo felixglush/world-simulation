@@ -17,7 +17,7 @@ export function SourceBlock({
   "aria-label": label,
 }: {
   code: string;
-  language: "python" | "json";
+  language: string;
   title: string;
   className?: string;
   style?: CSSProperties;
@@ -28,7 +28,7 @@ export function SourceBlock({
     <CodeBlock
       code={code}
       language={language}
-      showLineNumbers={language === "python"}
+      showLineNumbers={language !== "json"}
       className={className}
       style={style}
       aria-label={label}
@@ -42,9 +42,7 @@ export function SourceBlock({
             {copyStatus}
           </span>
           <CodeBlockCopyButton
-            aria-label={
-              language === "python" ? "Copy source code" : "Copy JSON"
-            }
+            aria-label={language !== "json" ? "Copy source code" : "Copy JSON"}
             onCopy={() => setCopyStatus("Copied")}
             onError={() =>
               setCopyStatus("Copy unavailable; select the text to copy.")

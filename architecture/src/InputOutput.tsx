@@ -3,31 +3,25 @@ import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
 import { Fields } from "./ContractFields";
 import { SourceBlock } from "./SourceBlock";
-import { byId, format, kindLabels, model, sourceFor, sourceUrl } from "./model";
-import type { Connection, RunRecord } from "./model";
-
-const actorRecords: Record<string, string> = {
-  adversary: "adversary_decision",
-  jev: "dispatch",
-  captain: "captain_decision",
-  rules: "captain_decision",
-};
+import { useProject, format } from "./core/project";
+import type { Connection, DemoRun } from "./core/project";
 
 export function InputOutput({
   componentId,
   connection,
-  events,
+  run,
   cursor,
   replay,
   onSelect,
 }: {
   componentId?: string;
   connection?: Connection;
-  events: RunRecord[];
+  run?: DemoRun;
   cursor: number;
   replay: boolean;
   onSelect: (kind: "component" | "message", id: string) => void;
 }) {
+  const { project, model, byId } = useProject();
   const inputs = model.connections.filter(
     (edge) => edge.target === componentId,
   );
@@ -35,10 +29,8 @@ export function InputOutput({
     (edge) => edge.source === componentId,
   );
   const recorded =
-    componentId && actorRecords[componentId]
-      ? events
-          .slice(0, cursor + 1)
-          .findLast((event) => event.event_type === actorRecords[componentId])
+    componentId && run
+      ? project.replay?.recordedIO(componentId, run, cursor)
       : undefined;
   return (
     <div className="io-inspector">
@@ -58,7 +50,7 @@ export function InputOutput({
         </>
       ) : (
         <>
-          {replay && componentId && actorRecords[componentId] && (
+          {replay && recorded !== undefined && (
             <section
               aria-label="Recorded input and output"
               className="io-recording"
@@ -67,19 +59,17 @@ export function InputOutput({
               {recorded ? (
                 <>
                   <Badge variant="outline">
-                    Event {recorded.sequence} · turn {recorded.turn}
+                    Event {recorded.sequence} · {project.replay?.labels.tick}{" "}
+                    {recorded.tick}
                   </Badge>
                   <p className="muted">
-                    Latest decision at or before the selected event. Input is
-                    the evidence/context saved in the log, which may omit
-                    provider request fields. Output is the persisted decision
-                    shape; it may flatten the typed result or add audit
-                    identifiers.
+                    Latest record at or before the selected event.{" "}
+                    {recorded.note}
                   </p>
                   <details>
                     <summary>Recorded input · evidence/context</summary>
                     <SourceBlock
-                      code={format(recorded.evidence ?? null)}
+                      code={format(recorded.input ?? null)}
                       language="json"
                       title="Recorded input (may be partial)"
                     />
@@ -87,7 +77,7 @@ export function InputOutput({
                   <details>
                     <summary>Recorded output · decision</summary>
                     <SourceBlock
-                      code={format(recorded.decision ?? null)}
+                      code={format(recorded.output ?? null)}
                       language="json"
                       title="Recorded decision"
                     />
@@ -142,6 +132,7 @@ export function InputOutput({
   );
 }
 function Contract({ edge }: { edge: Connection }) {
+  const { model, kindLabels, sourceFor, sourceUrl } = useProject();
   const ref = model.contracts[edge.contract];
   return (
     <div className="io-contract-body">
@@ -149,7 +140,7 @@ function Contract({ edge }: { edge: Connection }) {
       <p>{edge.description}</p>
       <h4>Schema · {edge.contract}</h4>
       <p className="muted">
-        Python field types extracted from the backing definition.
+        Field types extracted from the backing definition.
       </p>
       <Fields reference={ref} />
       <a

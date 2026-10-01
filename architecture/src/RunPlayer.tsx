@@ -12,13 +12,14 @@ import {
   X,
 } from "lucide-react";
 import {
+  useProject,
   decisionHighlight,
+  decisionStyle,
   eventTrace,
   format,
-  parseRun,
-  worldAt,
-} from "./model";
-import type { DemoRun, RunRecord } from "./model";
+  validateRun,
+} from "./core/project";
+import type { DemoRun, RunRecord } from "./core/project";
 interface Props {
   run: DemoRun;
   runs: DemoRun[];
@@ -41,6 +42,8 @@ export function RunPlayer({
   setPlaying,
   onClose,
 }: Props) {
+  const { project } = useProject();
+  const adapter = project.replay!;
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
@@ -55,18 +58,13 @@ export function RunPlayer({
   );
   const previousDecision = decisionIndices.findLast((index) => index < cursor);
   const nextDecision = decisionIndices.find((index) => index > cursor);
-  const state = worldAt(events, cursor),
-    before = worldAt(events, cursor - 1);
+  const metrics = adapter.metrics(run, cursor);
   const indices = events
     .map((_, index) => index)
     .filter((index) =>
       filter === "decisions"
-        ? Boolean(decisionHighlight(events[index]))
-        : filter === "all" ||
-          events[index].event_type !== "world_transition" ||
-          ["scheduled_event", "oxygen", "repairs", "captain_action"].includes(
-            events[index].consequence?.phase,
-          ),
+        ? Boolean(events[index].decision)
+        : filter === "all" || events[index].keyEvent,
     );
   useEffect(() => {
     if (!playing) return;
@@ -103,7 +101,10 @@ export function RunPlayer({
     try {
       if (file.size > 5_000_000)
         throw new Error("Use a JSONL run smaller than 5 MB.");
-      const imported = parseRun(await file.text(), file.name);
+      const imported = validateRun(
+        project,
+        adapter.import!.parse(await file.text(), file.name),
+      );
       onRun(imported);
       setError("");
     } catch (error) {
@@ -114,25 +115,23 @@ export function RunPlayer({
     if (input.current) input.current.value = "";
   }
   function download() {
-    const blob = new Blob(
-      [run.records.map((record) => JSON.stringify(record)).join("\n") + "\n"],
-      { type: "application/x-ndjson" },
-    );
+    const exported = adapter.serialize!(run);
+    const blob = new Blob([exported.text], { type: exported.mimeType });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${run.id}.jsonl`;
+    link.download = exported.filename;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   return (
-    <section className="run-player" aria-label="Turn walkthrough">
+    <section className="run-player" aria-label={adapter.labels.region}>
       <div className="run-toolbar">
         <div className="run-label">
           <span className="live-dot" />
           <strong>Run player</strong>
           <Badge variant="outline" className="demo-badge">
-            {run.id.startsWith("import-") ? "Imported run" : "Scripted AI demo"}
+            {run.badge}
           </Badge>
         </div>
         <select
@@ -148,31 +147,35 @@ export function RunPlayer({
             </option>
           ))}
         </select>
-        <Button
-          variant="ghost"
-          className="text-button"
-          onClick={() => input.current?.click()}
-        >
-          <Upload size={15} />
-          Load JSONL
-        </Button>
+        {adapter.import && (
+          <Button
+            variant="ghost"
+            className="text-button"
+            onClick={() => input.current?.click()}
+          >
+            <Upload size={15} />
+            {adapter.import.label}
+          </Button>
+        )}
         <input
           type="file"
-          accept=".jsonl,.ndjson,.json"
+          accept={adapter.import?.accept}
           ref={input}
           onChange={(event) => void importFile(event.target.files?.[0])}
           aria-label="Import run file"
           hidden
         />
-        <Button
-          variant="ghost"
-          className="icon-button"
-          aria-label="Download this run"
-          title="Download this run"
-          onClick={download}
-        >
-          <Download size={17} />
-        </Button>
+        {adapter.serialize && (
+          <Button
+            variant="ghost"
+            className="icon-button"
+            aria-label="Download this run"
+            title="Download this run"
+            onClick={download}
+          >
+            <Download size={17} />
+          </Button>
+        )}
         <Button
           variant="ghost"
           className="icon-button"
@@ -219,10 +222,7 @@ export function RunPlayer({
           />
           Pause at decisions
         </label>
-        <small>
-          Malicious = disruptive action type · benign = wait · acceptance shown
-          separately
-        </small>
+        <small>{adapter.labels.decisionHelp}</small>
       </div>
       <div className="run-main">
         <div className="event-journal">
@@ -249,6 +249,7 @@ export function RunPlayer({
                   key={item.sequence}
                   className={`decision-row ${cursor === index ? "current" : ""}`}
                   data-decision={marker?.tone}
+                  style={decisionStyle(marker)}
                   aria-current={cursor === index ? "step" : undefined}
                   onClick={() => {
                     setPlaying(false);
@@ -261,7 +262,7 @@ export function RunPlayer({
                   <span>
                     <strong>{marker?.label ?? itemTrace.title}</strong>
                     <small>
-                      Turn {item.turn} · {item.event_type}
+                      {adapter.labels.tick} {item.tick} · {item.type}
                     </small>
                   </span>
                   <i
@@ -272,7 +273,11 @@ export function RunPlayer({
             })}
           </div>
         </div>
-        <div className="event-stage" data-decision={decision?.tone}>
+        <div
+          className="event-stage"
+          data-decision={decision?.tone}
+          style={decisionStyle(decision)}
+        >
           {decision && (
             <div className="decision-spotlight" role="status">
               <Badge variant="outline">{decision.label}</Badge>
@@ -280,61 +285,43 @@ export function RunPlayer({
             </div>
           )}
           <div className="event-kicker">
-            TURN {event?.turn ?? 0} <span>/ EVENT {event?.sequence ?? 0}</span>
+            {adapter.labels.tick.toUpperCase()} {event?.tick ?? 0}{" "}
+            <span>/ EVENT {event?.sequence ?? 0}</span>
             <b className={trace.private ? "private-badge" : "public-badge"}>
-              {trace.private
-                ? "Private audit fact"
-                : "Crew / application event"}
+              {trace.private ? adapter.labels.private : adapter.labels.public}
             </b>
           </div>
           <h3>{trace.title}</h3>
           <p>{trace.body}</p>
           <div className="event-payload">
             <span>Recorded message</span>
-            <code>
-              {format(event?.decision ?? event?.evidence ?? event?.consequence)}
-            </code>
+            <code>{format(event?.payload)}</code>
           </div>
         </div>
-        <div className="world-metrics">
+        <div className="run-metrics">
           <div className="journal-heading">
-            WORLD STATE <span>at this event</span>
+            {metrics.title} <span>at this event</span>
           </div>
-          {[
-            ["oxygen", "Oxygen"],
-            ["backup_oxygen", "Backup"],
-            ["parts", "Spare parts"],
-            ["repair_turns_remaining", "Repair turns"],
-          ].map(([key, title]) => {
-            const value = state[key],
-              delta =
-                typeof before[key] === "number" && typeof value === "number"
-                  ? value - before[key]
-                  : 0;
-            return (
-              <div className="metric" key={key}>
-                <span>{title}</span>
-                <strong data-testid={`metric-${key}`}>{value ?? "—"}</strong>
-                {delta !== 0 && (
-                  <b className={delta < 0 ? "down" : "up"}>
-                    {delta > 0 ? "+" : ""}
-                    {delta}
-                  </b>
-                )}
-              </div>
-            );
-          })}
-          <div className="world-flags">
-            <span className={state.leak_active ? "warning" : "healthy"}>
-              {state.leak_active ? "Leak active" : "No active leak"}
-            </span>
-            <span className={state.crew_alive ? "healthy" : "warning"}>
-              {state.crew_alive ? "Crew alive" : "Crew lost"}
-            </span>
+          {metrics.values.map(({ id, title, value, delta = 0 }) => (
+            <div className="metric" key={id}>
+              <span>{title}</span>
+              <strong data-testid={`metric-${id}`}>{value}</strong>
+              {delta !== 0 && (
+                <b className={delta < 0 ? "down" : "up"}>
+                  {delta > 0 ? "+" : ""}
+                  {delta}
+                </b>
+              )}
+            </div>
+          ))}
+          <div className="run-flags">
+            {metrics.flags.map((flag, index) => (
+              <span key={index} className={flag.tone}>
+                {flag.label}
+              </span>
+            ))}
           </div>
-          <small>
-            Audit perspective · crew AIs receive public projections only.
-          </small>
+          <small>{metrics.note}</small>
         </div>
       </div>
       <div className="transport">

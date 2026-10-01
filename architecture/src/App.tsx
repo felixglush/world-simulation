@@ -20,28 +20,31 @@ import { Inspector } from "./Inspector";
 import type { InspectorTab, Selection } from "./Inspector";
 import { RunPlayer } from "./RunPlayer";
 import {
-  byId,
-  demoRuns,
+  ProjectProvider,
+  useProject,
   eventTrace,
   decisionHighlight,
   eventsOf,
-  kindLabels,
-  model,
-  sourceIndex,
-  visibleComponents,
-} from "./model";
-import type { DemoRun, MessageKind, Mode } from "./model";
+} from "./core/project";
+import type { ArchitectureProject } from "./core/types";
+import type { DemoRun, MessageKind, Mode } from "./core/project";
 
-export default function App() {
+export default function App({ project }: { project: ArchitectureProject }) {
   return (
-    <ReactFlowProvider>
-      <Explorer />
-    </ReactFlowProvider>
+    <ProjectProvider project={project}>
+      <ReactFlowProvider>
+        <Explorer key={`${project.document.id}:${project.document.version}`} />
+      </ReactFlowProvider>
+    </ProjectProvider>
   );
 }
 function Explorer() {
-  const [view, setView] = useState("crew");
-  const [mode, setMode] = useState<Mode>("jev+llm");
+  const { project, model, byId, kindLabels, visibleComponents } = useProject();
+  const adapter = project.replay;
+  const demoRuns = adapter?.runs ?? [];
+  const canReplay = Boolean(adapter && demoRuns.length);
+  const [view, setView] = useState(model.defaults.view);
+  const [mode, setMode] = useState<Mode>(model.defaults.mode);
   const [selected, setSelected] = useState<Selection | null>(null);
   const [tab, setTab] = useState<InspectorTab>("overview");
   const [query, setQuery] = useState("");
@@ -51,7 +54,7 @@ function Explorer() {
   const [sidebar, setSidebar] = useState(false);
   const [replay, setReplay] = useState(false);
   const [runs, setRuns] = useState<DemoRun[]>(demoRuns);
-  const [run, setRun] = useState<DemoRun>(demoRuns[0]);
+  const [run, setRun] = useState<DemoRun | undefined>(demoRuns[0]);
   const [cursor, setCursor] = useState(0);
   const [playing, setPlaying] = useState(false);
   const search = useRef<HTMLInputElement>(null);
@@ -72,18 +75,23 @@ function Explorer() {
           : model.connections
               .filter((edge) => edge.id === id)
               .flatMap((edge) => [edge.source, edge.target]);
-      if (!replay && ids.includes("rules")) setMode("rules");
-      else if (!replay && ids.includes("jev")) setMode("jev+llm");
-      else if (!replay && ids.includes("captain") && mode === "rules")
-        setMode("llm");
+      const compatible = model.modes.find((m) =>
+        ids.every((id) => !byId[id].modes || byId[id].modes!.includes(m.id)),
+      );
+      if (
+        !replay &&
+        compatible &&
+        ids.some((id) => byId[id].modes && !byId[id].modes!.includes(mode))
+      )
+        setMode(compatible.id);
       if (
         ids.some(
           (id) => !visibleComponents(view, mode).some((node) => node.id === id),
         )
       )
-        setView("all");
+        setView(model.defaults.allView);
     },
-    [view, mode, replay],
+    [view, mode, replay, model, byId, visibleComponents],
   );
   const clear = useCallback(() => setSelected(null), []);
   useEffect(() => {
@@ -117,22 +125,34 @@ function Explorer() {
     return () => window.removeEventListener("keydown", handle);
   }, [replay, events.length]);
   function chooseRun(next: DemoRun) {
-    if (!runs.some((item) => item.id === next.id))
-      setRuns((list) => [...list, next]);
+    setRuns((list) =>
+      list.some((item) => item.id === next.id)
+        ? list.map((item) => (item.id === next.id ? next : item))
+        : [...list, next],
+    );
     setRun(next);
     setCursor(0);
     setPlaying(false);
-    setSelected({ kind: "component", id: "world" });
+    setSelected(
+      adapter?.defaults.component
+        ? { kind: "component", id: adapter.defaults.component }
+        : null,
+    );
     setTab("state");
-    const saved = next.records[0]?.metadata?.controller;
-    if (["jev+llm", "llm", "rules"].includes(saved)) setMode(saved);
+    if (next.mode) setMode(next.mode);
   }
   function startReplay() {
+    if (!adapter || !run) return;
     setReplay(true);
-    setView("overview");
-    setMode(run.records[0]?.metadata?.controller ?? "jev+llm");
-    setCursor(1);
-    setSelected({ kind: "component", id: "world" });
+    setPlaying(false);
+    setView(adapter.defaults.view);
+    setMode(run.mode ?? model.defaults.mode);
+    setCursor(Math.min(adapter.defaults.cursor, run.events.length - 1));
+    setSelected(
+      adapter.defaults.component
+        ? { kind: "component", id: adapter.defaults.component }
+        : null,
+    );
     setTab("state");
     setPrivateFlows(true);
     setSidebar(false);
@@ -159,24 +179,26 @@ function Explorer() {
             <Network size={25} />
           </span>
           <div>
-            <span>STATION CONTROL</span>
+            <span>{model.title}</span>
             <h1>Architecture explorer</h1>
           </div>
         </div>
         <div className="header-center">
           <span className="live-dot" />
-          Current implementation <code>v{sourceIndex.simulatorVersion}</code>
+          Current implementation <code>v{model.version}</code>
         </div>
-        <a
-          className="repository-link"
-          href="https://github.com/felixglush/world-simulation"
-          target="_blank"
-          rel="noreferrer"
-        >
-          <GitBranch size={16} />
-          Repository
-          <ExternalLink size={13} />
-        </a>
+        {model.repositoryUrl && (
+          <a
+            className="repository-link"
+            href={model.repositoryUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <GitBranch size={16} />
+            Repository
+            <ExternalLink size={13} />
+          </a>
+        )}
       </header>
       <div className="workspace-toolbar">
         <button
@@ -198,16 +220,20 @@ function Explorer() {
             <Compass size={16} />
             Architecture
           </button>
-          <button className={replay ? "selected" : ""} onClick={startReplay}>
+          <button
+            disabled={!canReplay}
+            className={replay ? "selected" : ""}
+            onClick={startReplay}
+          >
             <Play size={15} />
             Run replay
           </button>
         </div>
         <div className="toolbar-spacer" />
         <label className="mode-selector">
-          Controller
+          {model.modeLabel ?? "Configuration"}
           <select
-            aria-label="Controller mode"
+            aria-label={model.modeLabel ?? "Configuration"}
             value={mode}
             disabled={replay}
             onChange={(event) => {
@@ -215,14 +241,20 @@ function Explorer() {
               setSelected(null);
             }}
           >
-            <option value="jev+llm">Jev + AI captain</option>
-            <option value="llm">AI captain only</option>
-            <option value="rules">Rules baseline</option>
+            {model.modes.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.title}
+              </option>
+            ))}
           </select>
         </label>
-        <Button className="walkthrough-button" onClick={startReplay}>
+        <Button
+          disabled={!canReplay}
+          className="walkthrough-button"
+          onClick={startReplay}
+        >
           <Play size={14} />
-          Walk through a turn
+          {adapter?.labels.action ?? "No recorded runs"}
         </Button>
       </div>
       <div className="workspace">
@@ -298,7 +330,8 @@ function Explorer() {
                     {service.title}
                   </div>
                   {members.map((node) => {
-                    const Icon = icons[node.icon as keyof typeof icons];
+                    const Icon =
+                      icons[node.icon as keyof typeof icons] ?? Network;
                     return (
                       <button
                         key={node.id}
@@ -335,13 +368,7 @@ function Explorer() {
           </div>
           <div className="sidebar-footer">
             <LockKeyhole size={15} />
-            <p>
-              Logical service boundaries.
-              <br />
-              <strong>One Python process.</strong>
-              <br />
-              Only model calls cross HTTPS.
-            </p>
+            <p>{model.description}</p>
           </div>
         </nav>
         <main className="canvas-area">
@@ -398,7 +425,7 @@ function Explorer() {
           <div className="legend">
             {(Object.keys(kindLabels) as MessageKind[]).map((kind) => (
               <span key={kind}>
-                <i className={kind} />
+                <i style={{ background: model.messageKinds[kind].color }} />
                 {kindLabels[kind]}
               </span>
             ))}
@@ -422,7 +449,7 @@ function Explorer() {
           />
         )}
       </div>
-      {replay && (
+      {replay && run && adapter && (
         <RunPlayer
           run={run}
           runs={runs}

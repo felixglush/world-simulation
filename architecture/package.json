@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1 --port 4173",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
-    "check": "node scripts/check-model.ts",
+    "check": "node scripts/check-model.ts && node scripts/check-boundaries.ts",
     "test": "playwright test",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" src/model.json scripts/*.ts tests/*.ts *.ts *.html *.md",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" src/model.json scripts/*.ts tests/*.ts *.ts *.html *.md"
@@ -24,6 +24,7 @@
     "tailwind-merge": "3.7.0"
   },
   "devDependencies": {
+    "@babel/parser": "7.29.9",
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/react": "19.3.0",

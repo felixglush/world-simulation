@@ -1,6 +1,7 @@
-import { sourceFor } from "./model";
-import type { SourceRef } from "./model";
+import { useProject } from "./core/project";
+import type { SourceRef } from "./core/project";
 export function Fields({ reference }: { reference: SourceRef }) {
+  const { sourceFor } = useProject();
   const fields = sourceFor(reference).fields;
   return fields.length ? (
     <div className="contract-fields">
