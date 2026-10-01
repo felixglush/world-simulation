@@ -197,10 +197,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
     commands.add_parser("scenarios", help="List legacy and YAML scenario definitions.")
 
-    trade_parser = commands.add_parser(
-        "trade", help="Run the offline trade and delayed-defect story."
-    )
+    trade_parser = commands.add_parser("trade", help="Run a trade, economy, or deception story.")
     trade_parser.add_argument("--turns", type=_bounded_integer(1, MAX_MISSION_TURNS), default=20)
+    trade_parser.add_argument(
+        "--controller",
+        choices=(
+            ControllerMode.RULES.value,
+            ControllerMode.LLM.value,
+            ControllerMode.JEV_LLM.value,
+        ),
+        default=ControllerMode.RULES.value,
+        help="Deception-story crew controller (default: rules).",
+    )
     trade_modes = trade_parser.add_mutually_exclusive_group()
     trade_modes.add_argument(
         "--economy",
@@ -211,13 +219,35 @@ def _build_parser() -> argparse.ArgumentParser:
     trade_modes.add_argument(
         "--deception",
         choices=("supply_chain", "incomplete_repair", "resource_diversion", "benign"),
-        help="Run an offline deception story with scoped investigations.",
+        help="Run a deception story with scoped investigations.",
     )
     trade_parser.add_argument(
         "--policy",
         choices=("investigate", "trust"),
         default="investigate",
         help="Deception policy: evidence-driven investigation or unsafe scripted baseline.",
+    )
+    trade_parser.add_argument(
+        "--max-calls",
+        type=_positive_integer,
+        help="Required finite call budget shared by the live crew providers.",
+    )
+    trade_parser.add_argument(
+        "--max-output-tokens-per-call",
+        type=_positive_integer,
+        help="Required response limit for live captain calls.",
+    )
+    trade_parser.add_argument(
+        "--captain-model",
+        type=_nonblank_model,
+        metavar="MODEL",
+        help="Captain model; overrides CAPTAIN_MODEL for this run.",
+    )
+    trade_parser.add_argument(
+        "--jev-model",
+        type=_nonblank_model,
+        metavar="MODEL",
+        help="Jev model; overrides JEV_MODEL for this run.",
     )
 
     replay_parser = commands.add_parser("replay", help="Validate and display a saved mission log.")
@@ -554,6 +584,41 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_trade_story,
                 trade_story_summary,
             )
+
+            if arguments.controller in LIVE_CONTROLLERS:
+                if arguments.deception is None or arguments.economy:
+                    raise CLIError(
+                        "Live crew control requires --deception and cannot be used with --economy."
+                    )
+                if arguments.policy != "investigate":
+                    raise CLIError("Live crew control requires --policy investigate.")
+                from .deception_mission import (
+                    create_deception_simulation,
+                    deception_story_summary,
+                )
+
+                settings = _read_live_settings(arguments, arguments.controller)
+                captain = dispatcher = None
+                try:
+                    captain, dispatcher = _make_providers(arguments.controller, settings)
+                    result = create_deception_simulation(
+                        arguments.deception,
+                        policy="crew",
+                        captain=captain,
+                        dispatcher=dispatcher,
+                    ).run(turns=arguments.turns)
+                    summary = deception_story_summary(
+                        result,
+                        story=arguments.deception,
+                        policy="crew",
+                        controller=arguments.controller,
+                        models=settings["models"],
+                        call_budget=settings["budget"],
+                    )
+                finally:
+                    _close_providers(captain, dispatcher)
+                print(json.dumps(summary, sort_keys=True))
+                return 0
 
             if arguments.deception is not None:
                 from .deception_mission import deception_story_summary, run_deception_story

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, replace
 from typing import Callable
 
+from .crew_governor import CrewGovernor, CrewReview
 from .governors import GovernorPolicy, TradeCommand
 from .scenarios import create_world
 from .trade import (
@@ -36,6 +37,7 @@ class TradeMissionResult:
     state: WorldState
     events: tuple[TradeEvidence, ...]
     decisions: tuple[GovernorDecision, ...]
+    crew_reviews: tuple[CrewReview, ...] = ()
 
 
 def run_trade_mission(
@@ -53,6 +55,9 @@ def run_trade_mission(
         raise ValueError("Each world must have one governor")
     if len({id(policy) for _, policy in governors}) != len(governors):
         raise ValueError("Each world must have an independent governor instance")
+    crew_governors = tuple(policy for _, policy in governors if isinstance(policy, CrewGovernor))
+    for policy in crew_governors:
+        policy.drain_reviews()
     from .deception import trace_report
     from .quality import assay_batch, consume_feedstock
     from .sensors import calibrate_sensors
@@ -74,14 +79,14 @@ def run_trade_mission(
         proposals = []
         for world_id, policy, snapshot in snapshots:
             try:
-                proposals.append((world_id, policy.decide(snapshot)))
+                proposals.append((world_id, policy, policy.decide(snapshot)))
             except Exception:
                 decisions.append(
                     GovernorDecision(
                         state.station.turn, world_id, None, False, "governor_unavailable"
                     )
                 )
-        for world_id, command in proposals:
+        for world_id, policy, command in proposals:
             if command is None:
                 continue
             if not isinstance(command, TradeCommand):
@@ -170,7 +175,10 @@ def run_trade_mission(
                     state.station.turn, world_id, command, result.accepted, result.rejection
                 )
             )
-    return TradeMissionResult(state, tuple(events), tuple(decisions))
+            if isinstance(policy, CrewGovernor):
+                policy.observe_action_result(observe_world(state, world_id))
+    crew_reviews = tuple(review for policy in crew_governors for review in policy.drain_reviews())
+    return TradeMissionResult(state, tuple(events), tuple(decisions), crew_reviews)
 
 
 def run_trade_story(*, turns: int = 20) -> TradeMissionResult:
@@ -196,8 +204,9 @@ def run_trade_story(*, turns: int = 20) -> TradeMissionResult:
 
 def trade_story_summary(result: TradeMissionResult) -> dict[str, object]:
     return {
-        "controller": "scripted",
-        "model_calls": 0,
+        "controller": "crew" if result.crew_reviews else "scripted",
+        "model_calls": sum(review.model_calls for review in result.crew_reviews),
+        "crew_reviews": [asdict(review) for review in result.crew_reviews],
         "turns_completed": result.state.station.turn,
         "crew_alive": result.state.station.crew_alive,
         "repairs_completed": result.state.station.repairs_completed,

@@ -66,6 +66,20 @@ uv run --frozen python -m station_control trade --deception resource_diversion -
 
 Deception stories use the `investigate` policy by default. Use `--policy trust` to compare against a deliberately unsafe purchase-and-repair sequence. Run for 40 turns to include investigation, replacement, and later recurrence checks. The `trade` command prints a JSON summary with public evidence, decisions, and ledger-based measures. Saved mission logs, replay, and rerun use the `run`, `replay`, and `rerun` commands described below.
 
+For an AI crew, select `--controller llm` for the captain or `--controller jev+llm` for Jev and the captain; `rules` remains the default. Live crew control requires a deception story with the `investigate` policy, an `OPENROUTER_API_KEY`, model IDs, a finite shared call budget, and a captain output-token limit. The summary records resolved model IDs and budget without the credential.
+
+Run from the repository root:
+
+```bash
+export OPENROUTER_API_KEY=...
+uv run --frozen python -m station_control trade --deception supply_chain \
+  --controller jev+llm --captain-model "<captain-model-id>" \
+  --jev-model typesafe/jev-1.13 --max-calls 120 \
+  --max-output-tokens-per-call 512 --turns 40
+```
+
+Facade-based callers can register the same providers with `create_decision_system("station", kind="crew", captain=..., dispatcher=..., history_limit=..., escalation_threshold=...)`. Crew decisions are available for the station world.
+
 ## Roles and access to information
 
 | Role | Responsibility | Information available |

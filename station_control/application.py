@@ -40,7 +40,6 @@ from .controllers import (
     CaptainDecision,
     CaptainProvider,
     DispatchContext,
-    DispatchJudgment,
     DispatchProvider,
     NoulOutcome,
     ProviderError,
@@ -50,6 +49,7 @@ from .controllers import (
     StationView,
     Subsystem,
     WorkflowEvidence,
+    dispatch_requires_review,
 )
 from .domain import (
     Action,
@@ -731,18 +731,19 @@ def _screen_events(
     )
     try:
         judgment = dispatcher.classify(context)
-        if (
-            not isinstance(judgment, DispatchJudgment)
-            or not isinstance(judgment.rationale, str)
-            or not isinstance(judgment.metadata, Mapping)
-        ):
-            raise ValueError("malformed dispatch result")
+        routed = dispatch_requires_review(
+            judgment,
+            has_alert=any(
+                json.loads(event.payload)["evidence"].get("kind") == "alert"
+                for event in context.events
+                if isinstance(json.loads(event.payload)["evidence"], dict)
+            ),
+            escalation_threshold=config.escalation_threshold,
+        )
         subsystem = Subsystem(judgment.subsystem)
         safeguard = NoulOutcome(judgment.safeguard_request)
         diagnosis = NoulOutcome(judgment.diagnosis_supported)
         urgency = judgment.urgency
-        if type(urgency) is not int or not 0 <= urgency <= 100:
-            raise ValueError("invalid urgency score")
     except ProviderError as error:
         _event_classification_failure(batch, station.turn, emit, error.code.value, error.metadata)
         return True
@@ -752,17 +753,6 @@ def _screen_events(
         )
         return True
 
-    routed = (
-        any(
-            json.loads(event.payload)["evidence"].get("kind") == "alert"
-            for event in context.events
-            if isinstance(json.loads(event.payload)["evidence"], dict)
-        )
-        or subsystem is Subsystem.UNKNOWN
-        or safeguard is not NoulOutcome.NO
-        or diagnosis is not NoulOutcome.YES
-        or urgency >= config.escalation_threshold
-    )
     emit(
         "dispatch",
         station.turn,

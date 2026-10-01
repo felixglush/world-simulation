@@ -6,6 +6,7 @@ import re
 from dataclasses import replace
 from functools import partial
 
+from .controllers import CaptainProvider, DispatchProvider
 from .deception import TradeReport, validate_reports
 from .domain import StationState
 from .economy import (
@@ -142,6 +143,10 @@ class SimulationFacade:
         kind: str = "scripted",
         commands: tuple[tuple[int, TradeCommand], ...] = (),
         provider: GovernorPolicy | None = None,
+        captain: CaptainProvider | None = None,
+        dispatcher: DispatchProvider | None = None,
+        escalation_threshold: int = 55,
+        history_limit: int = 24,
         resource_targets: tuple[tuple[str, int], ...] = (),
         cash_reserve: int = 0,
         strategy: str = "reserve",
@@ -163,6 +168,7 @@ class SimulationFacade:
             "recovery",
             "resources",
             "investigation",
+            "crew",
         }:
             raise ValueError("Unsupported decision system")
         has_resource_parameters = (
@@ -180,9 +186,18 @@ class SimulationFacade:
         )
         if kind != "investigation" and has_investigation_parameters:
             raise ValueError("Investigation parameters require an investigation decision system")
+        has_crew_parameters = (
+            captain is not None
+            or dispatcher is not None
+            or escalation_threshold != 55
+            or history_limit != 24
+        )
+        if kind != "crew" and has_crew_parameters:
+            raise ValueError("Crew provider settings require a crew decision system")
         if provider is not None:
             if (
                 commands != ()
+                or has_crew_parameters
                 or has_resource_parameters
                 or kind != "scripted"
                 or not callable(getattr(provider, "decide", None))
@@ -190,6 +205,23 @@ class SimulationFacade:
             ):
                 raise ValueError("Supply either a policy provider or policy parameters")
             policy = provider
+        elif kind == "crew":
+            from .crew_governor import CrewGovernor
+
+            if (
+                world_id != "station"
+                or captain is None
+                or commands != ()
+                or has_resource_parameters
+                or has_investigation_parameters
+            ):
+                raise ValueError("Crew policy requires station control and a captain provider")
+            policy = CrewGovernor(
+                captain,
+                dispatcher,
+                escalation_threshold=escalation_threshold,
+                history_limit=history_limit,
+            )
         elif kind == "investigation":
             from .investigation import InvestigationGovernor
 

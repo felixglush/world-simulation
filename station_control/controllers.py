@@ -12,6 +12,7 @@ from enum import StrEnum
 from typing import Mapping, Protocol
 
 from .domain import Evidence, SensorReading
+from .trade_types import PublicWorldView
 
 QUESTION_VERSION = "jev-event-questions-v2"
 RUBRIC_VERSION = "jev-event-rubric-v2"
@@ -40,6 +41,14 @@ class ActionRequestKind(StrEnum):
     ORDER_SUPPLIES = "order_supplies"
     DEFER = "defer"
     CLOSE = "close"
+    PURCHASE = "purchase"
+    REPAIR = "repair"
+    ASSAY = "assay"
+    CONSUME = "consume"
+    QUARANTINE = "quarantine"
+    TRACE = "trace"
+    CALIBRATE = "calibrate"
+    SET_LOAD = "load"
 
 
 class ProviderErrorCode(StrEnum):
@@ -133,6 +142,7 @@ class DispatchContext:
     question_version: str
     rubric_version: str
     events: tuple[PublicEvent, ...] = ()
+    world: PublicWorldView | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +155,37 @@ class DispatchJudgment:
     metadata: ProviderMetadata = field(default_factory=dict)
 
 
+def dispatch_requires_review(
+    judgment: DispatchJudgment,
+    *,
+    has_alert: bool,
+    escalation_threshold: int,
+) -> bool:
+    """Validate a dispatch result and decide whether its batch needs captain review."""
+    if (
+        not isinstance(judgment, DispatchJudgment)
+        or not isinstance(judgment.rationale, str)
+        or not isinstance(judgment.metadata, Mapping)
+        or type(has_alert) is not bool
+        or type(escalation_threshold) is not int
+        or not 0 <= escalation_threshold <= 100
+    ):
+        raise ValueError("malformed dispatch result")
+    subsystem = Subsystem(judgment.subsystem)
+    safeguard = NoulOutcome(judgment.safeguard_request)
+    diagnosis = NoulOutcome(judgment.diagnosis_supported)
+    urgency = judgment.urgency
+    if type(urgency) is not int or not 0 <= urgency <= 100:
+        raise ValueError("invalid urgency score")
+    return (
+        has_alert
+        or subsystem is Subsystem.UNKNOWN
+        or safeguard is not NoulOutcome.NO
+        or diagnosis is not NoulOutcome.YES
+        or urgency >= escalation_threshold
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ActionRequest:
     kind: ActionRequestKind
@@ -153,6 +194,13 @@ class ActionRequest:
     follow_up_turn: int | None = None
     reason: str | None = None
     evidence_sequences: tuple[int, ...] = ()
+    seller_id: str | None = None
+    batch_id: str | None = None
+    shipment_id: str | None = None
+    method: str | None = None
+    repair_mode: str | None = None
+    report_id: str | None = None
+    operating_load: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +212,7 @@ class CaptainContext:
     inspection_budget_remaining: int
     instruction_version: str
     events: tuple[PublicEvent, ...] = ()
+    world: PublicWorldView | None = None
 
 
 @dataclass(frozen=True, slots=True)

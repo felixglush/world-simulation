@@ -93,15 +93,34 @@ UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control tra
 `investigate`; `--policy trust` is a deliberately unsafe scripted comparison and
 makes no claim about AI performance. The common trade CLI default remains 20 turns;
 use the explicit 40-turn horizon above to include recovery, source tracing, and later
-recurrence checks. The domain API defaults the deception story to 40 turns. Both
-policies run offline, use no live models, and print public evidence/decisions without
-writing mission artifacts or changing the existing versioned JSONL contract.
+recurrence checks. The domain API defaults the deception story to 40 turns. These
+rules-based commands print public evidence and decisions without writing mission
+artifacts or changing the existing versioned JSONL contract.
+
+For a live crew on a deception story, select `--controller llm` for the captain or
+`--controller jev+llm` for Jev plus the captain. The trade controller defaults to
+`rules`, preserving the existing no-model behavior. Live crew control requires
+`--deception` and `--policy investigate`; it cannot be combined with `--economy` or
+the `trust` baseline. Configure `OPENROUTER_API_KEY`, explicit model IDs, and finite
+`--max-calls` and `--max-output-tokens-per-call` budgets. Both providers share the call
+budget. The JSON summary includes resolved model IDs and the configured budget, never
+the credential. For example:
+
+```bash
+export OPENROUTER_API_KEY=...
+UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control trade \
+  --deception supply_chain --controller jev+llm \
+  --captain-model "<captain-model-id>" --jev-model typesafe/jev-1.13 \
+  --max-calls 120 --max-output-tokens-per-call 512 --turns 40
+```
 
 Verify with `uv run --frozen pytest tests/test_deception.py tests/test_conditional_defects.py
 tests/test_quality.py tests/test_sensor_drift.py tests/test_deception_facade.py
-tests/test_deception_cli.py`. The process tests run
-all four stories twice for deterministic output and cover the benign counterpart and
-real credit exhaustion in the unsafe diversion baseline.
+tests/test_deception_cli.py tests/test_crew_governor.py tests/test_crew_cli.py`. The
+process tests run all four stories twice for deterministic output and cover the benign
+counterpart and real credit exhaustion in the unsafe diversion baseline. The crew CLI
+process test starts a local fake-provider HTTP server and requires loopback network
+access.
 
 Run a short AI-led mission with the default `llm` controller, replacing the model placeholder. The CLI saves a versioned JSONL run under `runs/` unless `--output` names another path:
 

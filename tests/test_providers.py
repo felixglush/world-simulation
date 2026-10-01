@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 import httpx2
@@ -32,6 +32,15 @@ from station_control.controllers import (
 )
 from station_control.providers import CallBudget, JevDispatchProvider, OpenRouterCaptainProvider
 from station_control.scenarios import ScenarioFamily
+from station_control.trade import create_world_state
+from station_control.trade_types import (
+    PublicContract,
+    PublicLot,
+    PublicShipment,
+    PublicWorldView,
+    TradeEvidence,
+    TradeEvidenceKind,
+)
 
 
 def _jev_payload(
@@ -774,3 +783,196 @@ def test_event_screening_and_captain_actions_share_budget_through_real_adapters(
         assert failure["consequence"]["code"] == "budget_exhausted"
         assert failure["consequence"]["metadata"]["request_made"] is False
         assert [event["event_type"] for event in failure["evidence"]] == ["action"]
+
+
+def test_sdk_roundtrips_scoped_trade_world_and_keeps_legacy_payloads() -> None:
+    @dataclass(frozen=True, slots=True)
+    class ExtendedPublicWorldView(PublicWorldView):
+        private_cause: str = "hidden factory defect"
+
+    world = ExtendedPublicWorldView(
+        world_id="station",
+        turn=8,
+        credits=120,
+        parts=2,
+        offers=(
+            PublicLot(
+                batch_id="offered-batch",
+                quantity=3,
+                unit_price=25,
+                origin_world="industrial",
+                seller_world="industrial",
+            ),
+        ),
+        local_lots=(
+            PublicLot(
+                batch_id="arrived-batch",
+                quantity=2,
+                unit_price=25,
+                origin_world="industrial",
+                seller_world="industrial",
+                contract_id="contract-8",
+                shipment_id="shipment-8",
+            ),
+        ),
+        contracts=(
+            PublicContract(
+                contract_id="contract-8",
+                buyer_id="station",
+                seller_id="industrial",
+                batch_id="arrived-batch",
+                quantity=2,
+                unit_price=25,
+                status="settled",
+            ),
+        ),
+        shipments=(
+            PublicShipment(
+                shipment_id="shipment-8",
+                contract_id="contract-8",
+                origin="industrial",
+                destination="station",
+                batch_id="arrived-batch",
+                quantity=2,
+                status="arrived",
+                departure_turn=6,
+                arrival_turn=8,
+            ),
+        ),
+        evidence=(
+            TradeEvidence(
+                sequence=4,
+                turn=8,
+                kind=TradeEvidenceKind.ASSAY,
+                message="The sampled batch passed the pressure assay.",
+                world_id="station",
+                asset_id="oxygen_system",
+                batch_id="arrived-batch",
+                shipment_id="shipment-8",
+                report_id="report-8",
+                method="pressure_assay",
+                measured_value=91,
+                measured_unit="kPa",
+            ),
+        ),
+    )
+    action = ActionDescriptor(
+        ActionRequestKind("trace"),
+        "Trace one public report source.",
+        {
+            "type": "object",
+            "properties": {"report_id": {"type": "string", "minLength": 1}},
+            "required": ["report_id"],
+            "additionalProperties": False,
+        },
+    )
+    captain_requests: list[dict[str, Any]] = []
+    jev_requests: list[dict[str, Any]] = []
+
+    def captain_handler(request: httpx2.Request) -> httpx2.Response:
+        captain_requests.append(json.loads(request.content))
+        return httpx2.Response(
+            200,
+            json=_captain_payload(name="trace", arguments='{"report_id":"report-8"}'),
+        )
+
+    def jev_handler(request: httpx2.Request) -> httpx2.Response:
+        jev_requests.append(json.loads(request.content))
+        return httpx2.Response(200, json=_jev_payload())
+
+    captain = _captain(captain_handler)
+    jev = _jev(jev_handler)
+    try:
+        captain_result = captain.decide(replace(_captain_context(action), world=world))
+        legacy_captain_result = captain.decide(_captain_context(action))
+        jev.classify(replace(_dispatch_context(), world=world))
+        jev.classify(_dispatch_context())
+    finally:
+        captain.close()
+        jev.close()
+
+    assert captain_result.action.kind.value == "trace"
+    assert captain_result.action.report_id == "report-8"
+    assert legacy_captain_result.action.kind is action.kind
+
+    captain_world = json.loads(captain_requests[0]["messages"][1]["content"])["world"]
+    jev_world = jev_requests[0]["state"]["world"]
+    for serialized_world in (captain_world, jev_world):
+        assert serialized_world["offers"][0]["batch_id"] == "offered-batch"
+        assert serialized_world["local_lots"][0]["batch_id"] == "arrived-batch"
+        assert serialized_world["contracts"][0]["contract_id"] == "contract-8"
+        assert serialized_world["shipments"][0]["batch_id"] == "arrived-batch"
+        assert serialized_world["evidence"][0]["measured_value"] == 91
+        assert serialized_world["evidence"][0]["measured_unit"] == "kPa"
+        serialized = json.dumps(serialized_world)
+        assert "private_cause" not in serialized
+        assert "hidden factory defect" not in serialized
+        assert "latent_defect" not in serialized
+        assert '"cargo"' not in serialized
+
+    legacy_captain_payload = json.loads(captain_requests[1]["messages"][1]["content"])
+    assert legacy_captain_payload == {
+        "instruction_version": "captain-event-instructions-v2",
+        "incident": {
+            "sequence": 12,
+            "code": None,
+            "turn": 4,
+            "kind": "maintenance",
+            "message": "Pressure is falling near the oxygen manifold.",
+        },
+        "public_events": [],
+        "station": {
+            "turn": 4,
+            "oxygen_sensors": [
+                {"sensor": "sensor_a", "oxygen": 68, "sampled_turn": 0, "source": ""},
+                {"sensor": "sensor_b", "oxygen": 70, "sampled_turn": 0, "source": ""},
+            ],
+            "backup_oxygen": 12,
+            "parts": 2,
+            "credits": 30,
+            "available_crew": 4,
+        },
+        "accessible_evidence": [
+            {
+                "sequence": 12,
+                "code": None,
+                "turn": 4,
+                "kind": "maintenance",
+                "message": "Pressure is falling near the oxygen manifold.",
+            }
+        ],
+        "inspection_budget_remaining": 1,
+    }
+    assert set(jev_requests[1]["state"]) == {
+        "report",
+        "public_events",
+        "station",
+        "accessible_evidence",
+    }
+
+
+def test_providers_reject_authoritative_world_state_before_http_io() -> None:
+    requests = 0
+
+    def handle(_: httpx2.Request) -> httpx2.Response:
+        nonlocal requests
+        requests += 1
+        return httpx2.Response(200, json=_jev_payload())
+
+    world_state = create_world_state()
+    jev = _jev(handle)
+    captain = _captain(handle)
+    try:
+        with pytest.raises(ProviderError) as jev_error:
+            jev.classify(replace(_dispatch_context(), world=world_state))
+        with pytest.raises(ProviderError) as captain_error:
+            captain.decide(replace(_captain_context(), world=world_state))
+    finally:
+        jev.close()
+        captain.close()
+
+    assert requests == 0
+    assert jev_error.value.code is ProviderErrorCode.INVALID_INPUT
+    assert jev_error.value.metadata["request_made"] is False
+    assert captain_error.value.code is ProviderErrorCode.INVALID_INPUT
+    assert captain_error.value.metadata["request_made"] is False

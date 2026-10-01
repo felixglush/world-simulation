@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Mapping
 
+from .controllers import CaptainProvider, DispatchProvider
 from .deception import TradeReport
 from .facade import SimulationFacade
 from .governors import TradeCommand
@@ -15,10 +17,19 @@ DECEPTION_STORIES = ("supply_chain", "incomplete_repair", "resource_diversion", 
 
 
 def create_deception_simulation(
-    story: str = "supply_chain", *, policy: str = "investigate"
+    story: str = "supply_chain",
+    *,
+    policy: str = "investigate",
+    captain: CaptainProvider | None = None,
+    dispatcher: DispatchProvider | None = None,
 ) -> SimulationFacade:
-    if story not in DECEPTION_STORIES or policy not in {"investigate", "trust"}:
+    if story not in DECEPTION_STORIES or policy not in {"investigate", "trust", "crew"}:
         raise ValueError("Unknown deception story or policy")
+    if policy == "crew":
+        if captain is None:
+            raise ValueError("Crew policy requires a captain provider")
+    elif captain is not None or dispatcher is not None:
+        raise ValueError("Crew providers require the crew policy")
     diversion = story == "resource_diversion"
     faulty_parts = story in {"supply_chain", "resource_diversion"}
     station = replace(
@@ -120,6 +131,10 @@ def create_deception_simulation(
             initial_repair_mode="stabilize" if story == "incomplete_repair" else "full",
             feedstock_target=2 if story in {"supply_chain", "benign"} else 0,
         )
+    elif policy == "crew":
+        simulation.create_decision_system(
+            "station", kind="crew", captain=captain, dispatcher=dispatcher
+        )
     else:
         # Deliberately unsafe scripted baseline. This is not an AI performance claim.
         commands = (
@@ -196,12 +211,25 @@ def run_deception_story(
 
 
 def deception_story_summary(
-    result: TradeMissionResult, *, story: str, policy: str
+    result: TradeMissionResult,
+    *,
+    story: str,
+    policy: str,
+    controller: str | None = None,
+    models: Mapping[str, object] | None = None,
+    call_budget: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     summary = trade_story_summary(result)
+    has_jev = any(review.phase in {"world", "action"} for review in result.crew_reviews) or bool(
+        models and models.get("jev")
+    )
+    if policy == "crew":
+        default_controller = "jev+llm" if has_jev else "llm"
+    else:
+        default_controller = "rules" if policy == "investigate" else "scripted"
     summary.update(
         {
-            "controller": "rules" if policy == "investigate" else "scripted",
+            "controller": controller or default_controller,
             "deception": story,
             "policy": policy,
             "credits_remaining": result.state.station.credits,
@@ -222,4 +250,8 @@ def deception_story_summary(
             ),
         }
     )
+    if models is not None:
+        summary["models"] = dict(models)
+    if call_budget is not None:
+        summary["call_budget"] = dict(call_budget)
     return summary
