@@ -35,6 +35,9 @@ def test_purchase_to_stress_investigation_and_replacement_removes_defect_and_res
         travel_turns=2,
     )
     state = replace(state, residual_damage_after_turns=2)
+    seller = state.inventories[0]
+    bad_lot = replace(seller.lots[0], failure_load="peak")
+    state = replace(state, inventories=(replace(seller, lots=(bad_lot, *seller.lots[1:])),))
     purchase = purchase_lot(
         state,
         command_id="bad-order",
@@ -51,7 +54,13 @@ def test_purchase_to_stress_investigation_and_replacement_removes_defect_and_res
     assert installed.installed_part.batch_id == "industrial-batch-a"
     assert installed.residual_damage_after_turns == 2
 
-    peak = set_operating_load(installed, "peak").state
+    routine = inspect_installed_batch(installed)
+    assert routine.evidence[0].method == "routine"
+    assert routine.evidence[0].code == "installed_batch_traced"
+    assert not routine.state.station.leak_active
+    assert routine.state.installed_part.operating_turns == 0
+
+    peak = set_operating_load(routine.state, "peak").state
     first_stress = inspect_installed_batch(peak, method="peak")
     assert first_stress.accepted
     assert not first_stress.state.station.leak_active

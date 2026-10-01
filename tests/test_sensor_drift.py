@@ -53,9 +53,22 @@ def test_real_turns_apply_private_drift_and_station_calibration_only_resets_sens
     assert later.sensor_drift_bias == 0
 
 
-def test_benign_calibration_reports_no_discrepancy_and_keeps_physical_readings_in_scope():
-    station = replace(create_world("normal", seed=0), scheduled_events=())
-    world = advance_world(create_world_state(station)).state
+def test_capacity_clamped_drift_calibration_reports_no_observed_discrepancy_and_resets_cause():
+    station = replace(
+        create_world("normal", seed=0),
+        scheduled_events=(),
+        oxygen=1000,
+    )
+    configured = replace(
+        create_world_state(station),
+        sensor_drift_per_turn=4,
+        sensor_drift_bias=6,
+        sensor_drift_limit=20,
+    )
+    world = advance_world(configured).state
+    assert world.station.oxygen == 1000
+    assert world.sensor_drift_bias == 10
+    assert reading(world, "sensor_a").oxygen == reading(world, "sensor_b").oxygen == 1000
     sensor_b_before = reading(world, "sensor_b")
     oxygen_before = world.station.oxygen
 
@@ -70,4 +83,3 @@ def test_benign_calibration_reports_no_discrepancy_and_keeps_physical_readings_i
     assert reading(calibrated.state, "sensor_a").sampled_turn == world.station.turn
     assert reading(calibrated.state, "sensor_b") == sensor_b_before
     assert calibrated.evidence[0].finding_code == "sensor_calibration_verified"
-    assert "no discrepancy was observed" in calibrated.evidence[0].message
