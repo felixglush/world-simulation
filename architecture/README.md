@@ -9,6 +9,36 @@ logical boundaries inside one process; only model requests cross an HTTPS bounda
 
 ## Open the explorer
 
+[Hosted canvas](https://felixglush.github.io/world-simulation/) ·
+[Example flow](https://felixglush.github.io/world-simulation/?run=demo_deception)
+
+The example opens a paused recorded run. Use **Play run**, **Next step**, or
+**Next decision** to follow adversary actions, Jev classifications, captain decisions,
+and world changes. Demo AI responses are scripted; no live simulator or model API
+starts. Code, state, schemas, and example logs are bundled. Imported logs stay in
+browser memory. Hosted links require the initial Pages setup below.
+
+### GitHub Pages
+
+Select **Settings → Pages → Build and deployment → Source → GitHub Actions**.
+The integration preparing this change could not enable Pages (GitHub HTTP 403).
+Then run **Actions → Architecture canvas → Run workflow**. Before this stack merges,
+the workflow runs on pushes to `codex/architecture-github-pages`; rerun its latest
+workflow after enabling Pages. If the `github-pages` environment restricts deployments,
+allow that branch. After merging, use `main` and remove the temporary feature branch
+from the workflow triggers, deploy condition, and environment rules.
+
+The workflow checks, tests, and builds before deployment. Pull requests only validate
+and upload the downloadable `architecture-offline` HTML artifact; they never deploy.
+Changes to `architecture/` on `main` automatically update the site. The artifact can
+also be opened without a server. Only bundled source and scripted fixtures are
+published; local `runs/` and credentials are excluded.
+
+`?run=<bundled-run-id>` opens a paused replay; unknown IDs show the overview. This
+works with any project adapter and can be combined with `?project=example&run=<id>`.
+
+### Local development
+
 Use Node 24 and npm 11:
 
 ```bash
