@@ -14,7 +14,7 @@ from .trade import (
     advance_world,
     inspect_installed_batch,
     observe_world,
-    purchase_parts,
+    purchase_lot,
     quarantine_batch,
     repair_with_batch,
 )
@@ -92,7 +92,7 @@ def run_trade_mission(
                 )
                 continue
             if command.kind == "purchase":
-                result = purchase_parts(
+                result = purchase_lot(
                     state,
                     command_id=command.command_id,
                     quantity=command.quantity,
@@ -155,3 +155,128 @@ def trade_story_summary(result: TradeMissionResult) -> dict[str, object]:
         "events": [asdict(event) for event in result.events],
         "decisions": [asdict(decision) for decision in result.decisions],
     }
+
+
+def run_economy_story(*, turns: int = 20) -> TradeMissionResult:
+    """Assemble four complementary economies using only facade parameters."""
+    from .economy import (
+        AGRICULTURAL_WORLD_RECIPE,
+        ICE_MOON_RECIPE,
+        RESOURCE_PRICE_RULES,
+        initial_resource_inventory,
+    )
+    from .facade import SimulationFacade
+    from .trade import PartLot
+
+    prices = {rule.resource: rule.base_price for rule in RESOURCE_PRICE_RULES}
+
+    def lots_for(world_id, stocks):
+        return tuple(
+            PartLot(
+                f"{world_id}-{stock.resource}",
+                stock.quantity,
+                prices.get(stock.resource, 1),
+                world_id,
+                resource=stock.resource,
+                unit=stock.unit,
+            )
+            for stock in stocks
+        )
+
+    station_stocks = initial_resource_inventory("station")
+    station = replace(create_world("normal", 0), credits=500, parts=0, scheduled_events=())
+    simulation = SimulationFacade(
+        station,
+        station_lots=lots_for("station", station_stocks),
+        station_resource_capacities=tuple(
+            (stock.resource, stock.capacity) for stock in station_stocks
+        ),
+        station_resource_reserves=(("water", 5), ("food", 12)),
+    )
+    recipes = {"ice_moon": ICE_MOON_RECIPE, "agricultural_world": AGRICULTURAL_WORLD_RECIPE}
+    reserves = {
+        "industrial": (("fertilizer", 10),),
+        "ice_moon": (("water", 8),),
+        "agricultural_world": (("food", 8),),
+    }
+    for world_id, credits in (("industrial", 300), ("ice_moon", 200), ("agricultural_world", 500)):
+        stocks = initial_resource_inventory(world_id)
+        resources = {stock.resource for stock in stocks}
+        simulation.create_world(
+            world_id,
+            credits=credits,
+            lots=lots_for(world_id, stocks),
+            resource_capacities=tuple((stock.resource, stock.capacity) for stock in stocks),
+            resource_reserves=reserves[world_id],
+            production_recipe=recipes.get(world_id),
+            price_rules=tuple(rule for rule in RESOURCE_PRICE_RULES if rule.resource in resources),
+        )
+    simulation.create_decision_system(
+        "station",
+        kind="resources",
+        resource_targets=(("food", 12),),
+        cash_reserve=100,
+        strategy="reliable",
+    )
+    simulation.create_decision_system(
+        "industrial",
+        kind="resources",
+        resource_targets=(("food", 6),),
+        cash_reserve=100,
+        strategy="reserve",
+    )
+    simulation.create_decision_system(
+        "agricultural_world",
+        kind="resources",
+        resource_targets=(("water", 30), ("fertilizer", 15)),
+        cash_reserve=50,
+        strategy="income",
+    )
+    simulation.create_decision_system("ice_moon")
+    return simulation.run(turns=turns)
+
+
+def economy_story_summary(result: TradeMissionResult) -> dict[str, object]:
+    summary = trade_story_summary(result)
+    worlds = ("station", *(inventory.world_id for inventory in result.state.inventories))
+    ledger = result.state.ledger
+    production_batches = {
+        (entry.turn, world_id, entry.reference_id)
+        for entry in ledger
+        if entry.kind == "production_output"
+        for world_id in worlds
+        if entry.account.startswith(f"inventory:{world_id}:")
+    }
+    summary.update(
+        {
+            "economy": True,
+            "worlds": list(worlds),
+            "production_batches_completed": len(production_batches),
+            "contracts_settled": sum(
+                contract.status == "settled" for contract in result.state.contracts
+            ),
+            "expenditure": {
+                world_id: sum(
+                    -entry.delta
+                    for entry in ledger
+                    if entry.account == f"credits:{world_id}"
+                    and entry.resource == "credits"
+                    and entry.kind == "purchase"
+                    and entry.delta < 0
+                )
+                for world_id in worlds
+            },
+            "revenue": {
+                world_id: sum(
+                    entry.delta
+                    for entry in ledger
+                    if entry.account == f"credits:{world_id}"
+                    and entry.resource == "credits"
+                    and entry.kind == "settlement"
+                    and entry.delta > 0
+                )
+                for world_id in worlds
+            },
+        }
+    )
+    return summary

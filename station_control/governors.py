@@ -39,15 +39,33 @@ class RecoveryGovernor:
 
     def decide(self, observation: PublicWorldView) -> TradeCommand | None:
         kinds = {item.kind for item in observation.evidence}
-        lots = {lot.batch_id: lot.quantity for lot in observation.local_lots}
+        lots = {}
+        for lot in observation.local_lots:
+            if lot.resource == "parts":
+                lots[lot.batch_id] = lots.get(lot.batch_id, 0) + lot.quantity
         if "purchase" not in kinds:
-            available = tuple(offer for offer in observation.offers if offer.quantity >= 2)
+            available = tuple(
+                offer
+                for offer in observation.offers
+                if offer.quantity >= 2
+                and offer.resource == "parts"
+                and offer.seller_world != observation.world_id
+            )
             if not available:
                 return None
             offer = min(available, key=lambda item: (item.unit_price, item.batch_id))
-            return TradeCommand("purchase", "initial-parts", batch_id=offer.batch_id, quantity=2)
+            return TradeCommand(
+                "purchase",
+                "initial-parts",
+                seller_id=offer.seller_world,
+                batch_id=offer.batch_id,
+                quantity=2,
+            )
         if "repair_assigned" not in kinds:
-            available = next((lot for lot in observation.local_lots if lot.quantity), None)
+            available = next(
+                (lot for lot in observation.local_lots if lot.quantity and lot.resource == "parts"),
+                None,
+            )
             if available:
                 return TradeCommand("repair", batch_id=available.batch_id)
         if "failure" in kinds and "inspection" not in kinds:
@@ -65,7 +83,7 @@ class RecoveryGovernor:
             (
                 contract
                 for contract in observation.contracts
-                if contract.batch_id != finding.batch_id
+                if contract.batch_id != finding.batch_id and contract.resource == "parts"
             ),
             None,
         )
@@ -74,12 +92,20 @@ class RecoveryGovernor:
                 (
                     item
                     for item in observation.offers
-                    if item.batch_id != finding.batch_id and item.quantity
+                    if item.batch_id != finding.batch_id
+                    and item.quantity
+                    and item.resource == "parts"
+                    and item.seller_world != observation.world_id
                 ),
                 None,
             )
             if offer:
-                return TradeCommand("purchase", "replacement-parts", batch_id=offer.batch_id)
+                return TradeCommand(
+                    "purchase",
+                    "replacement-parts",
+                    seller_id=offer.seller_world,
+                    batch_id=offer.batch_id,
+                )
         elif lots.get(replacement.batch_id, 0):
             return TradeCommand("repair", batch_id=replacement.batch_id)
         return None

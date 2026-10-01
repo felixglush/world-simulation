@@ -40,6 +40,8 @@ class PartLot:
     defect_after_turns: int = 0
     contract_id: str | None = None
     shipment_id: str | None = None
+    resource: str = "parts"
+    unit: str = "parts"
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,10 +49,12 @@ class WorldInventory:
     world_id: str
     credits: int
     lots: tuple[PartLot, ...]
+    resource_capacities: tuple[tuple[str, int], ...] = ()
+    resource_reserves: tuple[tuple[str, int], ...] = ()
 
     @property
     def parts(self) -> int:
-        return sum(lot.quantity for lot in self.lots)
+        return sum(lot.quantity for lot in self.lots if lot.resource == "parts")
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +68,8 @@ class TradeContract:
     unit_price: int
     total_price: int
     status: str
+    resource: str = "parts"
+    unit: str = "parts"
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +83,7 @@ class Shipment:
     status: str
     departure_turn: int | None = None
     arrival_turn: int | None = None
+    cargo: PartLot | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +142,8 @@ class WorldState:
     travel_turns: int = 2
     shipment_capacity: int = 3
     defect_after_turns: int = 3
+    station_resource_capacities: tuple[tuple[str, int], ...] = ()
+    station_resource_reserves: tuple[tuple[str, int], ...] = ()
 
     @property
     def pending_repair_batch_id(self) -> str | None:
@@ -147,6 +156,9 @@ class PublicLot:
     quantity: int
     unit_price: int
     origin_world: str
+    resource: str = "parts"
+    unit: str = "parts"
+    seller_world: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +170,8 @@ class PublicContract:
     quantity: int
     unit_price: int
     status: str
+    resource: str = "parts"
+    unit: str = "parts"
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +185,8 @@ class PublicShipment:
     status: str
     departure_turn: int | None
     arrival_turn: int | None
+    resource: str = "parts"
+    unit: str = "parts"
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,7 +288,7 @@ def create_world_state(
     )
 
 
-def purchase_parts(
+def purchase_lot(
     state: WorldState,
     *,
     command_id: str,
@@ -333,9 +349,33 @@ def purchase_parts(
         )
         return _rejected(state, rejection)
     lot = seller_lots[selected]
-    if lot.quantity < quantity:
+    if any(
+        existing.resource == lot.resource and existing.unit != lot.unit
+        for existing in _lots(state, buyer_id)
+    ) or any(
+        shipment.destination == buyer_id
+        and shipment.status in {"booked", "in_transit"}
+        and _contract(state, shipment.contract_id).resource == lot.resource
+        and (
+            shipment.cargo.unit
+            if shipment.cargo is not None
+            else _contract(state, shipment.contract_id).unit
+        )
+        != lot.unit
+        for shipment in state.shipments
+    ):
+        return _rejected(state, "unit_mismatch")
+    if _offer_quantity(state, seller_id, batch_id) < quantity:
         return _rejected(state, "insufficient_stock")
-    if type(lot.unit_price) is not int or not 1 <= lot.unit_price <= 1_000_000:
+    capacity = _resource_capacity(state, buyer_id, lot.resource)
+    if capacity is not None and (
+        _stock_quantity(state, buyer_id, lot.resource)
+        + incoming_quantity(state, buyer_id, lot.resource)
+        + quantity
+        > capacity
+    ):
+        return _rejected(state, "storage_capacity")
+    if type(lot.unit_price) is not int or not 1 <= lot.unit_price <= MAX_UNIT_PRICE:
         return _rejected(state, "invalid_offer_price")
     total_price = lot.unit_price * quantity
     if _credits(state, buyer_id) < total_price:
@@ -353,6 +393,8 @@ def purchase_parts(
         lot.unit_price,
         total_price,
         "booked",
+        lot.resource,
+        lot.unit,
     )
     shipment = Shipment(
         shipment_id,
@@ -362,6 +404,7 @@ def purchase_parts(
         batch_id,
         quantity,
         "booked",
+        cargo=replace(lot, quantity=quantity),
     )
 
     updated = _set_credits(state, buyer_id, _credits(state, buyer_id) - total_price)
@@ -380,19 +423,20 @@ def purchase_parts(
             (f"credits:{buyer_id}", "credits", -total_price, "purchase", contract_id),
             (f"escrow:{contract_id}", "credits", total_price, "purchase", contract_id),
             (
-                f"inventory:{seller_id}:{batch_id}",
-                "parts",
+                f"inventory:{seller_id}:{lot.resource}:{batch_id}",
+                lot.resource,
                 -quantity,
                 "purchase",
                 contract_id,
             ),
-            (f"reserved:{shipment_id}", "parts", quantity, "purchase", contract_id),
+            (f"reserved:{shipment_id}", lot.resource, quantity, "purchase", contract_id),
         ),
     )
     updated, evidence = _emit_evidence(
         updated,
         TradeEvidenceKind.PURCHASE,
-        f"Purchased {quantity} part(s) from {seller_id}; funds are held pending delivery.",
+        f"Purchased {quantity} {lot.unit} of {lot.resource} from {seller_id}; "
+        "funds are held pending delivery.",
         buyer_id,
         batch_id=batch_id,
         contract_id=contract_id,
@@ -403,18 +447,46 @@ def purchase_parts(
     )
 
 
+def purchase_parts(
+    state: WorldState,
+    *,
+    command_id: str,
+    quantity: int,
+    batch_id: str = "industrial-batch-a",
+    buyer_id: str = "station",
+    seller_id: str = "industrial",
+) -> TradeResult:
+    """Compatibility entry point for replacement-part purchases."""
+    result = purchase_lot(
+        state,
+        command_id=command_id,
+        quantity=quantity,
+        batch_id=batch_id,
+        buyer_id=buyer_id,
+        seller_id=seller_id,
+    )
+    if result.accepted:
+        contract = next(item for item in result.state.contracts if item.command_id == command_id)
+        if contract.resource != "parts":
+            return _rejected(state, "not_a_part_lot")
+    return result
+
+
 def advance_world(state: WorldState) -> WorldAdvanceResult:
     if not isinstance(state, WorldState):
         raise TypeError("state must be a WorldState")
     if not state.station.crew_alive:
         return WorldAdvanceResult(state)
 
+    validate_storage_commitments(state)
     before = state
     station_turn = advance_turn(state.station)
     updated = replace(state, station=station_turn.state)
     emitted: list[TradeEvidence] = []
 
-    untracked_delivery = station_turn.state.parts - sum(lot.quantity for lot in state.station_lots)
+    untracked_delivery = station_turn.state.parts - sum(
+        lot.quantity for lot in state.station_lots if lot.resource == "parts"
+    )
     if untracked_delivery > 0:
         batch_id = f"station-delivery-{station_turn.state.turn}"
         updated = _set_lots(
@@ -545,14 +617,14 @@ def advance_world(state: WorldState) -> WorldAdvanceResult:
             (
                 (
                     f"reserved:{shipment.shipment_id}",
-                    "parts",
+                    _contract(updated, shipment.contract_id).resource,
                     -shipment.quantity,
                     "departure",
                     shipment.contract_id,
                 ),
                 (
                     f"transit:{shipment.shipment_id}",
-                    "parts",
+                    _contract(updated, shipment.contract_id).resource,
                     shipment.quantity,
                     "departure",
                     shipment.contract_id,
@@ -576,7 +648,9 @@ def advance_world(state: WorldState) -> WorldAdvanceResult:
         if shipment.arrival_turn > updated.station.turn:
             continue
         contract = _contract(updated, shipment.contract_id)
-        source_lot = _lot_for_contract(updated, shipment.origin, shipment.batch_id, contract)
+        source_lot = shipment.cargo or _lot_for_contract(
+            updated, shipment.origin, shipment.batch_id, contract
+        )
         received_lot = replace(
             source_lot,
             quantity=shipment.quantity,
@@ -601,14 +675,14 @@ def advance_world(state: WorldState) -> WorldAdvanceResult:
             (
                 (
                     f"transit:{shipment.shipment_id}",
-                    "parts",
+                    contract.resource,
                     -shipment.quantity,
                     "arrival",
                     contract.contract_id,
                 ),
                 (
                     f"inventory:{shipment.destination}:{shipment.batch_id}:{shipment.shipment_id}",
-                    "parts",
+                    contract.resource,
                     shipment.quantity,
                     "arrival",
                     contract.contract_id,
@@ -632,7 +706,8 @@ def advance_world(state: WorldState) -> WorldAdvanceResult:
         updated, arrival_events = _emit_evidence(
             updated,
             TradeEvidenceKind.ARRIVAL,
-            f"Shipment {shipment.shipment_id} arrived with {shipment.quantity} part(s).",
+            f"Shipment {shipment.shipment_id} arrived with {shipment.quantity} {contract.unit} "
+            f"of {contract.resource}.",
             shipment.destination,
             batch_id=shipment.batch_id,
             contract_id=shipment.contract_id,
@@ -702,6 +777,8 @@ def repair_with_batch(state: WorldState, batch_id: str) -> TradeResult:
         return _rejected(state, "insufficient_parts")
 
     lot = state.station_lots[selected]
+    if lot.resource != "parts":
+        return _rejected(state, "batch_not_in_station_inventory")
     if lot.quantity < 1:
         return _rejected(state, "batch_not_in_station_inventory")
     result = apply_action(state.station, Action(ActionKind.ASSIGN_REPAIR, target="oxygen_system"))
@@ -859,13 +936,23 @@ def observe_world(state: WorldState, world_id: str) -> PublicWorldView:
         alive = True
         repair_remaining = 0
 
-    local_lots = tuple(_public_lot(lot) for lot in _lots(state, world_id) if lot.quantity > 0)
-    offers = tuple(
-        _public_lot(lot)
-        for inventory in state.inventories
-        for lot in inventory.lots
-        if lot.quantity > 0
+    local_lots = tuple(
+        _public_lot(lot, world_id) for lot in _lots(state, world_id) if lot.quantity > 0
     )
+    seller_ids = sorted(("station", *(inventory.world_id for inventory in state.inventories)))
+    market_offers = []
+    seen_offers: set[tuple[str, str]] = set()
+    for seller_id in seller_ids:
+        for lot in _lots(state, seller_id):
+            if lot.quantity <= 0:
+                continue
+            key = (seller_id, lot.batch_id)
+            quantity = _offer_quantity(state, seller_id, lot.batch_id)
+            if key in seen_offers or quantity <= 0:
+                continue
+            seen_offers.add(key)
+            market_offers.append(_public_lot(lot, seller_id, quantity))
+    offers = tuple(market_offers)
     contracts = tuple(
         PublicContract(
             contract.contract_id,
@@ -875,6 +962,8 @@ def observe_world(state: WorldState, world_id: str) -> PublicWorldView:
             contract.quantity,
             contract.unit_price,
             contract.status,
+            contract.resource,
+            contract.unit,
         )
         for contract in state.contracts
         if world_id in {contract.buyer_id, contract.seller_id}
@@ -890,6 +979,8 @@ def observe_world(state: WorldState, world_id: str) -> PublicWorldView:
             shipment.status,
             shipment.departure_turn,
             shipment.arrival_turn,
+            _contract(state, shipment.contract_id).resource,
+            _contract(state, shipment.contract_id).unit,
         )
         for shipment in state.shipments
         if world_id in {shipment.origin, shipment.destination}
@@ -938,6 +1029,7 @@ def observe_world(state: WorldState, world_id: str) -> PublicWorldView:
 
 
 MAX_TRADE_QUANTITY = 3
+MAX_UNIT_PRICE = 1_000_000
 _COMMAND_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}\Z")
 
 
@@ -992,7 +1084,10 @@ def _set_lots(state: WorldState, world_id: str, lots: tuple[PartLot, ...]) -> Wo
         return replace(
             state,
             station_lots=lots,
-            station=replace(state.station, parts=sum(lot.quantity for lot in lots)),
+            station=replace(
+                state.station,
+                parts=sum(lot.quantity for lot in lots if lot.resource == "parts"),
+            ),
         )
     inventories = tuple(
         replace(inventory, lots=lots) if inventory.world_id == world_id else inventory
@@ -1012,8 +1107,97 @@ def _available_lot_index(state: WorldState, world_id: str, batch_id: str) -> int
     )
 
 
-def _public_lot(lot: PartLot) -> PublicLot:
-    return PublicLot(lot.batch_id, lot.quantity, lot.unit_price, lot.origin_world)
+def _resource_capacities(state: WorldState, world_id: str) -> tuple[tuple[str, int], ...]:
+    if world_id == "station":
+        return state.station_resource_capacities
+    inventory = _inventory(state, world_id)
+    return inventory.resource_capacities if inventory is not None else ()
+
+
+def _resource_reserves(state: WorldState, world_id: str) -> tuple[tuple[str, int], ...]:
+    if world_id == "station":
+        return state.station_resource_reserves
+    inventory = _inventory(state, world_id)
+    return inventory.resource_reserves if inventory is not None else ()
+
+
+def _resource_capacity(state: WorldState, world_id: str, resource: str) -> int | None:
+    capacities = dict(_resource_capacities(state, world_id))
+    if resource == "parts":
+        return capacities.get(resource)
+    return capacities.get(resource, 1000)
+
+
+def _resource_reserve(state: WorldState, world_id: str, resource: str) -> int:
+    return dict(_resource_reserves(state, world_id)).get(resource, 0)
+
+
+def _stock_quantity(state: WorldState, world_id: str, resource: str) -> int:
+    return sum(lot.quantity for lot in _lots(state, world_id) if lot.resource == resource)
+
+
+def validate_storage_commitments(state: WorldState) -> None:
+    """Reject explicit storage limits that cannot hold stock and committed arrivals."""
+    for world_id in ("station", *(world.world_id for world in state.inventories)):
+        for resource, capacity in _resource_capacities(state, world_id):
+            if (
+                _stock_quantity(state, world_id, resource)
+                + incoming_quantity(state, world_id, resource)
+                > capacity
+            ):
+                raise ValueError(f"Committed {resource} exceeds {world_id} storage capacity")
+
+
+def incoming_quantity(state: WorldState, world_id: str, resource: str) -> int:
+    """Stock already committed by trade or existing station delivery orders."""
+    legacy = (
+        sum(
+            delivery.quantity * max(0, min(100, delivery.fill_percent)) // 100
+            for delivery in state.station.deliveries
+            if delivery.supply == "parts" and delivery.due_turn > state.station.turn
+        )
+        if world_id == "station" and resource == "parts"
+        else 0
+    )
+    return legacy + sum(
+        shipment.quantity
+        for shipment in state.shipments
+        if shipment.destination == world_id
+        and shipment.status in {"booked", "in_transit"}
+        and _contract(state, shipment.contract_id).resource == resource
+    )
+
+
+def _offer_quantity(state: WorldState, world_id: str, batch_id: str) -> int:
+    lots = _lots(state, world_id)
+    selected = next((lot for lot in lots if lot.batch_id == batch_id), None)
+    if selected is None:
+        return 0
+    remaining = max(
+        0,
+        _stock_quantity(state, world_id, selected.resource)
+        - _resource_reserve(state, world_id, selected.resource),
+    )
+    for lot in lots:
+        if lot.resource != selected.resource or lot.quantity <= 0:
+            continue
+        available = min(lot.quantity, remaining)
+        if lot.batch_id == batch_id:
+            return available
+        remaining -= available
+    return 0
+
+
+def _public_lot(lot: PartLot, seller_world: str, quantity: int | None = None) -> PublicLot:
+    return PublicLot(
+        lot.batch_id,
+        lot.quantity if quantity is None else quantity,
+        lot.unit_price,
+        lot.origin_world,
+        lot.resource,
+        lot.unit,
+        seller_world,
+    )
 
 
 def _append_ledger(

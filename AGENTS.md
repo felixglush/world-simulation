@@ -54,11 +54,22 @@ change the versioned mission-log contract:
 
 ```bash
 UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control trade --turns 20
+UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control trade --economy --turns 20
 ```
 
 The horizon includes purchase, shipment, repair, later failure, batch investigation,
 quarantine, and replacement. Verify with `uv run --frozen pytest tests/test_trade.py
 tests/test_trade_mission.py tests/test_trade_cli.py`.
+
+The economy variant creates a station, industrial supplier, ice moon, and agricultural
+world through `SimulationFacade`. It runs finite production, stock-based prices, and
+independent deterministic resource policies. Credits, resource movement, expenditures,
+and revenue come from the trade ledger. Configure custom worlds with `create_world`
+(lots, capacities, sale reserves, recipe, and price rules) and their policies with
+`create_decision_system` (scripted commands, resource targets, cash reserve, strategy,
+or an injected fake policy). Policies receive only local public views and market offers.
+Verify with `uv run --frozen pytest tests/test_economy.py tests/test_economy_facade.py
+tests/test_facade.py tests/test_facade_validation.py tests/test_trade_cli.py`.
 
 Run a short AI-led mission with the default `llm` controller, replacing the model placeholder. The CLI saves a versioned JSONL run under `runs/` unless `--output` names another path:
 

@@ -201,6 +201,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "trade", help="Run the offline trade and delayed-defect story."
     )
     trade_parser.add_argument("--turns", type=_bounded_integer(1, MAX_MISSION_TURNS), default=20)
+    trade_parser.add_argument(
+        "--economy",
+        action="store_true",
+        help="Run four worlds with production and resource policies.",
+    )
 
     replay_parser = commands.add_parser("replay", help="Validate and display a saved mission log.")
     replay_parser.add_argument("log", type=Path)
@@ -530,13 +535,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     try:
         if arguments.command == "trade":
-            from .trade_mission import run_trade_story, trade_story_summary
-
-            print(
-                json.dumps(
-                    trade_story_summary(run_trade_story(turns=arguments.turns)), sort_keys=True
-                )
+            from .trade_mission import (
+                economy_story_summary,
+                run_economy_story,
+                run_trade_story,
+                trade_story_summary,
             )
+
+            summary = (
+                economy_story_summary(run_economy_story(turns=arguments.turns))
+                if arguments.economy
+                else trade_story_summary(run_trade_story(turns=arguments.turns))
+            )
+
+            print(json.dumps(summary, sort_keys=True))
             return 0
         if arguments.command == "replay":
             print(render_run_log(read_run_log(arguments.log)))
