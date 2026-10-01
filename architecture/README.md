@@ -36,6 +36,13 @@ require a connection; browsing the bundled code does not.
 - Click a component for its responsibilities and connections. **Code** opens actual
   Python definitions with line numbers; **State** shows state ownership, schemas, and
   values at the selected replay event. Click the code icon for direct source access.
+- The **I/O** tab groups incoming and outgoing message contracts with Python field
+  types, source definitions, and illustrative example payloads. For a connection,
+  it explicitly shows output from its sender → input to its receiver. Contracts
+  cover all configured modes; examples show selected fields rather than complete
+  serialized instances. AI actor panels also show the latest recorded input and
+  decision at or before the replay cursor. Saved evidence may omit request fields,
+  and persisted decisions may flatten result types or include audit identifiers.
 - Click a connection for its contract fields, payload example, timing, and failure policy.
 - Choose **Walk through a turn** to follow adversarial input, world changes, public
   events, Jev classification, captain proposals, validation, repair, and closure.

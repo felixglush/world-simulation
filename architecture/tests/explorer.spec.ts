@@ -324,3 +324,63 @@ test("rejected adversary actions stay distinct from benign and unknown choices",
     "Unclassified action",
   );
 });
+
+test("component I/O shows directional schemas, examples, and cursor-bounded recorded pairs", async ({
+  page,
+}) => {
+  const { readFileSync } = await import("node:fs");
+  const run = JSON.parse(readFileSync("src/demo-runs.json", "utf8"))[0];
+  const events = run.records.filter((r: any) => r.record_type === "event");
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Inspect Jev classifier", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Input → output schemas & examples" })
+    .click();
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  const inputs = inspector.getByRole("region", { name: "Inputs contracts" });
+  const outputs = inspector.getByRole("region", { name: "Outputs contracts" });
+  await inputs
+    .locator("summary")
+    .filter({ hasText: "DispatchContext" })
+    .click();
+  await expect(inputs).toContainText("question_version");
+  await expect(inputs.locator("details[open] pre")).toContainText('"station"');
+  await outputs
+    .locator("summary")
+    .filter({ hasText: "DispatchJudgment" })
+    .click();
+  await expect(outputs).toContainText("diagnosis_supported");
+  await expect(outputs.locator("details[open] pre")).toContainText(
+    '"urgency": 75',
+  );
+  await page.getByRole("button", { name: "Walk through a turn" }).click();
+  await page
+    .getByRole("button", { name: "Inspect Jev classifier", exact: true })
+    .click();
+  await inspector.getByRole("tab", { name: "I/O", exact: true }).click();
+  await expect(inspector).toContainText("No recorded decision yet");
+  const dispatch = events.findIndex((r: any) => r.event_type === "dispatch");
+  await page
+    .getByRole("slider", { name: "Run progress" })
+    .fill(String(dispatch));
+  const recorded = inspector.getByRole("region", {
+    name: "Recorded input and output",
+  });
+  await recorded
+    .locator("summary")
+    .filter({ hasText: "Recorded input" })
+    .click();
+  await expect(recorded.locator("details[open] pre")).toContainText(
+    "station_observation",
+  );
+  await recorded
+    .locator("summary")
+    .filter({ hasText: "Recorded output" })
+    .click();
+  await expect(recorded).toContainText("scripted-demo-jev");
+  await page.getByRole("slider", { name: "Run progress" }).fill("0");
+  await expect(recorded).toContainText("No recorded decision yet");
+  await expect(recorded.locator("pre")).toHaveCount(0);
+});

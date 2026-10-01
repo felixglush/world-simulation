@@ -196,3 +196,8 @@ When changing the adversary action catalog or decision event schema, update
 `decisionHighlight` in `architecture/src/model.ts` and its browser review tests.
 Keep intent annotations separate from acceptance and world effects; unknown action
 types must remain unclassified, and a benign wait must not imply a safe world.
+
+The architecture inspector's I/O tab derives input/output contracts from directed
+connections and generated Python field schemas. Update connection examples with
+contract changes. Keep illustrative examples separate from recorded AI inputs and
+outputs; logs may contain only partial requests or flattened result projections.

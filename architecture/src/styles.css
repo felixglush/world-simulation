@@ -1778,3 +1778,63 @@ p {
     height: 330px;
   }
 }
+.io-inspector > .lead {
+  font-weight: 700;
+}
+.io-inspector section {
+  margin-top: 18px;
+}
+.io-contract {
+  margin: 10px 0;
+  border: 1px solid #d7e1e9;
+  border-radius: 7px;
+}
+.io-contract summary {
+  cursor: pointer;
+  padding: 11px;
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.io-contract summary small {
+  display: block;
+  margin: 4px 0 0 14px;
+  color: #678096;
+  font-weight: 400;
+}
+.io-contract-body {
+  padding: 10px;
+  min-width: 0;
+}
+.io-contract-body p {
+  margin: 8px 0;
+}
+.io-recording {
+  background: #f2f7fa;
+  border-radius: 7px;
+  padding: 12px;
+}
+.io-recording details {
+  margin-top: 10px;
+}
+.io-recording summary {
+  cursor: pointer;
+  font-size: 11px;
+  padding: 6px 0;
+}
+.io-route {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0;
+  font-weight: 600;
+  font-size: 12px;
+}
+.inspector-tabs {
+  gap: 0;
+}
+.inspector-tabs button {
+  padding-left: 5px;
+  padding-right: 5px;
+}
