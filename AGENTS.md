@@ -48,6 +48,18 @@ The project's TDD skill and supporting guides are stored in `.agents/skills/tdd`
 
 ## Run, replay, and compare missions
 
+The in-memory multi-world prototype has an offline scripted trade story. It prints
+public evidence and decisions as JSON, makes no model calls, and does not write or
+change the versioned mission-log contract:
+
+```bash
+UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control trade --turns 20
+```
+
+The horizon includes purchase, shipment, repair, later failure, batch investigation,
+quarantine, and replacement. Verify with `uv run --frozen pytest tests/test_trade.py
+tests/test_trade_mission.py tests/test_trade_cli.py`.
+
 Run a short AI-led mission with the default `llm` controller, replacing the model placeholder. The CLI saves a versioned JSONL run under `runs/` unless `--output` names another path:
 
 ```bash

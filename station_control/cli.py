@@ -197,6 +197,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     commands.add_parser("scenarios", help="List legacy and YAML scenario definitions.")
 
+    trade_parser = commands.add_parser(
+        "trade", help="Run the offline trade and delayed-defect story."
+    )
+    trade_parser.add_argument("--turns", type=_bounded_integer(1, MAX_MISSION_TURNS), default=20)
+
     replay_parser = commands.add_parser("replay", help="Validate and display a saved mission log.")
     replay_parser.add_argument("log", type=Path)
 
@@ -524,6 +529,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     arguments = parser.parse_args(argv)
     try:
+        if arguments.command == "trade":
+            from .trade_mission import run_trade_story, trade_story_summary
+
+            print(
+                json.dumps(
+                    trade_story_summary(run_trade_story(turns=arguments.turns)), sort_keys=True
+                )
+            )
+            return 0
         if arguments.command == "replay":
             print(render_run_log(read_run_log(arguments.log)))
             return 0
