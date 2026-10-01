@@ -11,12 +11,14 @@ from .trade import (
     TradeEvidence,
     WorldAdvanceResult,
     WorldState,
+    activate_world_backup,
     advance_world,
     inspect_installed_batch,
     observe_world,
     purchase_lot,
     quarantine_batch,
     repair_with_batch,
+    set_operating_load,
 )
 
 
@@ -51,6 +53,11 @@ def run_trade_mission(
         raise ValueError("Each world must have one governor")
     if len({id(policy) for _, policy in governors}) != len(governors):
         raise ValueError("Each world must have an independent governor instance")
+    from .deception import trace_report
+    from .quality import assay_batch, consume_feedstock
+    from .sensors import calibrate_sensors
+    from .trade_types import TradeEvidenceKind, record_evidence
+
     events = []
     decisions = []
     for _ in range(turns):
@@ -101,11 +108,38 @@ def run_trade_mission(
                     seller_id=command.seller_id,
                 )
             elif command.kind == "repair":
-                result = repair_with_batch(state, command.batch_id)
+                result = repair_with_batch(
+                    state,
+                    command.batch_id,
+                    mode=command.repair_mode,
+                    shipment_id=command.shipment_id,
+                )
             elif command.kind == "inspect":
-                result = inspect_installed_batch(state)
+                result = inspect_installed_batch(state, method=command.method)
             elif command.kind == "quarantine":
-                result = quarantine_batch(state, command.batch_id, quantity=command.quantity)
+                result = quarantine_batch(
+                    state,
+                    command.batch_id,
+                    quantity=command.quantity,
+                    shipment_id=command.shipment_id,
+                )
+            elif command.kind == "trace":
+                result = trace_report(state, command.report_id, world_id=world_id)
+            elif command.kind == "calibrate":
+                result = calibrate_sensors(state)
+            elif command.kind == "assay":
+                result = assay_batch(state, command.batch_id, shipment_id=command.shipment_id)
+            elif command.kind == "consume":
+                result = consume_feedstock(
+                    state,
+                    command.batch_id,
+                    quantity=command.quantity,
+                    shipment_id=command.shipment_id,
+                )
+            elif command.kind == "backup":
+                result = activate_world_backup(state)
+            elif command.kind == "load":
+                result = set_operating_load(state, command.operating_load)
             else:
                 decisions.append(
                     GovernorDecision(
@@ -115,6 +149,22 @@ def run_trade_mission(
                 continue
             state = result.state
             events.extend(result.evidence)
+            if not result.accepted:
+                state, feedback = record_evidence(
+                    state,
+                    TradeEvidenceKind.COMMAND_REJECTED,
+                    f"{command.kind} command rejected: {result.rejection}.",
+                    world_id,
+                    finding_code=(
+                        "sensor_calibration_unavailable"
+                        if command.kind == "calibrate"
+                        and result.rejection == "sensor_mode_incompatible"
+                        else "repair_not_needed"
+                        if command.kind == "repair" and result.rejection == "repair_not_needed"
+                        else "command_rejected"
+                    ),
+                )
+                events.extend(feedback)
             decisions.append(
                 GovernorDecision(
                     state.station.turn, world_id, command, result.accepted, result.rejection

@@ -291,6 +291,109 @@ def test_consumption_uses_duplicate_batch_lots_in_fifo_provenance_order():
     assert repeated.evidence[0].shipment_id == "shipment:second"
 
 
+def test_named_shipment_scopes_assay_and_consumption_for_same_batch_quality_lots():
+    first = feedstock(
+        quantity=2,
+        yield_percent=100,
+        contract_id="contract:first",
+        shipment_id="shipment:first",
+    )
+    second = feedstock(
+        quantity=2,
+        yield_percent=0,
+        contract_id="contract:second",
+        shipment_id="shipment:second",
+    )
+    state = state_with_lots(first, second)
+
+    assayed_first = assay_batch(state, "oxygen-batch", shipment_id="shipment:first")
+
+    assert assayed_first.accepted
+    assert [lot.quantity for lot in assayed_first.state.station_lots] == [1, 2]
+    assert assayed_first.evidence[0].shipment_id == "shipment:first"
+    assert assayed_first.evidence[0].contract_id == "contract:first"
+    assert assayed_first.evidence[0].measured_value == 100
+    assert assayed_first.evidence[0].measured_unit == "percent"
+
+    consumed_first = consume_feedstock(
+        assayed_first.state,
+        "oxygen-batch",
+        quantity=1,
+        shipment_id="shipment:first",
+    )
+
+    assert consumed_first.accepted
+    assert [lot.quantity for lot in consumed_first.state.station_lots] == [0, 2]
+    assert consumed_first.state.station.oxygen == state.station.oxygen + 100
+    assert consumed_first.evidence[0].shipment_id == "shipment:first"
+    assert consumed_first.evidence[0].contract_id == "contract:first"
+    assert consumed_first.evidence[0].measured_value == 100
+    assert consumed_first.evidence[0].measured_unit == "oxygen_units"
+
+    assayed_second = assay_batch(
+        consumed_first.state,
+        "oxygen-batch",
+        shipment_id="shipment:second",
+    )
+
+    assert assayed_second.accepted
+    assert [lot.quantity for lot in assayed_second.state.station_lots] == [0, 1]
+    assert assayed_second.evidence[0].shipment_id == "shipment:second"
+    assert assayed_second.evidence[0].contract_id == "contract:second"
+    assert assayed_second.evidence[0].measured_value == 0
+    assert assayed_second.evidence[0].measured_unit == "percent"
+
+
+@pytest.mark.parametrize("operation", ["assay", "consume"])
+def test_named_unknown_shipment_rejects_without_sampling_or_consuming_another_delivery(operation):
+    first = feedstock(
+        quantity=2,
+        yield_percent=100,
+        contract_id="contract:first",
+        shipment_id="shipment:first",
+    )
+    second = feedstock(
+        quantity=2,
+        yield_percent=0,
+        contract_id="contract:second",
+        shipment_id="shipment:second",
+    )
+    state = state_with_lots(first, second)
+
+    if operation == "assay":
+        result = assay_batch(state, "oxygen-batch", shipment_id="shipment:missing")
+    else:
+        result = consume_feedstock(
+            state,
+            "oxygen-batch",
+            quantity=1,
+            shipment_id="shipment:missing",
+        )
+
+    assert not result.accepted
+    assert result.rejection
+    assert result.state is state
+
+
+@pytest.mark.parametrize(("operation", "shipment_id"), [("assay", ""), ("consume", 42)])
+def test_named_shipment_id_must_be_a_nonempty_string_without_state_changes(operation, shipment_id):
+    state = state_with_lots(feedstock(quantity=2))
+
+    if operation == "assay":
+        result = assay_batch(state, "oxygen-batch", shipment_id=shipment_id)
+    else:
+        result = consume_feedstock(
+            state,
+            "oxygen-batch",
+            quantity=1,
+            shipment_id=shipment_id,
+        )
+
+    assert not result.accepted
+    assert result.rejection == "invalid_shipment_id"
+    assert result.state is state
+
+
 def test_assay_sample_and_quarantine_remove_distinct_feedstock_stock():
     lot = feedstock(
         quantity=2,

@@ -19,7 +19,12 @@ _FEEDSTOCK = "oxygen_feedstock"
 _FEEDSTOCK_UNIT = "canisters"
 
 
-def assay_batch(state: WorldState, batch_id: str) -> TradeResult:
+def assay_batch(
+    state: WorldState,
+    batch_id: str,
+    *,
+    shipment_id: str | None = None,
+) -> TradeResult:
     """Consume one station sample and publish its measured feedstock yield."""
     if not isinstance(state, WorldState):
         raise TypeError("state must be a WorldState")
@@ -27,12 +32,21 @@ def assay_batch(state: WorldState, batch_id: str) -> TradeResult:
         return _rejected(state, "crew_lost")
     if not isinstance(batch_id, str) or not batch_id:
         return _rejected(state, "invalid_batch_id")
+    if shipment_id is not None and (not isinstance(shipment_id, str) or not shipment_id.strip()):
+        return _rejected(state, "invalid_shipment_id")
     if state.station.available_crew < 1:
         return _rejected(state, "crew_unavailable")
 
-    matching = tuple(lot for lot in state.station_lots if lot.batch_id == batch_id)
-    if not matching:
+    batch_lots = tuple(lot for lot in state.station_lots if lot.batch_id == batch_id)
+    if not batch_lots:
         return _rejected(state, "batch_not_in_station_inventory")
+    matching = (
+        tuple(lot for lot in batch_lots if lot.shipment_id == shipment_id)
+        if shipment_id is not None
+        else batch_lots
+    )
+    if not matching:
+        return _rejected(state, "shipment_not_in_batch")
     available = tuple(lot for lot in matching if lot.quantity > 0)
     if not available:
         return _rejected(state, "insufficient_stock")
@@ -90,7 +104,13 @@ def assay_batch(state: WorldState, batch_id: str) -> TradeResult:
     return TradeResult(updated, True, evidence=evidence)
 
 
-def consume_feedstock(state: WorldState, batch_id: str, *, quantity: int = 1) -> TradeResult:
+def consume_feedstock(
+    state: WorldState,
+    batch_id: str,
+    *,
+    quantity: int = 1,
+    shipment_id: str | None = None,
+) -> TradeResult:
     """Convert FIFO station feedstock into oxygen, preserving quality provenance."""
     if not isinstance(state, WorldState):
         raise TypeError("state must be a WorldState")
@@ -98,14 +118,23 @@ def consume_feedstock(state: WorldState, batch_id: str, *, quantity: int = 1) ->
         return _rejected(state, "crew_lost")
     if not isinstance(batch_id, str) or not batch_id:
         return _rejected(state, "invalid_batch_id")
+    if shipment_id is not None and (not isinstance(shipment_id, str) or not shipment_id.strip()):
+        return _rejected(state, "invalid_shipment_id")
     if type(quantity) is not int or not 1 <= quantity <= 3:
         return _rejected(state, "invalid_quantity")
     if state.station.available_crew < 1:
         return _rejected(state, "crew_unavailable")
 
-    matching = tuple(lot for lot in state.station_lots if lot.batch_id == batch_id)
-    if not matching:
+    batch_lots = tuple(lot for lot in state.station_lots if lot.batch_id == batch_id)
+    if not batch_lots:
         return _rejected(state, "batch_not_in_station_inventory")
+    matching = (
+        tuple(lot for lot in batch_lots if lot.shipment_id == shipment_id)
+        if shipment_id is not None
+        else batch_lots
+    )
+    if not matching:
+        return _rejected(state, "shipment_not_in_batch")
     available = tuple(lot for lot in matching if lot.quantity > 0)
     if not available:
         return _rejected(state, "insufficient_stock")
@@ -125,7 +154,12 @@ def consume_feedstock(state: WorldState, batch_id: str, *, quantity: int = 1) ->
     emitted = []
     evidence_state = state
     for index, lot in enumerate(state.station_lots):
-        if lot.batch_id != batch_id or lot.quantity <= 0 or remaining <= 0:
+        if (
+            lot.batch_id != batch_id
+            or (shipment_id is not None and lot.shipment_id != shipment_id)
+            or lot.quantity <= 0
+            or remaining <= 0
+        ):
             continue
         consumed = min(lot.quantity, remaining)
         potential = consumed * 100

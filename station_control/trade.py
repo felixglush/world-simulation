@@ -199,6 +199,8 @@ def purchase_lot(
         or lot.failure_load not in {"any", "routine", "peak", "backup"}
         or type(lot.yield_percent) is not int
         or not 0 <= lot.yield_percent <= 100
+        or (lot.resource != "oxygen_feedstock" and lot.yield_percent != 100)
+        or (lot.resource != "parts" and (lot.latent_defect or lot.failure_load != "any"))
     ):
         return _rejected(state, "invalid_lot_condition")
     if any(
@@ -651,6 +653,21 @@ def _apply_equipment_exposure(state: WorldState, load: str) -> WorldAdvanceResul
     return WorldAdvanceResult(updated)
 
 
+def activate_world_backup(state: WorldState) -> TradeResult:
+    result = apply_action(state.station, Action(ActionKind.ACTIVATE_BACKUP))
+    if not result.accepted:
+        return _rejected(state, result.rejection or "backup_unavailable")
+    updated, evidence = _emit_evidence(
+        replace(state, station=result.state),
+        TradeEvidenceKind.STATION_EVIDENCE,
+        result.evidence[0].message,
+        "station",
+        asset_id="oxygen_system",
+        finding_code="backup_activated",
+    )
+    return TradeResult(updated, True, evidence=evidence)
+
+
 def set_operating_load(state: WorldState, load: str) -> TradeResult:
     if not state.station.crew_alive:
         return _rejected(state, "crew_lost")
@@ -667,7 +684,9 @@ def set_operating_load(state: WorldState, load: str) -> TradeResult:
     return TradeResult(updated, True, evidence=evidence)
 
 
-def repair_with_batch(state: WorldState, batch_id: str, *, mode: str = "full") -> TradeResult:
+def repair_with_batch(
+    state: WorldState, batch_id: str, *, mode: str = "full", shipment_id: str | None = None
+) -> TradeResult:
     if not isinstance(state, WorldState):
         raise TypeError("state must be a WorldState")
     if not state.station.crew_alive:
@@ -680,7 +699,9 @@ def repair_with_batch(state: WorldState, batch_id: str, *, mode: str = "full") -
         return _rejected(state, "repair_in_progress")
     if not isinstance(batch_id, str) or not batch_id:
         return _rejected(state, "invalid_batch_id")
-    selected = _available_lot_index(state, "station", batch_id)
+    if shipment_id is not None and (not isinstance(shipment_id, str) or not shipment_id):
+        return _rejected(state, "invalid_shipment_id")
+    selected = _available_lot_index(state, "station", batch_id, shipment_id=shipment_id)
     if selected is None:
         return _rejected(state, "batch_not_in_station_inventory")
     if state.station.parts < 1:
@@ -807,7 +828,9 @@ def inspect_installed_batch(state: WorldState, *, method: str = "routine") -> Tr
     return TradeResult(updated, True, evidence=stress.evidence + evidence)
 
 
-def quarantine_batch(state: WorldState, batch_id: str, *, quantity: int = 1) -> TradeResult:
+def quarantine_batch(
+    state: WorldState, batch_id: str, *, quantity: int = 1, shipment_id: str | None = None
+) -> TradeResult:
     if not isinstance(state, WorldState):
         raise TypeError("state must be a WorldState")
     if not state.station.crew_alive:
@@ -816,8 +839,14 @@ def quarantine_batch(state: WorldState, batch_id: str, *, quantity: int = 1) -> 
         return _rejected(state, "invalid_quantity")
     if not isinstance(batch_id, str) or not batch_id:
         return _rejected(state, "invalid_batch_id")
+    if shipment_id is not None and (not isinstance(shipment_id, str) or not shipment_id):
+        return _rejected(state, "invalid_shipment_id")
     available = sum(
-        lot.quantity for lot in state.station_lots if lot.batch_id == batch_id and lot.quantity > 0
+        lot.quantity
+        for lot in state.station_lots
+        if lot.batch_id == batch_id
+        and lot.quantity > 0
+        and (shipment_id is None or lot.shipment_id == shipment_id)
     )
     if available < quantity:
         return _rejected(state, "batch_not_in_station_inventory")
@@ -826,7 +855,12 @@ def quarantine_batch(state: WorldState, batch_id: str, *, quantity: int = 1) -> 
     remaining = quantity
     emitted: list[TradeEvidence] = []
     for index, lot in enumerate(updated.station_lots):
-        if lot.batch_id != batch_id or lot.quantity <= 0 or remaining <= 0:
+        if (
+            lot.batch_id != batch_id
+            or lot.quantity <= 0
+            or remaining <= 0
+            or (shipment_id is not None and lot.shipment_id != shipment_id)
+        ):
             continue
         removed = min(lot.quantity, remaining)
         changed = list(updated.station_lots)
@@ -886,7 +920,9 @@ def observe_world(state: WorldState, world_id: str) -> PublicWorldView:
         repair_remaining = 0
 
     local_lots = tuple(
-        _public_lot(lot, world_id) for lot in _lots(state, world_id) if lot.quantity > 0
+        _public_lot(lot, world_id, include_provenance=True)
+        for lot in _lots(state, world_id)
+        if lot.quantity > 0
     )
     seller_ids = sorted(("station", *(inventory.world_id for inventory in state.inventories)))
     market_offers = []
@@ -975,6 +1011,7 @@ def observe_world(state: WorldState, world_id: str) -> PublicWorldView:
         shipments=shipments,
         evidence=tuple(sorted(evidence, key=lambda item: (item.turn, item.sequence))),
         operating_load=state.operating_load if world_id == "station" else "routine",
+        backup_active=state.station.backup_active if world_id == "station" else False,
     )
 
 
@@ -1042,12 +1079,16 @@ def _set_lots(state: WorldState, world_id: str, lots: tuple[PartLot, ...]) -> Wo
     return replace(state, inventories=inventories)
 
 
-def _available_lot_index(state: WorldState, world_id: str, batch_id: str) -> int | None:
+def _available_lot_index(
+    state: WorldState, world_id: str, batch_id: str, *, shipment_id: str | None = None
+) -> int | None:
     return next(
         (
             index
             for index, lot in enumerate(_lots(state, world_id))
-            if lot.batch_id == batch_id and lot.quantity > 0
+            if lot.batch_id == batch_id
+            and lot.quantity > 0
+            and (shipment_id is None or lot.shipment_id == shipment_id)
         ),
         None,
     )
@@ -1134,7 +1175,13 @@ def _offer_quantity(state: WorldState, world_id: str, batch_id: str) -> int:
     return 0
 
 
-def _public_lot(lot: PartLot, seller_world: str, quantity: int | None = None) -> PublicLot:
+def _public_lot(
+    lot: PartLot,
+    seller_world: str,
+    quantity: int | None = None,
+    *,
+    include_provenance: bool = False,
+) -> PublicLot:
     return PublicLot(
         lot.batch_id,
         lot.quantity if quantity is None else quantity,
@@ -1143,6 +1190,8 @@ def _public_lot(lot: PartLot, seller_world: str, quantity: int | None = None) ->
         lot.resource,
         lot.unit,
         seller_world,
+        lot.contract_id if include_provenance else None,
+        lot.shipment_id if include_provenance else None,
     )
 
 

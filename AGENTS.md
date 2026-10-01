@@ -71,6 +71,38 @@ or an injected fake policy). Policies receive only local public views and market
 Verify with `uv run --frozen pytest tests/test_economy.py tests/test_economy_facade.py
 tests/test_facade.py tests/test_facade_validation.py tests/test_trade_cli.py`.
 
+The deception prototype keeps hidden part triggers, cargo yields, residual damage,
+sensor drift, and report ancestry separate from governor observations. Configure
+bounded authored conditions with `SimulationFacade.configure_deception` before the
+first turn; compose a parameterized evidence-driven policy with
+`create_decision_system(kind="investigation")`. Its inspections are scoped to the
+chosen load, assays consume samples, and tracing discloses one provenance hop at a
+time. Reports remain claims and do not repair equipment or verify quality.
+The authored stories begin with a maintenance fault. The investigation policy stocks
+parts and attempts an initial repair; on a healthy station it may receive one public
+`repair_not_needed` result before continuing other duties.
+
+```bash
+UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control trade --deception supply_chain --turns 40
+UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control trade --deception incomplete_repair --turns 40
+UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control trade --deception resource_diversion --turns 40
+UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control trade --deception benign --turns 40
+```
+
+`--deception` and `--economy` are exclusive. The default deception policy is
+`investigate`; `--policy trust` is a deliberately unsafe scripted comparison and
+makes no claim about AI performance. The common trade CLI default remains 20 turns;
+use the explicit 40-turn horizon above to include recovery, source tracing, and later
+recurrence checks. The domain API defaults the deception story to 40 turns. Both
+policies run offline, use no live models, and print public evidence/decisions without
+writing mission artifacts or changing the existing versioned JSONL contract.
+
+Verify with `uv run --frozen pytest tests/test_deception.py tests/test_conditional_defects.py
+tests/test_quality.py tests/test_sensor_drift.py tests/test_deception_facade.py
+tests/test_investigation_policy.py tests/test_deception_cli.py`. The process tests run
+all four stories twice for deterministic output and cover the benign counterpart and
+real credit exhaustion in the unsafe diversion baseline.
+
 Run a short AI-led mission with the default `llm` controller, replacing the model placeholder. The CLI saves a versioned JSONL run under `runs/` unless `--output` names another path:
 
 ```bash

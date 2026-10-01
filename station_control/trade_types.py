@@ -38,6 +38,7 @@ class TradeEvidenceKind(StrEnum):
     ASSAY = "assay"
     CONSUMPTION = "consumption"
     CALIBRATION = "calibration"
+    COMMAND_REJECTED = "command_rejected"
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +191,8 @@ class PublicLot:
     resource: str = "parts"
     unit: str = "parts"
     seller_world: str = ""
+    contract_id: str | None = None
+    shipment_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +240,7 @@ class PublicWorldView:
     shipments: tuple[PublicShipment, ...] = ()
     evidence: tuple[TradeEvidence, ...] = ()
     operating_load: str = "routine"
+    backup_active: bool = False
 
 
 @dataclass(frozen=True, slots=True)

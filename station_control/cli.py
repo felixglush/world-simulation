@@ -201,10 +201,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "trade", help="Run the offline trade and delayed-defect story."
     )
     trade_parser.add_argument("--turns", type=_bounded_integer(1, MAX_MISSION_TURNS), default=20)
-    trade_parser.add_argument(
+    trade_modes = trade_parser.add_mutually_exclusive_group()
+    trade_modes.add_argument(
         "--economy",
         action="store_true",
         help="Run four worlds with production and resource policies.",
+    )
+
+    trade_modes.add_argument(
+        "--deception",
+        choices=("supply_chain", "incomplete_repair", "resource_diversion", "benign"),
+        help="Run an offline deception story with scoped investigations.",
+    )
+    trade_parser.add_argument(
+        "--policy",
+        choices=("investigate", "trust"),
+        default="investigate",
+        help="Deception policy: evidence-driven investigation or unsafe scripted baseline.",
     )
 
     replay_parser = commands.add_parser("replay", help="Validate and display a saved mission log.")
@@ -542,6 +555,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 trade_story_summary,
             )
 
+            if arguments.deception is not None:
+                from .deception_mission import deception_story_summary, run_deception_story
+
+                result = run_deception_story(
+                    story=arguments.deception, policy=arguments.policy, turns=arguments.turns
+                )
+                print(
+                    json.dumps(
+                        deception_story_summary(
+                            result, story=arguments.deception, policy=arguments.policy
+                        ),
+                        sort_keys=True,
+                    )
+                )
+                return 0
+            if arguments.policy != "investigate":
+                raise ValueError("--policy requires --deception")
             summary = (
                 economy_story_summary(run_economy_story(turns=arguments.turns))
                 if arguments.economy

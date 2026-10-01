@@ -6,6 +6,7 @@ import re
 from dataclasses import replace
 from functools import partial
 
+from .deception import TradeReport, validate_reports
 from .domain import StationState
 from .economy import (
     ProductionRecipe,
@@ -99,6 +100,41 @@ class SimulationFacade:
         if price_rules:
             self._price_rules[world_id] = price_rules
 
+    def configure_deception(
+        self,
+        *,
+        reports: tuple[TradeReport, ...] = (),
+        sensor_drift_per_turn: int = 0,
+        sensor_drift_limit: int = 200,
+        residual_damage_after_turns: int = 0,
+        operating_load: str = "routine",
+    ) -> None:
+        """Set bounded authored conditions before the first mission turn."""
+        if self.state.station.turn != 0:
+            raise ValueError("Configure deception before starting the simulation")
+        if (
+            type(sensor_drift_per_turn) is not int
+            or not 0 <= sensor_drift_per_turn <= 20
+            or type(sensor_drift_limit) is not int
+            or not 0 <= sensor_drift_limit <= 200
+            or type(residual_damage_after_turns) is not int
+            or not 0 <= residual_damage_after_turns <= 100
+            or not isinstance(operating_load, str)
+            or operating_load not in {"routine", "peak"}
+        ):
+            raise ValueError("Invalid bounded deception configuration")
+        validate_reports(
+            reports, {"station", *(world.world_id for world in self.state.inventories)}
+        )
+        self.state = replace(
+            self.state,
+            reports=reports,
+            sensor_drift_per_turn=sensor_drift_per_turn,
+            sensor_drift_limit=sensor_drift_limit,
+            residual_damage_after_turns=residual_damage_after_turns,
+            operating_load=operating_load,
+        )
+
     def create_decision_system(
         self,
         world_id: str,
@@ -110,6 +146,11 @@ class SimulationFacade:
         cash_reserve: int = 0,
         strategy: str = "reserve",
         reference_prices: tuple[tuple[str, str, int], ...] | None = None,
+        emergency_reserve: int = 60,
+        stress_method: str = "peak",
+        stress_cycles: int = 2,
+        initial_repair_mode: str = "full",
+        feedstock_target: int = 2,
     ) -> GovernorPolicy:
         if world_id != "station" and not any(
             world.world_id == world_id for world in self.state.inventories
@@ -117,7 +158,12 @@ class SimulationFacade:
             raise ValueError("Create the world before its decision system")
         if world_id in self._governors:
             raise ValueError("A world already has a decision system")
-        if not isinstance(kind, str) or kind not in {"scripted", "recovery", "resources"}:
+        if not isinstance(kind, str) or kind not in {
+            "scripted",
+            "recovery",
+            "resources",
+            "investigation",
+        }:
             raise ValueError("Unsupported decision system")
         has_resource_parameters = (
             resource_targets != ()
@@ -125,6 +171,15 @@ class SimulationFacade:
             or strategy != "reserve"
             or reference_prices is not None
         )
+        has_investigation_parameters = (
+            emergency_reserve != 60
+            or stress_method != "peak"
+            or stress_cycles != 2
+            or initial_repair_mode != "full"
+            or feedstock_target != 2
+        )
+        if kind != "investigation" and has_investigation_parameters:
+            raise ValueError("Investigation parameters require an investigation decision system")
         if provider is not None:
             if (
                 commands != ()
@@ -135,6 +190,18 @@ class SimulationFacade:
             ):
                 raise ValueError("Supply either a policy provider or policy parameters")
             policy = provider
+        elif kind == "investigation":
+            from .investigation import InvestigationGovernor
+
+            if world_id != "station" or commands != () or has_resource_parameters:
+                raise ValueError("Investigation policy controls station operations")
+            policy = InvestigationGovernor(
+                emergency_reserve,
+                stress_method,
+                stress_cycles,
+                initial_repair_mode,
+                feedstock_target,
+            )
         elif kind == "resources":
             from .economy import ResourceGovernor
 
@@ -296,6 +363,12 @@ def _validate_initial_lots(lots: tuple[PartLot, ...], world_id: str) -> None:
             or type(lot.defect_after_turns) is not int
             or not 0 <= lot.defect_after_turns <= 100
             or (lot.latent_defect and lot.defect_after_turns == 0)
+            or not isinstance(lot.failure_load, str)
+            or lot.failure_load not in {"any", "routine", "peak", "backup"}
+            or type(lot.yield_percent) is not int
+            or not 0 <= lot.yield_percent <= 100
+            or (lot.resource != "oxygen_feedstock" and lot.yield_percent != 100)
+            or (lot.resource != "parts" and (lot.latent_defect or lot.failure_load != "any"))
         ):
             raise ValueError("Invalid initial world lot")
         batches.add(lot.batch_id)

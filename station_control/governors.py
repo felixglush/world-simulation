@@ -20,6 +20,7 @@ class TradeCommand:
     repair_mode: str = "full"
     report_id: str | None = None
     operating_load: str = "routine"
+    shipment_id: str | None = None
 
 
 class GovernorPolicy(Protocol):
