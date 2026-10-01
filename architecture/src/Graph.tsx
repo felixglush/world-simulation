@@ -1,3 +1,6 @@
+import { useDiagramLayout } from "./diagram/useDiagramLayout";
+import { routePath, CARD_WIDTH, CARD_HEIGHT } from "./diagram/layout";
+import type { DiagramRoute, DiagramPort } from "./diagram/layout";
 import { memo, useEffect, useMemo, useRef } from "react";
 import {
   Background,
@@ -7,10 +10,9 @@ import {
   MarkerType,
   Position,
   ReactFlow,
-  getSmoothStepPath,
   useReactFlow,
   useViewport,
-  useNodesInitialized,
+  useUpdateNodeInternals,
 } from "@xyflow/react";
 import type { Edge, EdgeProps, Node, NodeProps } from "@xyflow/react";
 import {
@@ -66,6 +68,7 @@ export const icons = {
   cloud: Cloud,
 };
 interface CardData extends Record<string, unknown> {
+  ports: DiagramPort[];
   decision?: DecisionHighlight | null;
   component: Component;
   tone: string;
@@ -80,6 +83,7 @@ interface BoundaryData extends Record<string, unknown> {
   external: boolean;
 }
 interface WireData extends Record<string, unknown> {
+  route: DiagramRoute;
   message: Connection;
   active: boolean;
   dim: boolean;
@@ -87,7 +91,11 @@ interface WireData extends Record<string, unknown> {
   labels: boolean;
 }
 
-const ComponentNode = memo(({ data }: NodeProps<Node<CardData>>) => {
+const ComponentNode = memo(({ data, id }: NodeProps<Node<CardData>>) => {
+  const updateNodeInternals = useUpdateNodeInternals();
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, data.ports, updateNodeInternals]);
   const Icon = icons[data.component.icon as keyof typeof icons] ?? Workflow;
   return (
     <div
@@ -100,14 +108,21 @@ const ComponentNode = memo(({ data }: NodeProps<Node<CardData>>) => {
         } as React.CSSProperties
       }
     >
-      {[Position.Left, Position.Right, Position.Top, Position.Bottom].map(
-        (position) => (
-          <span key={position}>
-            <Handle id={`in-${position}`} type="target" position={position} />
-            <Handle id={`out-${position}`} type="source" position={position} />
-          </span>
-        ),
-      )}
+      {data.ports.map((port) => (
+        <Handle
+          key={port.id}
+          id={port.id}
+          type={port.type}
+          position={port.side as Position}
+          style={{
+            left: port.x,
+            top: port.y,
+            right: "auto",
+            bottom: "auto",
+            transform: "translate(-50%, -50%)",
+          }}
+        />
+      ))}
       {data.decision && (
         <span className="canvas-decision-badge">{data.decision.label}</span>
       )}
@@ -150,11 +165,8 @@ const BoundaryNode = memo(({ data }: NodeProps<Node<BoundaryData>>) => (
 const MessageEdge = memo((props: EdgeProps<Edge<WireData>>) => {
   const { data } = props;
   const { colors, model } = useProject();
-  const [path, x, y] = getSmoothStepPath({
-    ...props,
-    borderRadius: 14,
-    offset: 26,
-  });
+  const path = routePath(data!.route.points);
+  const { x, y } = data!.route.label;
   return (
     <>
       <BaseEdge
@@ -234,9 +246,8 @@ export function Graph({
     useProject();
   const api = useReactFlow();
   const container = useRef<HTMLDivElement>(null);
-  const initialized = useNodesInitialized();
   const { zoom } = useViewport();
-  const { nodes, edges } = useMemo(() => {
+  const { components, services, messages } = useMemo(() => {
     const revealed = new Set(follow ? activeNodes : []);
     if (follow)
       model.connections
@@ -271,6 +282,33 @@ export function Graph({
       mode,
       privateFlows,
     );
+    return { components, services, messages };
+  }, [
+    view,
+    mode,
+    showDetails,
+    follow,
+    activeNodes,
+    activeEdges,
+    selected,
+    privateFlows,
+    model,
+    visibleComponents,
+    visibleConnections,
+  ]);
+  const arranged = useDiagramLayout({
+    services: services.map((s) => ({ id: s.id })),
+    items: components.map((c) => ({ id: c.id, service: c.service })),
+    links: messages.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      label: e.label,
+    })),
+  });
+  const layout = arranged?.layout;
+  const { nodes, edges } = useMemo(() => {
+    if (!layout) return { nodes: [], edges: [] };
     const focusNodes = new Set(activeNodes);
     const focusEdges = new Set(activeEdges);
     if (selected?.kind === "component") {
@@ -295,59 +333,59 @@ export function Graph({
       }
     }
     const focus = focusNodes.size > 0;
-    const positions: Record<string, { x: number; y: number; column: number }> =
-      {};
     const graphNodes: Node[] = [];
-    services.forEach((service, column) => {
+    services.forEach((service) => {
       const members = components.filter((node) => node.service === service.id);
       graphNodes.push({
         id: `boundary-${service.id}`,
         type: "boundary",
-        position: { x: column * 304, y: 0 },
+        position: {
+          x: layout.boundaries[service.id].x,
+          y: layout.boundaries[service.id].y,
+        },
         data: { ...service, external: service.external ?? false },
-        style: { width: 268, height: members.length * 122 + 82 },
+        style: {
+          width: layout.boundaries[service.id].width,
+          height: layout.boundaries[service.id].height,
+        },
         selectable: false,
         draggable: false,
         focusable: false,
         zIndex: -1,
       });
-      members.forEach((component, row) => {
-        const position = { x: column * 304 + 18, y: 72 + row * 122 };
-        positions[component.id] = { ...position, column };
+      members.forEach((component) => {
+        const position = layout.positions[component.id];
         graphNodes.push({
           id: component.id,
           type: "component",
           position,
           data: {
             component,
+            ports: layout.ports[component.id],
             tone: service.color,
             active: focusNodes.has(component.id),
             decision: decision?.actor === component.id ? decision : null,
             dim: focus && !focusNodes.has(component.id),
             onCode: (id: string) => onSelect("component", id, true),
           },
-          style: { width: 232 },
+          style: { width: CARD_WIDTH, height: CARD_HEIGHT },
           ariaLabel: `Component ${component.title}`,
           draggable: false,
         });
       });
     });
     const graphEdges: Edge[] = messages.map((message) => {
-      const from = positions[message.source],
-        to = positions[message.target];
-      const forward = to.column > from.column;
-      const vertical = to.column === from.column;
-      const bypass =
-        vertical && (from.y > to.y || Math.abs(from.y - to.y) > 130);
+      const route = layout.routes[message.id];
       return {
         id: message.id,
         type: "message",
         source: message.source,
         target: message.target,
-        sourceHandle: `out-${vertical ? (bypass ? "right" : "bottom") : forward ? "right" : "left"}`,
-        targetHandle: `in-${vertical ? (bypass ? "right" : "top") : forward ? "left" : "right"}`,
+        sourceHandle: `out-${message.id}`,
+        targetHandle: `in-${message.id}`,
         data: {
           message,
+          route,
           active: focusEdges.has(message.id),
           dim: focus && !focusEdges.has(message.id),
           inspect: (id: string) => onSelect("message", id),
@@ -363,13 +401,21 @@ export function Graph({
         ariaLabel: `${message.label}: ${byId[message.source].title} to ${byId[message.target].title}`,
       };
     });
+    graphNodes.push({
+      id: "routing-extent",
+      type: "boundary",
+      position: { x: layout.bounds.width, y: layout.bounds.height },
+      data: { title: "", subtitle: "", color: "transparent", external: false },
+      style: { width: 1, height: 1, opacity: 0, pointerEvents: "none" },
+      selectable: false,
+      focusable: false,
+    });
     return { nodes: graphNodes, edges: graphEdges };
   }, [
-    view,
-    follow,
-    showDetails,
-    mode,
-    privateFlows,
+    layout,
+    components,
+    services,
+    messages,
     labels,
     selected,
     activeNodes,
@@ -382,28 +428,41 @@ export function Graph({
     visibleComponents,
     visibleConnections,
   ]);
+  const cameraBounds = useMemo(() => {
+    if (!layout) return undefined;
+    if (!follow || !activeNodes.length) return layout.bounds;
+    const points = activeNodes.flatMap((id) => {
+      const p = layout.positions[id];
+      return p ? [p, { x: p.x + CARD_WIDTH, y: p.y + CARD_HEIGHT }] : [];
+    });
+    activeEdges.forEach((id) =>
+      points.push(...(layout.routes[id]?.points ?? [])),
+    );
+    if (!points.length) return layout.bounds;
+    const x = Math.min(...points.map((p) => p.x)),
+      y = Math.min(...points.map((p) => p.y));
+    return {
+      x,
+      y,
+      width: Math.max(...points.map((p) => p.x)) - x,
+      height: Math.max(...points.map((p) => p.y)) - y,
+    };
+  }, [layout, follow, activeNodes, activeEdges]);
   useEffect(() => {
-    if (initialized)
-      void api.fitView({ padding: 0.1, duration: 200, maxZoom: 1.05 });
-  }, [initialized, view, mode, api]);
+    if (!api.viewportInitialized || !cameraBounds) return;
+    const frame = requestAnimationFrame(() => {
+      void api.fitBounds(cameraBounds, { padding: 0.15, duration: 250 });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [cameraBounds, api]);
   useEffect(() => {
-    if (!container.current) return;
+    if (!container.current || !api.viewportInitialized || !cameraBounds) return;
     const observer = new ResizeObserver(() => {
-      void api.fitView({ padding: 0.1, duration: 0, maxZoom: 1.05 });
+      void api.fitBounds(cameraBounds, { padding: 0.15, duration: 0 });
     });
     observer.observe(container.current);
     return () => observer.disconnect();
-  }, [api]);
-  const activeKey = activeNodes.join(",");
-  useEffect(() => {
-    if (!initialized || !follow || !activeKey) return;
-    void api.fitView({
-      nodes: activeKey.split(",").map((id) => ({ id })),
-      padding: 0.35,
-      maxZoom: 1.15,
-      duration: 350,
-    });
-  }, [activeKey, follow, initialized, view, showDetails, api]);
+  }, [cameraBounds, api]);
   const focusSelection = () => {
     const ids =
       selected?.kind === "component"
@@ -426,14 +485,23 @@ export function Graph({
       className="graph"
       aria-label="Interactive architecture diagram"
     >
+      {!layout && (
+        <div
+          className="layout-status"
+          role={arranged?.error ? "alert" : "status"}
+        >
+          {arranged?.error
+            ? `Unable to arrange diagram: ${arranged.error}`
+            : "Arranging connections…"}
+        </div>
+      )}
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        fitView
         fitViewOptions={{ padding: 0.1, maxZoom: 1.05 }}
-        minZoom={0.2}
+        minZoom={0.08}
         maxZoom={2.2}
         nodesConnectable={false}
         nodesDraggable={false}

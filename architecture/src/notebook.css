@@ -650,3 +650,11 @@ summary:focus-visible {
 .display-settings > summary:focus-visible {
   outline: 2px solid #778e5c;
 }
+.layout-status {
+  position: absolute;
+  top: 16px;
+  left: 28px;
+  z-index: 2;
+  font-size: 11px;
+  color: #6d7a64;
+}

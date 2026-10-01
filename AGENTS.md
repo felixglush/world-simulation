@@ -224,3 +224,10 @@ The field-notebook presentation lives in `architecture/src/notebook.css`; contro
 are separated into `CanvasToolbar` and `ComponentBrowser`. Verify desktop/mobile,
 keyboard navigation, generic adapters, and `tests/presentation.spec.ts` when changing
 this layout. Preserve the separate README infographic style.
+
+The architecture canvas uses bundled ELK.js for grouped layout and orthogonal edge
+routing. Keep React Flow card dimensions and handles aligned with
+`architecture/src/diagram/layout.ts`; render ELK bend points instead of regenerating
+endpoint-only paths. Test route/card collisions and initial viewport fitting with
+`architecture/tests/routing.spec.ts`. Preserve topology caching, stale-result guards,
+and offline bundling when changing the layout adapter.

@@ -183,3 +183,24 @@ and display controls; `ComponentBrowser` owns the searchable drawer; `Graph` and
 `RunPlayer` retain rendering and replay responsibilities. `notebook.css` is the
 presentation skin over shared explorer controls. Project metadata marks optional
 infrastructure with `Component.detail: "implementation"`; shared UI uses no actor IDs.
+
+### Layout and routing
+
+[ELK.js](https://github.com/kieler/elkjs) supplies grouped, layered layout and
+orthogonal obstacle-aware routes, following [React Flow's layout guidance](https://reactflow.dev/learn/layouting/layouting).
+React Flow renders the resulting node positions, edge bend points, and matching
+connection handles. Service boundaries remain grouped, with room reserved for
+connections and labels. The full map is larger; use focus presets and zoom to read
+individual components. Crossing arrows can still occur, but routes must not cross
+component interiors.
+
+`src/diagram/layout.ts` adapts project-neutral metadata to ELK.
+`useDiagramLayout.ts` caches topology results and ignores obsolete asynchronous
+results when filters change quickly. Replay color changes reuse the layout;
+revealing previously hidden nodes requires a new layout. Replay framing includes
+routed paths, and initial fitting waits for the viewport. Geometry/browser checks
+in `tests/routing.spec.ts` cover modes, focus presets, cycles, parallel links,
+self-loops, actual SVG/card collisions, and initial fitting.
+
+ELK is bundled into the standalone HTML: there is no runtime layout service, CDN,
+or worker download. The offline artifact is larger (about 2.9 MB before compression).
