@@ -43,3 +43,25 @@ serialized world with selected fields removed. Unknown or malformed actions are 
 provider errors never grant access or bypass action rules. Network work is bounded and
 routine tests use fake providers. Live experiments require explicit budgets and record
 configuration and model identifiers; no live model validation is implied by offline tests.
+
+## Event classification and response
+
+The world returns public evidence and private audit transitions through its Facade. The application records all facts through the existing Observer-style EventSink and projects crew-visible activity into immutable PublicEvent values. Private sabotage selections, hidden faults, future schedules, and provider bookkeeping remain in the audit log.
+
+In `jev+llm`, newly published observations and world evidence are classified before incident routing. Jev returns subsystem, safeguard, diagnosis-support, and urgency judgments over each batch. The application applies routing rules: an alert or classification failure always routes; a supported, low-urgency batch stays under monitoring. A concerning observation can create an incident without a preceding report. The captain reviews the public batch and proposes one action per due incident. Physical and closure validation remain authoritative in the application/world.
+
+Action outcomes are classified in a second batch after the turn's captain reviews, including the final turn. Additional work waits until a later turn, preventing recursive classification/action loops. Event sequence IDs identify exactly which events were assessed. Calls use the existing shared budget, input bound, timeout, and failure accounting. This is synchronous Observer-style publication and explicit orchestration; no message broker or asynchronous delivery guarantee is implied.
+
+```mermaid
+flowchart LR
+  W[World observations] --> L[Full audit log]
+  W --> J[Jev classifies public events]
+  J --> A[Application routes incidents]
+  A --> C[Captain investigates and proposes]
+  C --> V[Application and world validate actions]
+  V --> L
+  V --> J
+  X[Private adversary selections] --> L
+```
+
+Design references: [Hello Interview patterns](https://www.hellointerview.com/learn/low-level-design/in-a-hurry/patterns) (Facade and Observer), [design principles](https://www.hellointerview.com/learn/low-level-design/in-a-hurry/design-principles) (single responsibility and dependency inversion), and [OOP concepts](https://www.hellointerview.com/learn/low-level-design/in-a-hurry/oop-concepts) (encapsulation).

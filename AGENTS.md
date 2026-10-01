@@ -160,4 +160,34 @@ Docker check containers remove themselves with `--rm`. We have no background ser
 
 ## Structured evidence compatibility
 
-Simulator `0.3.1` records optional public evidence codes used by closure validation and the rules captain. Replay still accepts schema-1 logs without codes; rerun retains the existing exact simulator-version requirement. Verify wording-independent closure and rejection of deceptive report claims with `uv run --frozen pytest tests/test_mission.py tests/test_providers.py`.
+Simulator `0.3.2` records optional public evidence codes used by closure validation and the rules captain. Replay still accepts schema-1 logs without codes; rerun retains the existing exact simulator-version requirement. Verify wording-independent closure and rejection of deceptive report claims with `uv run --frozen pytest tests/test_mission.py tests/test_providers.py`.
+
+Full audit verification: `uv run --frozen pytest tests/test_mission.py tests/test_adversary.py tests/test_persistence.py tests/test_cli.py`. Private world-transition records must stay out of crew provider contexts.
+
+In `jev+llm`, allow up to two Jev calls per turn (world/observation batch and action-result batch) in addition to captain/adversary calls. All roles share `--max-calls`; exhaustion conservatively routes events to captain review and remains logged. Jev question/rubric and captain instruction versions are v2 for public-event processing. Use `uv run --frozen pytest tests/test_mission.py tests/test_providers.py` to verify classification, safety fallback, projections, and shared budget without paid calls.
+
+## Interactive architecture explorer
+
+Keep `architecture/` current in every change to components, service boundaries, message
+contracts, state fields, incident routing, controller modes, or event recording.
+Update `architecture/src/model.json`, regenerate the source snapshots and scripted run
+fixtures with `uv run --frozen python architecture/scripts/generate.py`, and verify the
+affected canvas views, component Code/State tabs, and run walkthrough. Source hyperlinks
+are pinned to the generator's Git revision; regenerate after committing runtime changes
+so those links address the matching source. The bundled code is available offline.
+
+Use the repository-installed PR Lens guidance at `.agents/skills/pr-lens/SKILL.md` for
+source-backed walkthroughs; this explorer uses React Flow and runs locally.
+See `architecture/README.md` for setup, generation, browser testing, and standalone builds.
+Verify with the generator's `--check`, then `npm run check`, `npm run build`, and `npm test`
+inside `architecture/`. Use `npm run format:check` for hand-maintained frontend files.
+Demo providers are scripted and make zero model calls; label this distinction in the UI.
+Preserve the README infographic's picture style when updating architecture documentation.
+Stop the optional Vite development server with Ctrl-C when finished.
+
+The architecture UI uses Vercel AI Elements for source/JSON viewing, shadcn/ui
+(Radix) for inspector/replay controls, and Tailwind via the Vite plugin. Component
+sources live under `architecture/src/components`; registry configuration is in
+`architecture/components.json`. Preserve the offline Python/JSON-only Shiki setup,
+source-file line offsets, keyboard tabs, and clipboard error feedback when updating
+components. Run the browser suite after changes to these interactions.

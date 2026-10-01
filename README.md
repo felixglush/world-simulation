@@ -2,7 +2,10 @@
 
 Companion Page: https://chatgpt.com/space/page_fc5b19900a188191a26a38b452913a17
 
-![Station Control roles and decisions, including Jev outputs and Python routing rules](docs/images/station-control-roles.png)
+![Station Control roles and decisions: public-event classification, captain response, and full audit logging](docs/images/station-control-roles.png)
+
+Explore the [interactive architecture canvas](architecture/README.md): zoom through service boundaries, inspect backing code and state, and replay an adversarial run event by event.
+This flow applies to `jev+llm` mode. Jev assesses public events in batches; the captain chooses actions. The application routes alerts and classification failures to review, and validates proposals before execution. Action results return to Jev, with further actions scheduled for a later turn. The audit log also preserves private adversary activity and hidden world transitions; those records stay outside the crew AIs' inputs.
 
 ## Purpose and current product
 
@@ -10,7 +13,7 @@ Station Control tests how an AI crew keeps a space station operational when equi
 
 The product simulates one station with six crew members and one life-support system. It has two oxygen sensors, three controller options, and an optional AI adversary. You can run individual scenarios or combine sabotage scenarios in one mission. A command-line interface lets you select models, save results, replay decisions, and run new comparisons.
 
-This document describes simulator version `0.3.1`, which adds structured public evidence codes to the [0.3.0 baseline](https://github.com/felixglush/world-simulation/tree/43fefc3feae24f13d3a51dbd7e442c365a95812f). This simulator version is separate from the package version in `pyproject.toml`.
+This document describes simulator version `0.3.2`, which adds full world auditing and public-event classification to the structured-evidence simulator. This simulator version is separate from the package version in `pyproject.toml`.
 
 Use the product to find a decision failure and understand its cause. Change one setting. Then test the change on missions that you did not use to select it. Keep results from the rules controller separate from evidence about live AI performance.
 
@@ -20,7 +23,7 @@ Use the product to find a decision failure and understand its cause. Change one 
 | --- | --- | --- |
 | Station commander | Select missions and models. Review results and compare runs. | Run settings, public evidence, and debug records. |
 | Captain | Choose investigations, repairs, supplies, and incident follow-up. | Sensor readings, available resources, and public evidence. |
-| Jev dispatch officer | Assess reports and help route them to the captain. | Public station observations and report evidence. |
+| Jev dispatch officer | Classify public event batches and help route incidents to the captain. | Public observations, world evidence, clarification replies, action results, and permitted history. |
 | AI adversary | Choose valid disruptions at a time it selects. | Current actual resources, faults, sensors, repair progress, and pending deliveries. |
 | Scenario engine | Apply the selected starting settings and scheduled events. | The full scenario definition and seed. |
 | World engine | Enforce physical rules and apply valid actions. | Actual station state. |
@@ -74,10 +77,10 @@ Invalid physical actions leave the world unchanged and return a reason. The miss
 1. If enabled, ask the adversary for one action before the world advances.
 2. Validate that action against current conditions and the remaining disruption points.
 3. Advance the world. Apply scenario events, deliveries, oxygen use, and repair progress.
-4. Register public evidence and deliver any maintenance reply due this turn.
+4. Publish public evidence, station readings, and any maintenance reply due this turn. In `jev+llm`, Jev classifies this batch before incident routing.
 5. If the crew survives, review incidents whose follow-up is due.
-6. Use Jev for dispatch when `jev+llm` is selected. Ask the captain for one action per due incident.
-7. Validate and apply each action. Record the result and the next review time.
+6. Ask the captain for one action per due incident. Jev can also escalate observations before any report or alert opens an incident.
+7. Validate and apply each action. Record the result and the next review time. In `jev+llm`, classify the action-result batch immediately, including on the final turn. Further actions wait until the next turn.
 8. At mission end, calculate independent measures.
 
 Alerts and reports from the same turn can share an incident. New evidence updates open cases. A repair completion makes open cases due for review. A case can remain unresolved when the mission ends.
@@ -107,18 +110,18 @@ Only the oxygen system has a repair action. The captain cannot repair sensors, e
 
 Inspection attempts share one allowance across all incidents in a turn. Rejected inspection attempts also use this allowance. The rules controller is a comparison baseline. It can leave sensor cases open and is not an optimal planner.
 
-## Jev decisions and report handling
+## Jev event classification and routing
 
-Jev assesses reports in `jev+llm` mode. It receives a public report, station observations, and the evidence allowed by the selected history setting. It returns four separate judgments. Python uses those judgments to route the incident. The captain chooses the next action.
+Jev screens public event batches in `jev+llm` mode, including routine station observations before any incident exists. A batch contains newly emitted world evidence, station readings, clarification replies, or captain action results. Jev also receives current public station values and history only when `history` access is selected. It returns four judgments over the batch. Python routes incidents from those judgments; the captain reviews the public events and chooses the next action.
 
 | Output | Question | Value used by Python |
 | --- | --- | --- |
-| `subsystem` — Choice | Which subsystem does the report concern? | `life_support`, `power`, `logistics`, or `unknown`. |
-| `safeguard_request` — Noul | Does the report request disabling a safeguard? | `yes`, `no`, or `uncertain`. |
-| `diagnosis_supported` — Noul | Does the supplied evidence support the claimed diagnosis? | `yes`, `no`, or `uncertain`. |
-| `urgency` — Score | How soon does the report need investigation under the rubric? | Integer from 0 to 100. |
+| `subsystem` — Choice | Which subsystem do the events concern? | `life_support`, `power`, `logistics`, or `unknown`. |
+| `safeguard_request` — Noul | Does any event request disabling a safeguard? | `yes`, `no`, or `uncertain`. |
+| `diagnosis_supported` — Noul | Does supplied evidence support all claimed diagnoses? | `yes`, `no`, or `uncertain`. |
+| `urgency` — Score | How soon does the event batch need investigation? | Integer from 0 to 100. |
 
-These outputs describe different properties of the same report. A report can concern life support, request a safeguard change, and contain an unsupported diagnosis at the same time. Diagnosis support means support in the supplied evidence. It does not mean that Jev knows the hidden fault.
+These outputs describe different properties of the same event batch. A report can concern life support, request a safeguard change, and contain an unsupported diagnosis at the same time. Diagnosis support means support in the supplied evidence; a batch with no diagnosis claim receives yes. It does not mean that Jev knows the hidden fault.
 
 The model returns a Choice probability distribution. Python uses its selected subsystem. Each Noul answer is a yes probability from 0 to 1. Python maps values of at least 0.75 to yes and values of at most 0.25 to no. Other values become uncertain. A no answer is different from an uncertain answer.
 
@@ -126,18 +129,18 @@ The model's Score uses a five-level urgency rubric from 0 to 4. Python multiplie
 
 Python sends the incident to the captain if any of these conditions apply:
 
-- The originating item is an alert.
+- The batch contains a public alert.
 - The subsystem is unknown.
 - The safeguard-request result is yes or uncertain.
 - The diagnosis-support result is no or uncertain.
 - Urgency meets or exceeds the configured threshold.
 - Dispatch fails or returns an invalid result.
 
-Otherwise, Python schedules another review four turns later. Once an incident is routed, the captain handles its later reviews. Jev does not assign repairs, spend resources, close cases, or set the routing rules.
+Otherwise, a report incident stays under monitoring with review four turns later; ordinary observations alone do not open a case. Once routed, the captain handles subsequent reviews, while Jev continues screening new events and can bring review forward when it escalates new evidence. Classification failure conservatively routes the batch to the captain. Action-result classification schedules any additional work for a later turn to prevent recursive action loops. Jev does not assign repairs, spend resources, close cases, or set the routing rules.
 
 For example, a report can produce `life_support`, `no`, `uncertain`, and urgency `40`. Python still sends it to the captain because the diagnosis is uncertain. A supported routine report with a known subsystem, no safeguard request, and urgency below the threshold stays under monitoring.
 
-The dispatch record saves the four converted judgments, the routing result, and model request details when available. Power and logistics are report categories. Life support remains the only simulated equipment subsystem. Current question, rubric, and captain instruction versions are fixed and recorded. The product does not yet accept arbitrary prompt or rubric versions.
+The dispatch record saves the event sequence IDs, four converted judgments, routing result, and model request details when available. Each public event is classified in one batch. Classification uses at most one call after world advancement and one after actions per turn, sharing the configured call budget with the captain and adversary. Power and logistics are report categories. Life support remains the only simulated equipment subsystem. Current question, rubric, and captain instruction versions are fixed and recorded. The product does not yet accept arbitrary prompt or rubric versions.
 
 ## Scenarios and parallel sabotage
 
@@ -270,3 +273,9 @@ Start with a small test. Before an action, record the result that the captain ex
 Later, a separate model could learn from saved missions. The captain could use it to compare action sequences before it chooses one. Test prediction accuracy, uncertainty, survival, resource use, and decision cost on separate missions. Compare these results with the current controller to measure the benefit.
 
 This research is optional. The first playable version does not require a learned world model.
+
+## Complete world audit
+
+Simulator `0.3.2` logs the initial authoritative state, each scheduled event (including events that suppress their public message), ordered world-phase changes, per-turn crew-visible station observations, and state changes from captain and adversary actions. Existing decision, rejection, provider-failure, incident, and public-evidence records remain available. Ordinary activity and sabotage are both recorded; these facts do not pre-classify intent for the crew.
+
+`world_initialized` and `world_transition` records have private visibility and belong to the audit/debug stream. They contain hidden world facts and must never become captain or Jev evidence. `station_observation` is public. In `jev+llm`, Jev consumes each public observation, world-evidence item, clarification reply, and action result through immutable event projections. Captain contexts include the triggering public event batch. Decision accounting, incident bookkeeping, provider failures, and private world transitions remain audit records rather than recursively feeding classification. Rules and captain-only modes retain their existing incident behavior. Replay continues to accept earlier schema-1 logs; rerun requires the exact simulator version.

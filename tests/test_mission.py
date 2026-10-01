@@ -754,3 +754,222 @@ def test_custom_sensor_alert_wording_does_not_change_valid_closure():
     reworded = run("Sensor A needs an independent inspection.")
     assert standard.evaluation.metrics["unresolved_incidents"] == 0
     assert reworded.evaluation.metrics["unresolved_incidents"] == 0
+
+
+def test_audit_records_routine_phases_and_hidden_scheduled_events_without_leaking_to_captain():
+    definition = ScenarioDefinition(
+        id="audit_events",
+        description="Quiet sabotage and ordinary telemetry",
+        initial={},
+        events=(
+            ScenarioEventSpec(turn=1, kind="leak_start", message=""),
+            ScenarioEventSpec(turn=2, kind="report", message="Routine check requested"),
+        ),
+    )
+    captain = InspectingCaptain()
+    result = run_mission(
+        MissionConfig(
+            scenario="audit_events",
+            scenario_definition=definition,
+            duration_turns=3,
+            controller_mode=ControllerMode.LLM,
+        ),
+        captain=captain,
+    )
+    audit = [event for event in result.events if event["event_type"] == "world_transition"]
+    assert any(
+        event["consequence"]["scheduled_event"]["kind"] == "leak_start"
+        for event in audit
+        if event["consequence"].get("scheduled_event")
+    )
+    assert {event["consequence"]["phase"] for event in audit} >= {"oxygen", "sensors_and_crew"}
+    observations = [
+        event for event in result.events if event["event_type"] == "station_observation"
+    ]
+    assert len(observations) == result.turns_completed
+    assert captain.contexts
+    assert all(
+        not hasattr(evidence, "scheduled_event")
+        for context in captain.contexts
+        for evidence in context.evidence
+    )
+
+
+class EventScreeningDispatcher:
+    def __init__(self, *, failure=None, urgency=0):
+        self.contexts = []
+        self.failure = failure
+        self.urgency = urgency
+
+    def classify(self, context):
+        self.contexts.append(context)
+        if self.failure:
+            raise self.failure
+        return DispatchJudgment(
+            subsystem=Subsystem.LIFE_SUPPORT,
+            safeguard_request=NoulOutcome.NO,
+            diagnosis_supported=NoulOutcome.YES,
+            urgency=self.urgency,
+        )
+
+
+def test_jev_screens_routine_observations_before_any_incident_exists():
+    dispatcher = EventScreeningDispatcher()
+    captain = InspectingCaptain()
+    result = run_mission(
+        MissionConfig(
+            scenario=ScenarioFamily.NORMAL, duration_turns=1, controller_mode=ControllerMode.JEV_LLM
+        ),
+        captain=captain,
+        dispatcher=dispatcher,
+    )
+    assert len(dispatcher.contexts) == 1
+    assert [event.event_type for event in dispatcher.contexts[0].events] == ["station_observation"]
+    assert not captain.contexts
+    assert not any(event["event_type"] == "incident_opened" for event in result.events)
+    assert any(event["event_type"] == "dispatch" for event in result.events)
+
+
+def test_jev_detects_silent_fault_from_public_observations_and_screens_action_results():
+    dispatcher = EventScreeningDispatcher(urgency=100)
+    captain = InspectingCaptain()
+    definition = ScenarioDefinition(
+        id="silent_event",
+        description="Hidden leak",
+        initial={},
+        events=(ScenarioEventSpec(turn=1, kind="leak_start", message=""),),
+    )
+    result = run_mission(
+        MissionConfig(
+            scenario_definition=definition, duration_turns=1, controller_mode=ControllerMode.JEV_LLM
+        ),
+        captain=captain,
+        dispatcher=dispatcher,
+    )
+    assert captain.contexts
+    assert any(
+        event["event_type"] == "action" and event["consequence"]["accepted"]
+        for event in result.events
+    )
+    classified = {event.sequence for context in dispatcher.contexts for event in context.events}
+    public = {
+        event["sequence"]
+        for event in result.events
+        if event["event_type"] in {"station_observation", "world_evidence", "action"}
+    }
+    assert classified == public
+    assert all(
+        event.event_type not in {"world_transition", "world_initialized", "adversary_decision"}
+        for context in dispatcher.contexts
+        for event in context.events
+    )
+    assert all("leak_active" not in str(asdict(context)) for context in dispatcher.contexts)
+    classification = next(event for event in result.events if event["event_type"] == "dispatch")
+    opened = next(event for event in result.events if event["event_type"] == "incident_opened")
+    assert classification["sequence"] < opened["sequence"]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [ProviderError(ProviderErrorCode.BUDGET_EXHAUSTED), RuntimeError("private transport error")],
+)
+def test_event_classification_failure_falls_back_to_captain_without_stopping_world(failure):
+    dispatcher = EventScreeningDispatcher(failure=failure)
+    captain = InspectingCaptain()
+    result = run_mission(
+        MissionConfig(
+            scenario=ScenarioFamily.NORMAL, duration_turns=2, controller_mode=ControllerMode.JEV_LLM
+        ),
+        captain=captain,
+        dispatcher=dispatcher,
+    )
+    assert result.turns_completed == 2
+    assert captain.contexts
+    assert "private transport error" not in str(result.events)
+    assert any(event["event_type"] == "provider_failure" for event in result.events)
+
+
+def test_public_alert_cannot_be_suppressed_by_low_urgency_event_classification():
+    dispatcher = EventScreeningDispatcher()
+    captain = InspectingCaptain()
+    result = run_mission(
+        MissionConfig(
+            scenario=ScenarioFamily.LEAK,
+            seed=3,
+            duration_turns=4,
+            controller_mode=ControllerMode.JEV_LLM,
+        ),
+        captain=captain,
+        dispatcher=dispatcher,
+    )
+    assert captain.contexts
+    assert any(event["event_type"] == "action" for event in result.events)
+
+
+def test_jev_classifies_clarification_and_rejected_actions_once_without_recursive_reviews():
+    dispatcher = EventScreeningDispatcher(urgency=100)
+    captain = ClarifyingCaptain()
+    result = run_mission(
+        MissionConfig(
+            scenario=ScenarioFamily.LEAK,
+            seed=3,
+            duration_turns=3,
+            controller_mode=ControllerMode.JEV_LLM,
+        ),
+        captain=captain,
+        dispatcher=dispatcher,
+    )
+    classified = [event.sequence for context in dispatcher.contexts for event in context.events]
+    public = [
+        event["sequence"]
+        for event in result.events
+        if event["event_type"]
+        in {"station_observation", "world_evidence", "action", "clarification_received"}
+    ]
+    assert sorted(classified) == public
+    assert len(classified) == len(set(classified))
+    assert any(event["event_type"] == "clarification_received" for event in result.events)
+    reviews = [(context.incident.sequence, context.station.turn) for context in captain.contexts]
+    assert len(reviews) == len(set(reviews))
+    assert any(
+        event["event_type"] == "action" and not event["consequence"]["accepted"]
+        for event in result.events
+    )
+
+
+def test_private_adversary_selection_is_logged_but_crew_only_classifies_public_effects():
+    from station_control.adversary import (
+        AdversaryAction,
+        AdversaryActionKind,
+        AdversaryDecision,
+        AdversaryMode,
+    )
+
+    class SilentAdversary:
+        def decide(self, context):
+            return AdversaryDecision(
+                AdversaryAction(AdversaryActionKind.START_SILENT_LEAK),
+                rationale="PRIVATE_SABOTAGE_REASON",
+            )
+
+    dispatcher = EventScreeningDispatcher(urgency=100)
+    captain = InspectingCaptain()
+    result = run_mission(
+        MissionConfig(
+            scenario=ScenarioFamily.NORMAL,
+            duration_turns=1,
+            controller_mode=ControllerMode.JEV_LLM,
+            adversary_mode=AdversaryMode.LLM,
+        ),
+        adversary=SilentAdversary(),
+        dispatcher=dispatcher,
+        captain=captain,
+    )
+    assert "PRIVATE_SABOTAGE_REASON" in str(result.events)
+    assert result.debug_snapshots[-1].leak_active
+    for context in [*dispatcher.contexts, *captain.contexts]:
+        projection = str(asdict(context))
+        assert "PRIVATE_SABOTAGE_REASON" not in projection
+        assert "start_silent_leak" not in projection
+        assert "leak_active" not in projection
+    assert any(context.events for context in captain.contexts)

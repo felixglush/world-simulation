@@ -129,8 +129,8 @@ def _dispatch_context() -> DispatchContext:
             4, (SensorReading("sensor_a", 68), SensorReading("sensor_b", 70)), 12, 2, 30, 4
         ),
         evidence=(report,),
-        question_version="jev-questions-v1",
-        rubric_version="jev-rubric-v1",
+        question_version="jev-event-questions-v2",
+        rubric_version="jev-event-rubric-v2",
     )
 
 
@@ -157,7 +157,7 @@ def _captain_context(action: ActionDescriptor | None = None) -> CaptainContext:
             ),
         ),
         inspection_budget_remaining=1,
-        instruction_version="captain-instructions-v1",
+        instruction_version="captain-event-instructions-v2",
     )
 
 
@@ -243,8 +243,8 @@ def test_jev_asks_four_distinct_questions_and_reports_actual_usage_and_versions(
     assert result.metadata["cost_usd"] is None
     assert result.metadata["calls"] == 1
     assert result.metadata["timeout_seconds"] == 1.0
-    assert result.metadata["question_version"] == "jev-questions-v1"
-    assert result.metadata["rubric_version"] == "jev-rubric-v1"
+    assert result.metadata["question_version"] == "jev-event-questions-v2"
+    assert result.metadata["rubric_version"] == "jev-event-rubric-v2"
     assert result.metadata["latency_ms"] >= 0
 
 
@@ -335,7 +335,7 @@ def test_captain_receives_only_allowed_tools_and_returns_a_validated_action() ->
     assert result.metadata["calls"] == 1
     assert result.metadata["max_output_tokens"] == 96
     assert result.metadata["timeout_seconds"] == 1.0
-    assert result.metadata["instruction_version"] == "captain-instructions-v1"
+    assert result.metadata["instruction_version"] == "captain-event-instructions-v2"
     assert result.metadata["latency_ms"] >= 0
 
 
@@ -720,3 +720,57 @@ def test_captain_rejects_ambiguous_decisions(ambiguous):
         provider.close()
     assert error.value.code is ProviderErrorCode.MALFORMED_RESPONSE
     assert error.value.metadata["request_made"] is True
+
+
+@pytest.mark.parametrize("max_calls", [2, 3])
+def test_event_screening_and_captain_actions_share_budget_through_real_adapters(max_calls):
+    jev_requests = []
+    captain_requests = []
+
+    def classify(request):
+        jev_requests.append(json.loads(request.content))
+        return httpx2.Response(200, json=_jev_payload(urgency=4.0))
+
+    def decide(request):
+        captain_requests.append(json.loads(request.content))
+        return httpx2.Response(200, json=_captain_payload())
+
+    budget = CallBudget(max_calls=max_calls, max_output_tokens_per_call=96)
+    jev = _jev(classify, budget)
+    captain = _captain(decide, budget)
+    try:
+        result = run_mission(
+            MissionConfig(
+                scenario=ScenarioFamily.NORMAL,
+                duration_turns=1,
+                controller_mode=ControllerMode.JEV_LLM,
+            ),
+            dispatcher=jev,
+            captain=captain,
+        )
+    finally:
+        jev.close()
+        captain.close()
+
+    assert len(captain_requests) == 1
+    assert len(jev_requests) == max_calls - 1
+    assert result.evaluation.metrics["model_calls"] == max_calls
+    assert [event["event_type"] for event in jev_requests[0]["state"]["public_events"]] == [
+        "station_observation"
+    ]
+    observed = json.loads(captain_requests[0]["messages"][1]["content"])
+    assert observed["public_events"] == jev_requests[0]["state"]["public_events"]
+    observation = json.loads(jev_requests[0]["state"]["public_events"][0]["payload"])
+    assert "evidence" not in observation["evidence"]
+    if max_calls == 3:
+        assert [event["event_type"] for event in jev_requests[1]["state"]["public_events"]] == [
+            "action"
+        ]
+        assert not any(event["event_type"] == "provider_failure" for event in result.events)
+    else:
+        failure = next(
+            event for event in result.events if event["event_type"] == "provider_failure"
+        )
+        assert failure["consequence"]["code"] == "budget_exhausted"
+        assert failure["consequence"]["metadata"]["request_made"] is False
+        assert [event["event_type"] for event in failure["evidence"]] == ["action"]

@@ -1,0 +1,37 @@
+@layer theme, base, explorer, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "@xyflow/react/dist/style.css" layer(base);
+@import "./styles.css" layer(explorer);
+@import "tailwindcss/utilities.css" layer(utilities);
+@custom-variant dark (&:is(.dark *));
+@theme inline {
+  --color-background: #ffffff;
+  --color-foreground: #203b55;
+  --color-card: #ffffff;
+  --color-card-foreground: #203b55;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #203b55;
+  --color-primary: #143f52;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #edf4f7;
+  --color-secondary-foreground: #203b55;
+  --color-muted: #f2f6f9;
+  --color-muted-foreground: #617d92;
+  --color-accent: #e2f3f5;
+  --color-accent-foreground: #006f80;
+  --color-border: #d7e1e9;
+  --color-input: #d7e1e9;
+  --color-ring: #008b9b;
+  --color-destructive: #c33535;
+  --radius-lg: 0.625rem;
+  --radius-md: 0.5rem;
+  --radius-sm: 0.375rem;
+}
+/* Keep source-file line numbers rather than restarting every definition at 1. */
+.source-code pre > code {
+  counter-reset: line var(--source-line-offset, 0);
+}
+.source-code pre {
+  white-space: pre;
+  overflow: auto;
+}
