@@ -70,7 +70,7 @@ This is a recorded-run player, not a second implementation of the simulator.
 ## Maintain and verify
 
 `src/model.json` owns the human-authored components, logical services, views, message
-contracts, and examples. `src/model.ts` projects audit records into display state.
+contracts, and examples. `src/projects/station-control/` projects audit records into generic display state.
 `Graph.tsx`, `Inspector.tsx`, and `RunPlayer.tsx` render those models independently.
 
 When Python interfaces or behavior change, update the model and run from the repository
@@ -116,8 +116,18 @@ navigation without advancing the run player.
 Install additional components selectively with `npx shadcn@latest add <component>`.
 The AI Elements code block was installed from
 `https://elements.ai-sdk.dev/api/registry/code-block.json`. Local adaptations use
-Shiki's JavaScript engine with bundled Python/JSON grammars and two GitHub themes,
+Shiki's JavaScript engine with bundled Python/JSON/JavaScript/TypeScript grammars and two GitHub themes,
 and key the token cache by full source text. Preserve these when refreshing from
 the registry: importing the full language loader inflates the offline artifact.
 `src/ui.css` defines shared design tokens and CSS layer ordering; the existing
 light diagram style remains in `src/styles.css`. No Vercel deployment is required.
+
+## Reuse in another codebase
+
+See the [modularity review and extension contract](docs/modularity.md).
+`App` accepts an `ArchitectureProject` rather than importing project data. Shared
+canvas, inspector, I/O, and playback components depend on `src/core/types.ts`.
+A project supplies a versioned architecture document and an optional replay adapter.
+The TypeScript job-queue example at `/?project=example` exercises the same UI;
+`/?project=static-example` demonstrates operation without any runtime recordings.
+`npm run check` enforces the shared UI → contracts dependency boundary.

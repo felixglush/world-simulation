@@ -39,14 +39,13 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import {
-  byId,
-  colors,
-  model,
-  visibleComponents,
-  visibleConnections,
-} from "./model";
-import type { Component, Connection, Mode, DecisionHighlight } from "./model";
+import { useProject, decisionStyle } from "./core/project";
+import type {
+  Component,
+  Connection,
+  Mode,
+  DecisionHighlight,
+} from "./core/project";
 
 export const icons = {
   user: UserRound,
@@ -61,7 +60,6 @@ export const icons = {
   check: CheckCheck,
   bot: Bot,
   network: Network,
-  captain: UserRound,
   list: ListChecks,
   gauge: Gauge,
   database: Database,
@@ -98,7 +96,8 @@ const ComponentNode = memo(({ data }: NodeProps<Node<CardData>>) => {
       className={`component-card ${data.active ? "is-active" : ""} ${data.dim ? "is-dim" : ""}`}
       style={
         {
-          "--tone": data.component.id === "adversary" ? "#d58832" : data.tone,
+          "--tone": data.component.color ?? data.tone,
+          ...decisionStyle(data.decision),
         } as React.CSSProperties
       }
     >
@@ -131,7 +130,7 @@ const ComponentNode = memo(({ data }: NodeProps<Node<CardData>>) => {
       </div>
       <p>{data.component.summary}</p>
       <div className="card-foot">
-        <code>{data.component.sources[0].symbol}</code>
+        <code>{data.component.sources[0]?.symbol ?? "Source not indexed"}</code>
         <ArrowDownLeft size={12} />
       </div>
     </div>
@@ -151,6 +150,7 @@ const BoundaryNode = memo(({ data }: NodeProps<Node<BoundaryData>>) => (
 ));
 const MessageEdge = memo((props: EdgeProps<Edge<WireData>>) => {
   const { data } = props;
+  const { colors, model } = useProject();
   const [path, x, y] = getSmoothStepPath({
     ...props,
     borderRadius: 14,
@@ -166,7 +166,9 @@ const MessageEdge = memo((props: EdgeProps<Edge<WireData>>) => {
           stroke: colors[data!.message.kind],
           strokeWidth: data?.active ? 3 : 1.65,
           opacity: data?.dim ? 0.1 : 0.65,
-          strokeDasharray: data?.message.kind === "private" ? "7 5" : undefined,
+          strokeDasharray: model.messageKinds[data!.message.kind].private
+            ? "7 5"
+            : undefined,
         }}
         interactionWidth={20}
       />
@@ -227,6 +229,8 @@ export function Graph({
   onSelect,
   onClear,
 }: Props) {
+  const { byId, colors, model, visibleComponents, visibleConnections } =
+    useProject();
   const api = useReactFlow();
   const container = useRef<HTMLDivElement>(null);
   const initialized = useNodesInitialized();
@@ -274,7 +278,7 @@ export function Graph({
         id: `boundary-${service.id}`,
         type: "boundary",
         position: { x: column * 324, y: 0 },
-        data: { ...service, external: service.id === "external" },
+        data: { ...service, external: service.external ?? false },
         style: { width: 286, height: members.length * 155 + 88 },
         selectable: false,
         draggable: false,
@@ -344,6 +348,11 @@ export function Graph({
     activeEdges,
     onSelect,
     decision,
+    model,
+    byId,
+    colors,
+    visibleComponents,
+    visibleConnections,
   ]);
   useEffect(() => {
     if (initialized)
@@ -414,9 +423,7 @@ export function Graph({
           nodeColor={(node) =>
             node.type === "boundary"
               ? "#e8eff3"
-              : node.id === "adversary"
-                ? "#efc087"
-                : "#70b1c4"
+              : (byId[node.id]?.color ?? "#70b1c4")
           }
           nodeStrokeWidth={0}
           pannable
