@@ -16,6 +16,10 @@ class TradeCommand:
     seller_id: str = "industrial"
     batch_id: str | None = None
     quantity: int = 1
+    method: str = "routine"
+    repair_mode: str = "full"
+    report_id: str | None = None
+    operating_load: str = "routine"
 
 
 class GovernorPolicy(Protocol):

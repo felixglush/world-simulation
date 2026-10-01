@@ -3,225 +3,70 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
-from enum import StrEnum
+from dataclasses import replace
 
 from .domain import (
     Action,
     ActionKind,
-    SensorReading,
     StationState,
     advance_turn,
     apply_action,
 )
 from .scenarios import ScenarioFamily, create_world
-
-
-class TradeEvidenceKind(StrEnum):
-    PURCHASE = "purchase"
-    DEPARTURE = "departure"
-    ARRIVAL = "arrival"
-    SETTLEMENT = "settlement"
-    REPAIR_ASSIGNED = "repair_assigned"
-    REPAIR_COMPLETE = "repair_complete"
-    FAILURE = "failure"
-    INSPECTION = "inspection"
-    QUARANTINE = "quarantine"
-    STATION_EVIDENCE = "station_evidence"
-
-
-@dataclass(frozen=True, slots=True)
-class PartLot:
-    batch_id: str
-    quantity: int
-    unit_price: int
-    origin_world: str
-    latent_defect: bool = False
-    defect_after_turns: int = 0
-    contract_id: str | None = None
-    shipment_id: str | None = None
-    resource: str = "parts"
-    unit: str = "parts"
-
-
-@dataclass(frozen=True, slots=True)
-class WorldInventory:
-    world_id: str
-    credits: int
-    lots: tuple[PartLot, ...]
-    resource_capacities: tuple[tuple[str, int], ...] = ()
-    resource_reserves: tuple[tuple[str, int], ...] = ()
-
-    @property
-    def parts(self) -> int:
-        return sum(lot.quantity for lot in self.lots if lot.resource == "parts")
-
-
-@dataclass(frozen=True, slots=True)
-class TradeContract:
-    contract_id: str
-    command_id: str
-    buyer_id: str
-    seller_id: str
-    batch_id: str
-    quantity: int
-    unit_price: int
-    total_price: int
-    status: str
-    resource: str = "parts"
-    unit: str = "parts"
-
-
-@dataclass(frozen=True, slots=True)
-class Shipment:
-    shipment_id: str
-    contract_id: str
-    origin: str
-    destination: str
-    batch_id: str
-    quantity: int
-    status: str
-    departure_turn: int | None = None
-    arrival_turn: int | None = None
-    cargo: PartLot | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class InstalledPart:
-    batch_id: str
-    origin_world: str
-    contract_id: str | None
-    shipment_id: str | None
-    latent_defect: bool
-    defect_after_turns: int
-    operating_turns: int = 0
-    defect_confirmed: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class LedgerEntry:
-    sequence: int
-    turn: int
-    account: str
-    resource: str
-    delta: int
-    kind: str
-    reference_id: str
-
-
-@dataclass(frozen=True, slots=True)
-class TradeEvidence:
-    sequence: int
-    turn: int
-    kind: TradeEvidenceKind
-    message: str
-    world_id: str
-    asset_id: str | None = None
-    batch_id: str | None = None
-    contract_id: str | None = None
-    shipment_id: str | None = None
-    finding_code: str | None = None
-
-    @property
-    def code(self) -> str:
-        return self.finding_code or self.kind.value
-
-
-@dataclass(frozen=True, slots=True)
-class WorldState:
-    station: StationState
-    inventories: tuple[WorldInventory, ...]
-    station_lots: tuple[PartLot, ...]
-    contracts: tuple[TradeContract, ...] = ()
-    shipments: tuple[Shipment, ...] = ()
-    installed_part: InstalledPart | None = None
-    pending_repair_part: PartLot | None = None
-    ledger: tuple[LedgerEntry, ...] = ()
-    evidence: tuple[TradeEvidence, ...] = ()
-    escrow_credits: int = 0
-    travel_turns: int = 2
-    shipment_capacity: int = 3
-    defect_after_turns: int = 3
-    station_resource_capacities: tuple[tuple[str, int], ...] = ()
-    station_resource_reserves: tuple[tuple[str, int], ...] = ()
-
-    @property
-    def pending_repair_batch_id(self) -> str | None:
-        return self.pending_repair_part.batch_id if self.pending_repair_part else None
-
-
-@dataclass(frozen=True, slots=True)
-class PublicLot:
-    batch_id: str
-    quantity: int
-    unit_price: int
-    origin_world: str
-    resource: str = "parts"
-    unit: str = "parts"
-    seller_world: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class PublicContract:
-    contract_id: str
-    buyer_id: str
-    seller_id: str
-    batch_id: str
-    quantity: int
-    unit_price: int
-    status: str
-    resource: str = "parts"
-    unit: str = "parts"
-
-
-@dataclass(frozen=True, slots=True)
-class PublicShipment:
-    shipment_id: str
-    contract_id: str
-    origin: str
-    destination: str
-    batch_id: str
-    quantity: int
-    status: str
-    departure_turn: int | None
-    arrival_turn: int | None
-    resource: str = "parts"
-    unit: str = "parts"
-
-
-@dataclass(frozen=True, slots=True)
-class PublicWorldView:
-    world_id: str
-    turn: int
-    credits: int
-    parts: int
-    oxygen_sensors: tuple[SensorReading, ...] = ()
-    backup_oxygen: int = 0
-    available_crew: int = 0
-    crew_alive: bool = True
-    repair_turns_remaining: int = 0
-    offers: tuple[PublicLot, ...] = ()
-    local_lots: tuple[PublicLot, ...] = ()
-    contracts: tuple[PublicContract, ...] = ()
-    shipments: tuple[PublicShipment, ...] = ()
-    evidence: tuple[TradeEvidence, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class TradeResult:
-    state: WorldState
-    accepted: bool
-    rejection: str | None = None
-    evidence: tuple[TradeEvidence, ...] = ()
-    contract_id: str | None = None
-    shipment_id: str | None = None
-    duplicate: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class WorldAdvanceResult:
-    state: WorldState
-    evidence: tuple[TradeEvidence, ...] = ()
+from .trade_types import (
+    InstalledPart as InstalledPart,
+)
+from .trade_types import (
+    LedgerEntry as LedgerEntry,
+)
+from .trade_types import (
+    PartLot as PartLot,
+)
+from .trade_types import (
+    PublicContract as PublicContract,
+)
+from .trade_types import (
+    PublicLot as PublicLot,
+)
+from .trade_types import (
+    PublicShipment as PublicShipment,
+)
+from .trade_types import (
+    PublicWorldView as PublicWorldView,
+)
+from .trade_types import (
+    Shipment as Shipment,
+)
+from .trade_types import (
+    TradeContract as TradeContract,
+)
+from .trade_types import (
+    TradeEvidence as TradeEvidence,
+)
+from .trade_types import (
+    TradeEvidenceKind as TradeEvidenceKind,
+)
+from .trade_types import (
+    TradeReport as TradeReport,
+)
+from .trade_types import (
+    TradeResult as TradeResult,
+)
+from .trade_types import (
+    WorldAdvanceResult as WorldAdvanceResult,
+)
+from .trade_types import (
+    WorldInventory as WorldInventory,
+)
+from .trade_types import (
+    WorldState as WorldState,
+)
+from .trade_types import (
+    record_evidence as _emit_evidence,
+)
+from .trade_types import (
+    reject_trade as _rejected,
+)
 
 
 def create_world_state(
@@ -349,6 +194,13 @@ def purchase_lot(
         )
         return _rejected(state, rejection)
     lot = seller_lots[selected]
+    if (
+        not isinstance(lot.failure_load, str)
+        or lot.failure_load not in {"any", "routine", "peak", "backup"}
+        or type(lot.yield_percent) is not int
+        or not 0 <= lot.yield_percent <= 100
+    ):
+        return _rejected(state, "invalid_lot_condition")
     if any(
         existing.resource == lot.resource and existing.unit != lot.unit
         for existing in _lots(state, buyer_id)
@@ -550,6 +402,7 @@ def advance_world(state: WorldState) -> WorldAdvanceResult:
                     shipment_id=part.shipment_id,
                     latent_defect=part.latent_defect,
                     defect_after_turns=part.defect_after_turns,
+                    failure_load=part.failure_load,
                 ),
                 pending_repair_part=None,
             )
@@ -562,6 +415,13 @@ def advance_world(state: WorldState) -> WorldAdvanceResult:
                     ("repair_workshop:oxygen_system", "parts", -1, "repair_complete", batch_id),
                     ("installed:oxygen_system", "parts", 1, "repair_complete", batch_id),
                 ),
+            )
+        if updated.pending_repair_mode == "full":
+            updated = replace(
+                updated,
+                residual_damage_after_turns=0,
+                residual_damage_exposure=0,
+                residual_damage_confirmed=False,
             )
         completion = next(
             (item for item in station_turn.evidence if item.kind == "repair_complete"), None
@@ -725,45 +585,95 @@ def advance_world(state: WorldState) -> WorldAdvanceResult:
         emitted.extend(arrival_events)
         emitted.extend(settlement_events)
 
-    installed = updated.installed_part
     if (
-        installed is not None
-        and not installed.defect_confirmed
-        and updated.station.crew_alive
+        updated.station.crew_alive
         and updated.station.repair_turns_remaining == 0
         and not repair_completed
     ):
-        operating_turns = installed.operating_turns + 1
-        failed = installed.latent_defect and operating_turns >= installed.defect_after_turns
-        installed = replace(
-            installed,
-            operating_turns=operating_turns,
-            defect_confirmed=failed,
+        load = (
+            "backup"
+            if before.station.backup_active and before.station.backup_oxygen > 0
+            else updated.operating_load
         )
-        updated = replace(
-            updated,
-            station=replace(updated.station, leak_active=True) if failed else updated.station,
-            installed_part=installed,
-        )
-        if failed:
-            updated, item = _emit_evidence(
-                updated,
-                TradeEvidenceKind.FAILURE,
-                "A new oxygen leak appeared during operation and requires investigation.",
-                "station",
-                asset_id="oxygen_system",
-                finding_code="oxygen_leak_detected",
-            )
-            emitted.extend(item)
+        exposed = _apply_equipment_exposure(updated, load)
+        updated = exposed.state
+        emitted.extend(exposed.evidence)
 
+    from .deception import publish_due_reports
+    from .sensors import advance_sensor_drift
+
+    updated = advance_sensor_drift(updated)
+    reports = publish_due_reports(updated)
+    updated = reports.state
+    emitted.extend(reports.evidence)
     return WorldAdvanceResult(updated, tuple(emitted))
 
 
-def repair_with_batch(state: WorldState, batch_id: str) -> TradeResult:
+def _apply_equipment_exposure(state: WorldState, load: str) -> WorldAdvanceResult:
+    """One actual operating cycle; no authored calendar event can replace its cause."""
+    part = state.installed_part
+    part_failed = False
+    if part is not None and not part.defect_confirmed and part.failure_load in {"any", load}:
+        cycles = part.operating_turns + 1
+        part_failed = part.latent_defect and cycles >= part.defect_after_turns
+        part = replace(part, operating_turns=cycles, defect_confirmed=part_failed)
+    damage_exposure = state.residual_damage_exposure
+    damage_confirmed = state.residual_damage_confirmed
+    if state.residual_damage_after_turns and load in {"peak", "backup"}:
+        damage_exposure += 1
+        damage_confirmed = damage_exposure >= state.residual_damage_after_turns
+    damaged_failure = (
+        damage_confirmed and load in {"peak", "backup"} and not state.station.leak_active
+    )
+    failed = part_failed or damaged_failure
+    updated = replace(
+        state,
+        installed_part=part,
+        residual_damage_exposure=damage_exposure,
+        residual_damage_confirmed=damage_confirmed,
+        station=replace(state.station, leak_active=True) if failed else state.station,
+    )
+    if failed:
+        updated, evidence = _emit_evidence(
+            updated,
+            TradeEvidenceKind.FAILURE,
+            (
+                "Oxygen equipment showed an additional malfunction during operation."
+                if state.station.leak_active
+                else "A new oxygen leak appeared during operation and requires investigation."
+            ),
+            "station",
+            asset_id="oxygen_system",
+            finding_code="oxygen_leak_detected",
+            operating_load=load,
+        )
+        return WorldAdvanceResult(updated, evidence)
+    return WorldAdvanceResult(updated)
+
+
+def set_operating_load(state: WorldState, load: str) -> TradeResult:
+    if not state.station.crew_alive:
+        return _rejected(state, "crew_lost")
+    if not isinstance(load, str) or load not in {"routine", "peak"}:
+        return _rejected(state, "invalid_operating_load")
+    updated, evidence = _emit_evidence(
+        replace(state, operating_load=load),
+        TradeEvidenceKind.LOAD_CHANGE,
+        f"Oxygen equipment operating load set to {load}.",
+        "station",
+        asset_id="oxygen_system",
+        operating_load=load,
+    )
+    return TradeResult(updated, True, evidence=evidence)
+
+
+def repair_with_batch(state: WorldState, batch_id: str, *, mode: str = "full") -> TradeResult:
     if not isinstance(state, WorldState):
         raise TypeError("state must be a WorldState")
     if not state.station.crew_alive:
         return _rejected(state, "crew_lost")
+    if not isinstance(mode, str) or mode not in {"full", "stabilize"}:
+        return _rejected(state, "invalid_repair_mode")
     if not state.station.leak_active:
         return _rejected(state, "repair_not_needed")
     if state.station.repair_turns_remaining > 0:
@@ -791,6 +701,7 @@ def repair_with_batch(state: WorldState, batch_id: str) -> TradeResult:
         station=result.state,
         station_lots=tuple(station_lots),
         pending_repair_part=replace(lot, quantity=1),
+        pending_repair_mode=mode,
     )
     updated = _append_ledger(
         updated,
@@ -824,38 +735,76 @@ def repair_with_batch(state: WorldState, batch_id: str) -> TradeResult:
     return TradeResult(updated, True, evidence=evidence)
 
 
-def inspect_installed_batch(state: WorldState) -> TradeResult:
+def inspect_installed_batch(state: WorldState, *, method: str = "routine") -> TradeResult:
     if not isinstance(state, WorldState):
         raise TypeError("state must be a WorldState")
     if not state.station.crew_alive:
         return _rejected(state, "crew_lost")
+    if not isinstance(method, str) or method not in {"routine", "peak", "backup"}:
+        return _rejected(state, "invalid_inspection_method")
     if state.installed_part is None:
         return _rejected(state, "no_part_installed")
-    part = state.installed_part
+    if state.station.available_crew <= 0:
+        return _rejected(state, "crew_unavailable")
+    if state.station.repair_turns_remaining:
+        return _rejected(state, "repair_in_progress")
+    if method == "backup" and not (state.station.backup_active and state.station.backup_oxygen > 0):
+        return _rejected(state, "backup_not_operating")
+    updated = replace(
+        state, station=replace(state.station, available_crew=state.station.available_crew - 1)
+    )
+    stress = (
+        _apply_equipment_exposure(updated, method)
+        if method != "routine"
+        else WorldAdvanceResult(updated)
+    )
+    updated = stress.state
+    part = updated.installed_part
+    assert part is not None
     if part.defect_confirmed:
         message = (
-            f"Inspection traced the oxygen leak to a material defect in installed batch "
+            f"Inspection found a material defect in installed batch "
             f"{part.batch_id} from {part.origin_world}."
         )
         finding_code = "material_defect_confirmed"
+        batch_id, contract_id, shipment_id = part.batch_id, part.contract_id, part.shipment_id
+    elif updated.residual_damage_confirmed:
+        message = "Inspection found residual oxygen-system damage after stabilization."
+        finding_code = "residual_damage_confirmed"
+        batch_id = contract_id = shipment_id = None
     else:
         message = (
             f"Inspection traced the installed oxygen-system part to batch {part.batch_id} "
-            f"from {part.origin_world}; no material defect observed under current conditions."
+            f"from {part.origin_world}; no material defect observed under {method} conditions."
         )
         finding_code = "installed_batch_traced"
+        batch_id, contract_id, shipment_id = part.batch_id, part.contract_id, part.shipment_id
     updated, evidence = _emit_evidence(
-        state,
+        updated,
         TradeEvidenceKind.INSPECTION,
         message,
         "station",
         asset_id="oxygen_system",
-        batch_id=part.batch_id,
-        contract_id=part.contract_id,
-        shipment_id=part.shipment_id,
+        batch_id=batch_id,
+        contract_id=contract_id,
+        shipment_id=shipment_id,
         finding_code=finding_code,
+        method=method,
+        operating_load=method,
     )
-    return TradeResult(updated, True, evidence=evidence)
+    if part.defect_confirmed and updated.residual_damage_confirmed:
+        updated, residual = _emit_evidence(
+            updated,
+            TradeEvidenceKind.INSPECTION,
+            "Inspection also found residual oxygen-system damage after stabilization.",
+            "station",
+            asset_id="oxygen_system",
+            finding_code="residual_damage_confirmed",
+            method=method,
+            operating_load=method,
+        )
+        evidence += residual
+    return TradeResult(updated, True, evidence=stress.evidence + evidence)
 
 
 def quarantine_batch(state: WorldState, batch_id: str, *, quantity: int = 1) -> TradeResult:
@@ -889,20 +838,20 @@ def quarantine_batch(state: WorldState, batch_id: str, *, quantity: int = 1) -> 
             (
                 (
                     f"inventory:station:{batch_id}:{lot.shipment_id or 'local'}",
-                    "parts",
+                    lot.resource,
                     -removed,
                     "quarantine",
                     reference,
                 ),
-                (f"quarantine:{batch_id}", "parts", removed, "quarantine", reference),
+                (f"quarantine:{batch_id}", lot.resource, removed, "quarantine", reference),
             ),
         )
         updated, event = _emit_evidence(
             updated,
             TradeEvidenceKind.QUARANTINE,
-            f"Quarantined {removed} unused part(s) from batch {batch_id}.",
+            f"Quarantined {removed} unused {lot.unit} of {lot.resource} from batch {batch_id}.",
             "station",
-            asset_id="oxygen_system",
+            asset_id="oxygen_system" if lot.resource == "parts" else None,
             batch_id=batch_id,
             contract_id=lot.contract_id,
             shipment_id=lot.shipment_id,
@@ -1025,6 +974,7 @@ def observe_world(state: WorldState, world_id: str) -> PublicWorldView:
         contracts=contracts,
         shipments=shipments,
         evidence=tuple(sorted(evidence, key=lambda item: (item.turn, item.sequence))),
+        operating_load=state.operating_load if world_id == "station" else "routine",
     )
 
 
@@ -1041,10 +991,6 @@ def _validate_nonnegative_integer(name: str, value: object, *, maximum: int) -> 
 def _validate_bounded_positive(name: str, value: object, *, maximum: int) -> None:
     if type(value) is not int or not 1 <= value <= maximum:
         raise ValueError(f"{name} must be an integer from 1 to {maximum}")
-
-
-def _rejected(state: WorldState, reason: str) -> TradeResult:
-    return TradeResult(state, False, rejection=reason)
 
 
 def _world_exists(state: WorldState, world_id: str) -> bool:
@@ -1217,33 +1163,6 @@ def _append_ledger(
         for index, (account, resource, delta, kind, reference_id) in enumerate(rows)
     )
     return replace(state, ledger=state.ledger + entries)
-
-
-def _emit_evidence(
-    state: WorldState,
-    kind: TradeEvidenceKind,
-    message: str,
-    world_id: str,
-    *,
-    asset_id: str | None = None,
-    batch_id: str | None = None,
-    contract_id: str | None = None,
-    shipment_id: str | None = None,
-    finding_code: str | None = None,
-) -> tuple[WorldState, tuple[TradeEvidence, ...]]:
-    evidence = TradeEvidence(
-        sequence=len(state.evidence) + 1,
-        turn=state.station.turn,
-        kind=kind,
-        message=message,
-        world_id=world_id,
-        asset_id=asset_id,
-        batch_id=batch_id,
-        contract_id=contract_id,
-        shipment_id=shipment_id,
-        finding_code=finding_code,
-    )
-    return replace(state, evidence=state.evidence + (evidence,)), (evidence,)
 
 
 def _replace_shipment(state: WorldState, index: int, shipment: Shipment) -> WorldState:
