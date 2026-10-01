@@ -7,6 +7,24 @@ Companion Page: https://chatgpt.com/space/page_fc5b19900a188191a26a38b452913a17
 Explore the [interactive architecture canvas](architecture/README.md): zoom through service boundaries, inspect backing code and state, and replay an adversarial run event by event.
 This flow applies to `jev+llm` mode. Jev assesses public events in batches; the captain chooses actions. The application routes alerts and classification failures to review, and validates proposals before execution. Action results return to Jev, with further actions scheduled for a later turn. The audit log also preserves private adversary activity and hidden world transitions; those records stay outside the crew AIs' inputs.
 
+## From one crew to world governors
+
+The first diagram follows the decision cycle for one station crew. The next diagram widens the view: each world has a governor with its own observations, objectives, and decision context. The expanded station governor shows where the original Captain/Jev flow fits within that local decision boundary. Other worlds can use different policies, created through the same facade.
+
+![Station Control worlds and their governors: the station crew decision flow expanded inside a local governor, with authoritative world and trade rules outside](docs/images/station-control-world-governors.png)
+
+The original ideas remain in place:
+
+| Original idea | Where it appears in the wider system |
+| --- | --- |
+| Public evidence guides decisions. | Each governor receives local observations and action results. Hidden causes enter its view only through observable symptoms and scoped findings. |
+| Jev classifies; the captain chooses interventions. | The expanded station crew retains classification, incident routing, monitoring, and captain review. Trade worlds use their configured governor policies. |
+| Python validates proposals and owns reality. | Authoritative world and trade rules enforce resources, funds, crew, and capacity before changing state. Contracts and shipments connect worlds through those rules. |
+| Scenarios and adversaries influence the world. | Scheduled events and validated disruptions remain outside the governor's decision boundary. Their observable effects return as evidence. |
+| Review separates evidence, decisions, and actual outcomes. | Station mission logs and trade ledgers and summaries support commander review and evaluation. Private world facts stay outside governor inputs. |
+
+Production, pricing, and shipment-specific investigations extend this cycle. A defective batch can cross worlds and fail later under load; the governor must investigate the resulting evidence, trace its source, and propose a remedy. The Python rules determine what that remedy actually changes.
+
 ## Purpose and current product
 
 Station Control tests how an AI crew keeps a space station operational when equipment fails or reports are misleading. Crew survival is the primary objective. Resource use, incident handling, and decision cost show how well the crew performs.
