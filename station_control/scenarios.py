@@ -40,10 +40,18 @@ class ScenarioDefinition:
     schema_version: int = 1
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "initial", MappingProxyType(dict(self.initial)))
+        if not isinstance(self.initial, Mapping):
+            raise ValueError("initial must be a mapping")
+        if not isinstance(self.events, (list, tuple)) or any(
+            not isinstance(event, ScenarioEventSpec) for event in self.events
+        ):
+            raise ValueError("events must contain ScenarioEventSpec values")
+        validated = _validated_definition_fields(scenario_definition_to_dict(self))
+        object.__setattr__(self, "initial", MappingProxyType(validated["initial"]))
+        object.__setattr__(self, "events", validated["events"])
 
 
-_MAX_TURN = 336
+MAX_SCENARIO_TURNS = 14 * 24
 _MAX_EVENTS = 256
 _MAX_DESCRIPTION_LENGTH = 512
 _MAX_MESSAGE_LENGTH = 2000
@@ -158,6 +166,11 @@ def create_world(family: ScenarioFamily | str, seed: int) -> StationState:
 
 def scenario_definition_from_dict(data: object) -> ScenarioDefinition:
     """Validate a YAML or saved-log mapping and return its typed definition."""
+    return ScenarioDefinition(**_validated_definition_fields(data))
+
+
+def _validated_definition_fields(data: object) -> dict[str, object]:
+    """Normalize scenario fields using the same contract for every construction path."""
     root = _mapping(data, "scenario")
     _require_fields(root, {"schema_version", "id", "description", "initial", "events"}, "scenario")
     version = root["schema_version"]
@@ -221,13 +234,13 @@ def scenario_definition_from_dict(data: object) -> ScenarioDefinition:
         raise ValueError(f"events must be a sequence of at most {_MAX_EVENTS} items")
     events = tuple(_event_from_value(value, index) for index, value in enumerate(raw_events))
 
-    return ScenarioDefinition(
-        id=scenario_id,
-        description=description,
-        initial=initial,
-        events=events,
-        schema_version=version,
-    )
+    return {
+        "id": scenario_id,
+        "description": description,
+        "initial": initial,
+        "events": events,
+        "schema_version": version,
+    }
 
 
 def scenario_definition_to_dict(definition: ScenarioDefinition) -> dict[str, object]:
@@ -275,7 +288,7 @@ def compose_scenarios(
     for source in sources:
         if not isinstance(source, ScenarioDefinition):
             raise ValueError("definitions must contain ScenarioDefinition values")
-        validated_sources.append(scenario_definition_from_dict(scenario_definition_to_dict(source)))
+        validated_sources.append(source)
 
     initial: dict[str, int] = {}
     events: list[ScenarioEventSpec] = []
@@ -302,14 +315,16 @@ def compose_scenarios(
         initial=initial,
         events=tuple(events),
     )
-    return scenario_definition_from_dict(scenario_definition_to_dict(composed))
+    return composed
 
 
 def create_configured_world(definition: ScenarioDefinition, seed: int) -> StationState:
     """Create a seeded world from validated settings and authored event order."""
     if type(seed) is not int:
         raise ValueError("Scenario seed must be an integer")
-    validated = scenario_definition_from_dict(scenario_definition_to_dict(definition))
+    if not isinstance(definition, ScenarioDefinition):
+        raise ValueError("definition must be a ScenarioDefinition")
+    validated = definition
     state = create_world(ScenarioFamily.NORMAL, seed)
     overrides = dict(validated.initial)
     oxygen = overrides.get("oxygen", state.oxygen)
@@ -356,14 +371,18 @@ def _event_from_value(value: object, index: int) -> ScenarioEventSpec:
 
     raw_turn = fields["turn"]
     if type(raw_turn) is int:
-        if not 1 <= raw_turn <= _MAX_TURN:
-            raise ValueError(f"events[{index}].turn must be between 1 and {_MAX_TURN}")
+        if not 1 <= raw_turn <= MAX_SCENARIO_TURNS:
+            raise ValueError(f"events[{index}].turn must be between 1 and {MAX_SCENARIO_TURNS}")
         turn: int | tuple[int, int] = raw_turn
     elif isinstance(raw_turn, (list, tuple)) and len(raw_turn) == 2:
         start, end = raw_turn
-        if type(start) is not int or type(end) is not int or not 1 <= start <= end <= _MAX_TURN:
+        if (
+            type(start) is not int
+            or type(end) is not int
+            or not 1 <= start <= end <= MAX_SCENARIO_TURNS
+        ):
             raise ValueError(
-                f"events[{index}].turn window must be ordered integers in 1..{_MAX_TURN}"
+                f"events[{index}].turn window must be ordered integers in 1..{MAX_SCENARIO_TURNS}"
             )
         turn = (start, end)
     else:
@@ -430,13 +449,13 @@ def _initial_bounds(name: str) -> tuple[int, int]:
     if name == "oxygen_capacity":
         return 1, 10_000
     if name in {"repair_duration_turns"}:
-        return 1, _MAX_TURN
+        return 1, MAX_SCENARIO_TURNS
     if name in {
         "delivery_delay_turns",
         "repair_notice_delay_turns",
         "duplicate_notice_delay_turns",
     }:
-        return 0, _MAX_TURN
+        return 0, MAX_SCENARIO_TURNS
     if name == "delivery_fill_percent":
         return 0, 100
     return 0, 10_000

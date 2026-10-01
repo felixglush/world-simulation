@@ -6,7 +6,6 @@ import json
 import math
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
 from typing import Any
 
 import httpx2
@@ -24,6 +23,15 @@ from typesafe_sdk import (
 )
 
 from .controllers import (
+    INSTRUCTION_VERSION as CAPTAIN_INSTRUCTION_VERSION,
+)
+from .controllers import (
+    QUESTION_VERSION as DISPATCH_QUESTION_VERSION,
+)
+from .controllers import (
+    RUBRIC_VERSION as DISPATCH_RUBRIC_VERSION,
+)
+from .controllers import (
     ActionDescriptor,
     ActionRequest,
     ActionRequestKind,
@@ -36,20 +44,34 @@ from .controllers import (
     ProviderErrorCode,
     Subsystem,
 )
+from .provider_support import (
+    DEFAULT_TIMEOUT_SECONDS as DEFAULT_TIMEOUT_SECONDS,
+)
+from .provider_support import (
+    MAX_ARGUMENT_CHARS as MAX_ARGUMENT_CHARS,
+)
+from .provider_support import (
+    MAX_INPUT_CHARS as MAX_INPUT_CHARS,
+)
+from .provider_support import (
+    CallBudget as CallBudget,
+)
+from .provider_support import (
+    call_metadata,
+    ensure_bounded,
+    failure_metadata,
+    measure_latency_ms,
+    reported_cost,
+    validate_configuration,
+)
 
 DEFAULT_CAPTAIN_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_JEV_BASE_URL = "https://openrouter.ai/api"
-DEFAULT_TIMEOUT_SECONDS = 30.0
-MAX_INPUT_CHARS = 40_000
-MAX_ARGUMENT_CHARS = 12_000
 MAX_RATIONALE_CHARS = 2_000
 NOUL_YES_THRESHOLD = 0.75
 NOUL_NO_THRESHOLD = 0.25
 DISPATCH_PROMPT_VERSION = "jev-observation-v1"
-DISPATCH_QUESTION_VERSION = "jev-questions-v1"
-DISPATCH_RUBRIC_VERSION = "jev-rubric-v1"
 CAPTAIN_PROMPT_VERSION = "captain-structured-actions-v1"
-CAPTAIN_INSTRUCTION_VERSION = "captain-instructions-v1"
 
 _URGENCY_LEVELS = (
     "Routine: no current safety concern; ordinary monitoring is enough.",
@@ -67,28 +89,6 @@ _ALLOWED_ACTION_FIELDS = {
 }
 
 
-@dataclass(slots=True)
-class CallBudget:
-    """Shared finite provider-call budget and per-call output-token ceiling."""
-
-    max_calls: int
-    max_output_tokens_per_call: int
-    _used_calls: int = field(default=0, init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        if type(self.max_calls) is not int or self.max_calls < 1:
-            raise ValueError("max_calls must be a positive integer")
-        if type(self.max_output_tokens_per_call) is not int or self.max_output_tokens_per_call < 1:
-            raise ValueError("max_output_tokens_per_call must be a positive integer")
-
-    def consume(self) -> int:
-        """Spend one request before network I/O and return its output-token limit."""
-        if self._used_calls >= self.max_calls:
-            raise ProviderError(ProviderErrorCode.BUDGET_EXHAUSTED)
-        self._used_calls += 1
-        return self.max_output_tokens_per_call
-
-
 class JevDispatchProvider:
     """TypeSafe adapter that asks one Choice, two Noul, and one Score question."""
 
@@ -103,7 +103,7 @@ class JevDispatchProvider:
         transport: httpx2.BaseTransport | None = None,
         http_client: httpx2.Client | None = None,
     ) -> None:
-        _validate_configuration(api_key, model, base_url, timeout, budget)
+        validate_configuration(api_key, model, base_url, timeout, budget)
         try:
             self._client = TypeSafeClient(
                 api_key=api_key.strip(),
@@ -128,12 +128,12 @@ class JevDispatchProvider:
             ):
                 raise ProviderError(ProviderErrorCode.INVALID_INPUT)
             state = _dispatch_state(context)
-            _ensure_bounded(state)
+            ensure_bounded(state)
             self._budget.consume()
         except ProviderError as error:
             raise ProviderError(
                 error.code,
-                _failure_metadata("typesafe", self._model, request_made=False, latency_ms=0),
+                failure_metadata("typesafe", self._model, request_made=False, latency_ms=0),
             ) from None
         started = time.perf_counter()
         try:
@@ -204,32 +204,38 @@ class JevDispatchProvider:
         except TypeSafeAPIResponseValidationError:
             raise ProviderError(
                 ProviderErrorCode.MALFORMED_RESPONSE,
-                _failure_metadata(
-                    "typesafe", self._model, request_made=True, latency_ms=_elapsed_ms(started)
+                failure_metadata(
+                    "typesafe",
+                    self._model,
+                    request_made=True,
+                    latency_ms=measure_latency_ms(started),
                 ),
             ) from None
         except Exception:
             raise ProviderError(
                 ProviderErrorCode.PROVIDER_UNAVAILABLE,
-                _failure_metadata(
-                    "typesafe", self._model, request_made=True, latency_ms=_elapsed_ms(started)
+                failure_metadata(
+                    "typesafe",
+                    self._model,
+                    request_made=True,
+                    latency_ms=measure_latency_ms(started),
                 ),
             ) from None
 
-        elapsed_ms = _elapsed_ms(started)
+        elapsed_ms = measure_latency_ms(started)
         try:
             result = _dispatch_result(response, context, elapsed_ms, self._timeout)
         except ProviderError as error:
             raise ProviderError(
                 error.code,
-                _failure_metadata(
+                failure_metadata(
                     "typesafe", response.model, request_made=True, latency_ms=elapsed_ms
                 ),
             ) from None
         except Exception:
             raise ProviderError(
                 ProviderErrorCode.MALFORMED_RESPONSE,
-                _failure_metadata(
+                failure_metadata(
                     "typesafe", response.model, request_made=True, latency_ms=elapsed_ms
                 ),
             ) from None
@@ -252,7 +258,7 @@ class OpenRouterCaptainProvider:
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
         http_client: httpx2.Client | None = None,
     ) -> None:
-        _validate_configuration(api_key, model, base_url, timeout, budget)
+        validate_configuration(api_key, model, base_url, timeout, budget)
         try:
             self._client = OpenAI(
                 api_key=api_key.strip(),
@@ -274,12 +280,12 @@ class OpenRouterCaptainProvider:
             descriptors = _action_descriptors(context.allowed_actions)
             user_payload = _captain_payload(context)
             tools = [_tool_descriptor(action) for action in descriptors]
-            _ensure_bounded({"payload": user_payload, "tools": tools})
+            ensure_bounded({"payload": user_payload, "tools": tools})
             max_tokens = self._budget.consume()
         except ProviderError as error:
             raise ProviderError(
                 error.code,
-                _failure_metadata("openrouter", self._model, request_made=False, latency_ms=0),
+                failure_metadata("openrouter", self._model, request_made=False, latency_ms=0),
             ) from None
         started = time.perf_counter()
         try:
@@ -306,19 +312,25 @@ class OpenRouterCaptainProvider:
         except APIResponseValidationError:
             raise ProviderError(
                 ProviderErrorCode.MALFORMED_RESPONSE,
-                _failure_metadata(
-                    "openrouter", self._model, request_made=True, latency_ms=_elapsed_ms(started)
+                failure_metadata(
+                    "openrouter",
+                    self._model,
+                    request_made=True,
+                    latency_ms=measure_latency_ms(started),
                 ),
             ) from None
         except Exception:
             raise ProviderError(
                 ProviderErrorCode.PROVIDER_UNAVAILABLE,
-                _failure_metadata(
-                    "openrouter", self._model, request_made=True, latency_ms=_elapsed_ms(started)
+                failure_metadata(
+                    "openrouter",
+                    self._model,
+                    request_made=True,
+                    latency_ms=measure_latency_ms(started),
                 ),
             ) from None
 
-        elapsed_ms = _elapsed_ms(started)
+        elapsed_ms = measure_latency_ms(started)
         try:
             result = _captain_result(
                 response, descriptors, context, elapsed_ms, max_tokens, self._timeout
@@ -327,14 +339,14 @@ class OpenRouterCaptainProvider:
             response_model = getattr(response, "model", self._model)
             raise ProviderError(
                 error.code,
-                _failure_metadata(
+                failure_metadata(
                     "openrouter", response_model, request_made=True, latency_ms=elapsed_ms
                 ),
             ) from None
         except Exception:
             raise ProviderError(
                 ProviderErrorCode.MALFORMED_RESPONSE,
-                _failure_metadata(
+                failure_metadata(
                     "openrouter", self._model, request_made=True, latency_ms=elapsed_ms
                 ),
             ) from None
@@ -342,24 +354,6 @@ class OpenRouterCaptainProvider:
 
     def close(self) -> None:
         self._client.close()
-
-
-def _validate_configuration(
-    api_key: str,
-    model: str,
-    base_url: str,
-    timeout: float,
-    budget: CallBudget,
-) -> None:
-    if not all(isinstance(value, str) and value.strip() for value in (api_key, model, base_url)):
-        raise ProviderError(ProviderErrorCode.INVALID_INPUT)
-    if (
-        not isinstance(budget, CallBudget)
-        or type(timeout) not in (int, float)
-        or not math.isfinite(timeout)
-        or timeout <= 0
-    ):
-        raise ProviderError(ProviderErrorCode.INVALID_INPUT)
 
 
 def _dispatch_state(context: DispatchContext) -> dict[str, object]:
@@ -408,19 +402,11 @@ def _station(station: Any) -> dict[str, object]:
 def _evidence(item: Any) -> dict[str, object]:
     return {
         "sequence": item.sequence,
+        "code": getattr(item, "code", None),
         "turn": item.turn,
         "kind": item.kind,
         "message": item.message,
     }
-
-
-def _ensure_bounded(value: object) -> None:
-    try:
-        serialized = json.dumps(value, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-    except (TypeError, ValueError):
-        raise ProviderError(ProviderErrorCode.INVALID_INPUT) from None
-    if len(serialized) > MAX_INPUT_CHARS:
-        raise ProviderError(ProviderErrorCode.INVALID_INPUT)
 
 
 def _action_descriptors(actions: Sequence[ActionDescriptor]) -> tuple[ActionDescriptor, ...]:
@@ -456,7 +442,7 @@ def _action_descriptors(actions: Sequence[ActionDescriptor]) -> tuple[ActionDesc
             )
         ):
             raise ProviderError(ProviderErrorCode.INVALID_INPUT)
-        _ensure_bounded(schema)
+        ensure_bounded(schema)
     return descriptors
 
 
@@ -512,12 +498,12 @@ def _captain_result(
         raise ProviderError(ProviderErrorCode.MALFORMED_RESPONSE) from None
     rationale = message.content if isinstance(message.content, str) else ""
     usage = response.usage
-    metadata = _call_metadata(
+    metadata = call_metadata(
         provider="openrouter",
         model=response.model,
         input_tokens=getattr(usage, "prompt_tokens", None),
         output_tokens=getattr(usage, "completion_tokens", None),
-        cost=_reported_cost(usage),
+        cost=reported_cost(usage),
         elapsed_ms=elapsed_ms,
     )
     metadata.update(
@@ -656,7 +642,7 @@ def _dispatch_result(
         raise ProviderError(ProviderErrorCode.MALFORMED_RESPONSE)
 
     usage = response.usage
-    metadata = _call_metadata(
+    metadata = call_metadata(
         provider="typesafe",
         model=response.model,
         input_tokens=getattr(usage, "input_tokens", None),
@@ -700,54 +686,3 @@ def _valid_distribution(values: Mapping[object, float], expected_keys: set[objec
     ):
         return False
     return math.isclose(sum(values.values()), 1.0, abs_tol=0.03)
-
-
-def _call_metadata(
-    *,
-    provider: str,
-    model: str,
-    input_tokens: object,
-    output_tokens: object,
-    cost: float | None,
-    elapsed_ms: float,
-) -> dict[str, object]:
-    return {
-        "provider": provider,
-        "calls": 1,
-        "request_made": True,
-        "model": model,
-        "input_tokens": input_tokens if type(input_tokens) is int and input_tokens >= 0 else None,
-        "output_tokens": output_tokens
-        if type(output_tokens) is int and output_tokens >= 0
-        else None,
-        "cost_usd": cost,
-        "latency_ms": elapsed_ms,
-    }
-
-
-def _failure_metadata(
-    provider: str,
-    model: object,
-    *,
-    request_made: bool,
-    latency_ms: float,
-) -> dict[str, object]:
-    return {
-        "provider": provider,
-        "model": model if isinstance(model, str) else "unknown",
-        "calls": int(request_made),
-        "request_made": request_made,
-        "latency_ms": latency_ms,
-    }
-
-
-def _elapsed_ms(started: float) -> float:
-    return round((time.perf_counter() - started) * 1000, 3)
-
-
-def _reported_cost(usage: object) -> float | None:
-    extra = getattr(usage, "model_extra", None)
-    value = extra.get("cost") if isinstance(extra, Mapping) else getattr(usage, "cost", None)
-    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
-        return None
-    return float(value)

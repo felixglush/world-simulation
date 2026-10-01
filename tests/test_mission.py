@@ -665,3 +665,92 @@ def test_malformed_dispatch_result_routes_to_captain_without_crashing(field, val
         and event["consequence"]["code"] == "malformed_response"
         for event in result.events
     )
+
+
+def test_event_sink_cannot_change_mission_history_or_evaluation():
+    config = MissionConfig(
+        scenario=ScenarioFamily.LEAK, seed=3, duration_turns=8, run_id="sink-test"
+    )
+    expected = run_mission(config)
+
+    def modifying_sink(record):
+        if isinstance(record["decision"], dict):
+            record["decision"].clear()
+        if isinstance(record["consequence"], dict):
+            record["consequence"].clear()
+        if isinstance(record["evidence"], dict):
+            record["evidence"]["message"] = "changed by sink"
+
+    actual = run_mission(config, event_sink=modifying_sink)
+    assert actual.events == expected.events
+    assert actual.evaluation == expected.evaluation
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("action", None),
+        ("metadata", None),
+        ("rationale", None),
+        ("action", ActionRequest(ActionRequestKind.CLOSE, evidence_sequences=None)),
+        ("action", ActionRequest(ActionRequestKind.CLOSE, evidence_sequences=({},))),
+    ],
+)
+def test_malformed_captain_decision_is_recorded_and_followed_up(field, value):
+    from dataclasses import replace
+
+    class MalformedCaptain:
+        def decide(self, context):
+            proposal = CaptainDecision(ActionRequest(ActionRequestKind.INSPECT, "oxygen_system"))
+            return replace(proposal, **{field: value})
+
+    result = run_mission(
+        MissionConfig(duration_turns=6, controller_mode=ControllerMode.LLM),
+        captain=MalformedCaptain(),
+    )
+    failures = [event for event in result.events if event["event_type"] == "provider_failure"]
+    assert failures
+    assert all(event["consequence"]["code"] == "malformed_response" for event in failures)
+    assert not any(event["event_type"] == "action" for event in result.events)
+    assert any(
+        event["event_type"] == "follow_up_scheduled"
+        and event["consequence"]["reason"] == "provider_failure"
+        for event in result.events
+    )
+
+
+def test_custom_sensor_alert_wording_does_not_change_valid_closure():
+    class SensorCaptain:
+        def decide(self, context):
+            inspection = next(
+                (item for item in context.evidence if item.kind == "inspection"), None
+            )
+            if inspection is None:
+                return CaptainDecision(ActionRequest(ActionRequestKind.INSPECT, target="sensor_a"))
+            return CaptainDecision(
+                ActionRequest(
+                    ActionRequestKind.CLOSE,
+                    reason="inspection identified the calibration fault",
+                    evidence_sequences=(inspection.sequence,),
+                )
+            )
+
+    def run(message):
+        return run_mission(
+            MissionConfig(
+                scenario_definition=ScenarioDefinition(
+                    "sensor_wording",
+                    "Sensor alert wording.",
+                    {},
+                    (ScenarioEventSpec(1, "sensor_fault", target="sensor_a", message=message),),
+                ),
+                controller_mode=ControllerMode.LLM,
+                duration_turns=4,
+            ),
+            captain=SensorCaptain(),
+        )
+
+    standard = run(None)
+    reworded = run("Sensor A needs an independent inspection.")
+    assert standard.evaluation.metrics["unresolved_incidents"] == 0
+    assert reworded.evaluation.metrics["unresolved_incidents"] == 0
