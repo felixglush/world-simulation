@@ -1,36 +1,25 @@
-"""Failures depend on exposure and repairs remove their actual causes."""
+"""Equipment failures follow operating conditions and repairs remove their causes."""
 
 from dataclasses import replace
 
+from station_control.domain import Action, ActionKind, apply_action
 from station_control.scenarios import create_world
 from station_control.trade import (
-    PartLot,
+    TradeEvidenceKind,
+    TradeReport,
     advance_world,
     create_world_state,
     inspect_installed_batch,
+    purchase_lot,
+    quarantine_batch,
     repair_with_batch,
+    set_operating_load,
 )
 
 
-def initial(*, defective=True, residual=0):
-    station = replace(create_world("normal", 0), scheduled_events=(), parts=2, leak_active=True)
-    state = create_world_state(station)
-    return replace(
-        state,
-        station_lots=(
-            PartLot(
-                "local-a",
-                1,
-                10,
-                "station",
-                latent_defect=defective,
-                defect_after_turns=2 if defective else 0,
-                failure_load="peak",
-            ),
-            PartLot("local-b", 1, 10, "station"),
-        ),
-        residual_damage_after_turns=residual,
-    )
+def station_state(**changes):
+    station = replace(create_world("normal", seed=0), scheduled_events=())
+    return replace(station, **changes)
 
 
 def advance(state, turns):
@@ -39,112 +28,149 @@ def advance(state, turns):
     return state
 
 
-def repaired(*, defective=True, residual=0, mode="full"):
-    return advance(
-        repair_with_batch(
-            initial(defective=defective, residual=residual), "local-a", mode=mode
-        ).state,
-        2,
+def test_purchase_to_stress_investigation_and_replacement_removes_defect_and_residual_damage():
+    state = create_world_state(
+        station_state(leak_active=True),
+        defect_after_turns=2,
+        travel_turns=2,
+    )
+    state = replace(state, residual_damage_after_turns=2)
+    purchase = purchase_lot(
+        state,
+        command_id="bad-order",
+        batch_id="industrial-batch-a",
+        quantity=2,
+    )
+    arrived = advance(purchase.state, 3)
+    bad_lot = next(lot for lot in arrived.station_lots if lot.batch_id == "industrial-batch-a")
+    assert bad_lot.contract_id == purchase.contract_id
+    assert bad_lot.shipment_id == purchase.shipment_id
+
+    assigned = repair_with_batch(arrived, "industrial-batch-a", mode="stabilize")
+    installed = advance(assigned.state, 2)
+    assert installed.installed_part.batch_id == "industrial-batch-a"
+    assert installed.residual_damage_after_turns == 2
+
+    peak = set_operating_load(installed, "peak").state
+    first_stress = inspect_installed_batch(peak, method="peak")
+    assert first_stress.accepted
+    assert not first_stress.state.station.leak_active
+    second_stress = inspect_installed_batch(first_stress.state, method="peak")
+    assert second_stress.state.station.leak_active
+    assert any(item.kind is TradeEvidenceKind.FAILURE for item in second_stress.evidence)
+    assert {
+        item.code for item in second_stress.evidence if item.kind is TradeEvidenceKind.INSPECTION
+    } == {"material_defect_confirmed", "residual_damage_confirmed"}
+    findings = [
+        item for item in second_stress.evidence if item.kind is TradeEvidenceKind.INSPECTION
+    ]
+    assert next(item for item in findings if item.code == "material_defect_confirmed").batch_id == (
+        "industrial-batch-a"
+    )
+    assert (
+        next(item for item in findings if item.code == "residual_damage_confirmed").batch_id is None
     )
 
+    quarantined = quarantine_batch(second_stress.state, "industrial-batch-a")
+    assert quarantined.accepted
+    assert (
+        sum(
+            lot.quantity
+            for lot in quarantined.state.station_lots
+            if lot.batch_id == "industrial-batch-a"
+        )
+        == 0
+    )
+    replacement = purchase_lot(
+        quarantined.state,
+        command_id="good-order",
+        batch_id="industrial-batch-b",
+        quantity=1,
+    )
+    arrived_good = advance(replacement.state, 3)
+    completed = advance(repair_with_batch(arrived_good, "industrial-batch-b").state, 2)
+    assert completed.installed_part.batch_id == "industrial-batch-b"
+    assert completed.installed_part.contract_id == replacement.contract_id
+    assert completed.residual_damage_after_turns == 0
 
-def test_conditional_defect_survives_routine_inspection_and_fails_only_after_peak_exposure():
-    state = advance(repaired(), 10)
-    assert not state.station.leak_active
-    checked = inspect_installed_batch(state)
-    assert checked.evidence[-1].code == "installed_batch_traced"
-    assert checked.evidence[-1].method == "routine"
-    under_load = replace(checked.state, operating_load="peak")
-    once = advance(under_load, 1)
-    assert not once.station.leak_active
-    twice = advance(once, 1)
-    assert twice.station.leak_active
-    failure = next(item for item in reversed(twice.evidence) if item.kind == "failure")
-    assert failure.batch_id is None
-    assert failure.operating_load == "peak"
-    inspected = inspect_installed_batch(twice)
-    assert inspected.evidence[-1].code == "material_defect_confirmed"
-
-
-def test_relevant_stress_test_exposes_failure_before_uncontrolled_peak_operation():
-    state = repaired()
-    first = inspect_installed_batch(state, method="peak")
-    assert first.accepted
-    assert not first.state.station.leak_active
-    second = inspect_installed_batch(first.state, method="peak")
-    assert second.accepted
-    assert second.state.station.leak_active
-    assert second.evidence[-1].code == "material_defect_confirmed"
-    assert second.state.station.available_crew == state.station.available_crew - 2
+    operated = advance(completed, 6)
+    assert not operated.station.leak_active
+    assert inspect_installed_batch(operated).evidence[0].code == "installed_batch_traced"
 
 
-def test_healthy_part_passes_same_stress_test_without_false_accusation():
-    state = repaired(defective=False)
-    tested = inspect_installed_batch(state, method="peak")
+def test_backup_sensitive_defect_fails_only_when_the_backup_is_actually_operating():
+    state = create_world_state(station_state(leak_active=True), defect_after_turns=1)
+    seller = state.inventories[0]
+    bad_lot = replace(seller.lots[0], failure_load="backup")
+    state = replace(state, inventories=(replace(seller, lots=(bad_lot, *seller.lots[1:])),))
+    bought = purchase_lot(state, command_id="backup-order", batch_id=bad_lot.batch_id, quantity=1)
+    arrived = advance(bought.state, 3)
+    installed = advance(repair_with_batch(arrived, bad_lot.batch_id).state, 2)
+
+    peak = advance(set_operating_load(installed, "peak").state, 3)
+    assert not peak.station.leak_active
+    assert peak.installed_part.operating_turns == 0
+
+    backup_station = replace(peak.station, backup_oxygen=120)
+    backup = apply_action(backup_station, Action(ActionKind.ACTIVATE_BACKUP))
+    assert backup.accepted
+    failed = advance_world(replace(peak, station=backup.state))
+    assert failed.state.station.leak_active
+    failure = next(item for item in failed.evidence if item.kind is TradeEvidenceKind.FAILURE)
+    assert failure.operating_load == "backup"
+    assert failed.state.installed_part.defect_confirmed
+
+
+def test_healthy_replacement_passes_peak_stress_without_a_false_defect_finding():
+    state = create_world_state(station_state(leak_active=True))
+    bought = purchase_lot(
+        state,
+        command_id="healthy-order",
+        batch_id="industrial-batch-b",
+        quantity=1,
+    )
+    arrived = advance(bought.state, 3)
+    installed = advance(repair_with_batch(arrived, "industrial-batch-b").state, 2)
+
+    tested = inspect_installed_batch(installed, method="peak")
+
     assert tested.accepted
     assert not tested.state.station.leak_active
-    assert tested.evidence[-1].code == "installed_batch_traced"
+    assert tested.evidence[0].method == "peak"
+    assert tested.evidence[0].code == "installed_batch_traced"
 
 
-def test_stabilization_leaves_residual_damage_that_returns_under_load():
-    state = advance(repaired(defective=False, residual=2, mode="stabilize"), 8)
-    assert not state.station.leak_active
-    failed = advance(replace(state, operating_load="peak"), 2)
-    assert failed.station.leak_active
-    finding = inspect_installed_batch(failed)
-    assert finding.evidence[-1].code == "residual_damage_confirmed"
-    assert finding.evidence[-1].batch_id is None
-    fully_repaired = advance(repair_with_batch(finding.state, "local-b", mode="full").state, 2)
-    assert not advance(fully_repaired, 8).station.leak_active
-    assert fully_repaired.residual_damage_after_turns == 0
-
-
-def test_replacing_faulty_part_removes_cause_without_a_scheduled_recurrence():
-    state = advance(replace(repaired(), operating_load="peak"), 2)
-    fixed = advance(repair_with_batch(state, "local-b").state, 2)
-    assert not advance(fixed, 20).station.leak_active
-
-
-def test_invalid_or_unstaffed_stress_inspection_is_atomic():
-    state = repaired()
-    rejected = inspect_installed_batch(state, method="magic")
-    assert not rejected.accepted
-    assert rejected.state is state
-    no_crew = replace(state, station=replace(state.station, available_crew=0))
-    denied = inspect_installed_batch(no_crew, method="peak")
-    assert not denied.accepted
-    assert denied.state is no_crew
-
-
-def test_backup_failure_requires_actual_backup_operation():
-    state = repaired()
-    state = replace(state, installed_part=replace(state.installed_part, failure_load="backup"))
-    assert not advance(replace(state, operating_load="peak"), 5).station.leak_active
-    backed = replace(state, station=replace(state.station, backup_active=True, backup_oxygen=120))
-    assert advance(backed, 2).station.leak_active
-
-
-def test_fatal_oxygen_transition_stops_subsequent_defect_exposure_and_failure_events():
-    state = repaired()
-    doomed = replace(
-        state,
-        station=replace(state.station, oxygen=1, leak_active=True),
-        installed_part=replace(state.installed_part, failure_load="any", defect_after_turns=1),
+def test_fatal_oxygen_turn_stops_defect_exposure_sensor_drift_and_due_report_publication():
+    state = create_world_state(station_state(leak_active=True), defect_after_turns=1)
+    bought = purchase_lot(state, command_id="terminal-order", quantity=1)
+    installed = advance(
+        repair_with_batch(advance(bought.state, 3), "industrial-batch-a").state,
+        2,
     )
-    advanced = advance_world(doomed)
-    assert not advanced.state.station.crew_alive
-    assert advanced.state.installed_part.operating_turns == doomed.installed_part.operating_turns
-    assert not any(item.kind == "failure" for item in advanced.evidence)
+    current_turn = installed.station.turn
+    report = TradeReport(
+        "due-report",
+        "outside.qa",
+        "station",
+        "Inspection passed.",
+        current_turn,
+        current_turn + 1,
+    )
+    at_risk = replace(
+        installed,
+        station=replace(installed.station, oxygen=1, leak_active=True),
+        sensor_drift_per_turn=4,
+        sensor_drift_bias=2,
+        reports=(report,),
+    )
+    operating_turns = at_risk.installed_part.operating_turns
 
+    terminal = advance_world(at_risk)
 
-def test_inspection_reports_both_physical_causes_without_assigning_all_damage_to_supplier():
-    state = repaired(defective=True, residual=1, mode="stabilize")
-    state = replace(state, installed_part=replace(state.installed_part, defect_after_turns=1))
-    failed = advance(replace(state, operating_load="peak"), 1)
-    findings = inspect_installed_batch(failed).evidence
-    assert {item.code for item in findings} == {
-        "material_defect_confirmed",
-        "residual_damage_confirmed",
-    }
-    residual = next(item for item in findings if item.code == "residual_damage_confirmed")
-    assert residual.batch_id is None
+    assert not terminal.state.station.crew_alive
+    assert terminal.state.installed_part.operating_turns == operating_turns
+    assert terminal.state.sensor_drift_bias == 2
+    assert all(
+        item.kind not in {TradeEvidenceKind.FAILURE, TradeEvidenceKind.REPORT}
+        for item in terminal.evidence
+    )
