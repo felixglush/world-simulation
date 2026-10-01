@@ -412,6 +412,12 @@
 }
 .event-payload {
   margin-top: 8px;
+  display: block;
+  max-height: none;
+  overflow: visible;
+}
+.run-player:has(.event-payload[open]) {
+  height: min(65dvh, 650px);
 }
 .event-payload summary {
   cursor: pointer;
@@ -420,7 +426,10 @@
 }
 .event-payload code {
   display: block;
-  max-height: 95px;
+  height: clamp(160px, calc(65dvh - 270px), 370px);
+  max-height: none;
+  font-size: 11px;
+  line-height: 1.65;
   overflow: auto;
   padding-top: 8px;
   white-space: pre-wrap;
@@ -657,4 +666,13 @@ summary:focus-visible {
   z-index: 2;
   font-size: 11px;
   color: #6d7a64;
+}
+
+@media (max-width: 760px) {
+  .run-player:has(.event-payload[open]) {
+    height: 60dvh;
+  }
+  .event-payload code {
+    height: clamp(140px, calc(60dvh - 270px), 300px);
+  }
 }

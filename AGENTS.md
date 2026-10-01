@@ -231,3 +231,7 @@ routing. Keep React Flow card dimensions and handles aligned with
 endpoint-only paths. Test route/card collisions and initial viewport fitting with
 `architecture/tests/routing.spec.ts`. Preserve topology caching, stale-result guards,
 and offline bundling when changing the layout adapter.
+
+Opening the replay's Recorded message expands the bottom panel; closing it restores
+its compact height. Keep code readable and playback controls visible on desktop and
+mobile; verify the recorded-message case in `tests/presentation.spec.ts`.

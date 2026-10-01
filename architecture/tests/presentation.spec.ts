@@ -60,3 +60,25 @@ test("replay resumes and follows actors outside the selected focus", async ({
     .click();
   await expect(slider).toHaveValue(position);
 });
+
+test("opening the recorded message gives code more room and closing restores the canvas", async ({
+  page,
+}) => {
+  await page.goto("/?run=demo_deception");
+  const player = page.getByRole("region", { name: "Turn walkthrough" });
+  const collapsed = (await player.boundingBox())!.height;
+  await player.getByText("Recorded message", { exact: true }).click();
+  const code = player.locator(".event-payload code");
+  expect((await code.boundingBox())!.height).toBeGreaterThan(300);
+  await expect(
+    page.getByRole("button", { name: "Next step", exact: true }),
+  ).toBeInViewport();
+  await player.getByText("Recorded message", { exact: true }).click();
+  expect((await player.boundingBox())!.height).toBe(collapsed);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await player.getByText("Recorded message", { exact: true }).click();
+  expect((await code.boundingBox())!.height).toBeGreaterThan(180);
+  await expect(
+    page.getByRole("button", { name: "Next step", exact: true }),
+  ).toBeInViewport();
+});

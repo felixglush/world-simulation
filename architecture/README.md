@@ -72,7 +72,9 @@ require a connection; browsing the bundled code does not.
   following. Labels are hidden until a connection is focused, or you enable them.
 - **Walk through a turn** opens the replay notebook. Hide/reopen preserves the run
   and position. **Event journal** expands the full timeline; **Recorded message**
-  expands the payload. Following reveals actors outside the current focus preset.
+  expands the payload and grows the bottom panel to give code roughly 10–20 visible
+  lines, depending on the viewport. Closing it restores the compact panel. Following
+  reveals actors outside the current focus preset.
   The inspector opens only when you select a component or connection.
 - Click a component for its responsibilities and connections. **Code** opens actual
   Python definitions with line numbers; **State** shows state ownership, schemas, and
