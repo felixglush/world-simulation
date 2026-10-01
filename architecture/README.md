@@ -206,3 +206,14 @@ self-loops, actual SVG/card collisions, and initial fitting.
 
 ELK is bundled into the standalone HTML: there is no runtime layout service, CDN,
 or worker download. The offline artifact is larger (about 2.9 MB before compression).
+
+## Agent-authored architecture
+
+Codex and Claude agents can use the repository's
+[architecture explorer skill](../.agents/skills/architecture-explorer/SKILL.md)
+to inspect a codebase and produce its document and optional replay adapter.
+The renderer does not depend on which agent performs the analysis. See the
+[extension contract](docs/modularity.md) for supported capabilities and limits.
+Try `?project=http-example` for a Go handler with schema-less calls and an
+illustrative flow without metrics or state projections. Standalone skill/plugin
+distribution remains separate packaging work.

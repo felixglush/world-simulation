@@ -46,7 +46,9 @@ export function Inspector({
     selected.kind === "message"
       ? model.connections.find((item) => item.id === selected.id)!
       : null;
-  const refs = node?.sources ?? [model.contracts[edge!.contract]];
+  const refs =
+    node?.sources ??
+    (edge?.contract === undefined ? [] : [model.contracts[edge.contract]]);
   const [sourceChoice, setSourceChoice] = useState(0);
   const [example, setExample] = useState(false);
   useEffect(() => {
@@ -57,7 +59,7 @@ export function Inspector({
     ? sourceFor(refs[Math.min(sourceChoice, refs.length - 1)])
     : undefined;
   const snapshot =
-    node && run && project.replay
+    node && run && project.replay?.snapshot
       ? project.replay.snapshot(node.id, run, cursor)
       : { label: "No recorded state available.", value: null };
   const previous = snapshot.previous ?? {};
@@ -78,7 +80,7 @@ export function Inspector({
       <aside className="inspector" aria-label="Inspector">
         <div className="inspector-top">
           <span className="eyebrow">
-            {node ? "COMPONENT INSPECTOR" : "MESSAGE CONTRACT"}
+            {node ? "COMPONENT INSPECTOR" : "CONNECTION INSPECTOR"}
           </span>
           <Button
             variant="ghost"
@@ -151,7 +153,7 @@ export function Inspector({
                 </ul>
                 <h3>Code backing this component</h3>
                 <SourceLinks refs={refs} />
-                <h3>Messages</h3>
+                <h3>Connections</h3>
                 <div className="message-list">
                   {connections.map((item) => (
                     <Button
@@ -169,8 +171,8 @@ export function Inspector({
                         <strong>{item.label}</strong>
                         <small>
                           {item.source === node.id
-                            ? "Sends to " + byId[item.target].title
-                            : "Receives from " + byId[item.source].title}
+                            ? "Connects to " + byId[item.target].title
+                            : "Connected from " + byId[item.source].title}
                         </small>
                       </span>
                       <ArrowRight size={15} />
@@ -196,23 +198,29 @@ export function Inspector({
                   </Button>
                 </div>
                 <p className="lead">{edge!.description}</p>
-                <h3>When this message moves</h3>
+                <h3>When this connection is used</h3>
                 <p>{edge!.when}</p>
                 <h3>Failure behavior</h3>
                 <p>{edge!.failure}</p>
-                <h3>
-                  Contract fields <code>{edge!.contract}</code>
-                </h3>
-                <Fields reference={model.contracts[edge!.contract]} />
-                <Button
-                  variant="ghost"
-                  className="secondary wide"
-                  onClick={() => setExample(!example)}
-                  aria-expanded={example}
-                >
-                  <Braces size={16} />
-                  Example payload
-                </Button>
+                {edge!.contract !== undefined && (
+                  <>
+                    <h3>
+                      Contract fields <code>{edge!.contract}</code>
+                    </h3>
+                    <Fields reference={model.contracts[edge!.contract!]} />
+                  </>
+                )}
+                {edge!.example !== undefined && (
+                  <Button
+                    variant="ghost"
+                    className="secondary wide"
+                    onClick={() => setExample(!example)}
+                    aria-expanded={example}
+                  >
+                    <Braces size={16} />
+                    Example payload
+                  </Button>
+                )}
                 {example && (
                   <>
                     <p className="muted">
@@ -274,7 +282,7 @@ export function Inspector({
                 />
               </>
             ) : (
-              <p>No source definition is indexed for this component.</p>
+              <p>No source definition is indexed for this selection.</p>
             ))}
           {tab === "state" && (
             <>
@@ -282,17 +290,19 @@ export function Inspector({
                 <Layers3 size={19} />
                 <p>
                   {node?.state ??
-                    "This is a request or result value passed across a boundary; the receiving component owns any resulting changes."}
+                    "This connection does not define state ownership. Inspect its components for ownership and any supplied state evidence."}
                 </p>
               </div>
               {node && (
                 <>
                   <h3>
-                    {replay
-                      ? `Recorded state · event ${events[cursor]?.sequence}`
-                      : run
-                        ? "Demo state · initial event"
-                        : "Recorded state unavailable"}
+                    {!project.replay?.snapshot || !run
+                      ? "Recorded state unavailable"
+                      : replay
+                        ? `Recorded state · event ${events[cursor]?.sequence}`
+                        : run
+                          ? "Demo state · initial event"
+                          : "Recorded state unavailable"}
                   </h3>
                   <p className="muted">{snapshot!.label}</p>
                   {snapshot.fields !== undefined ? (
@@ -345,8 +355,8 @@ export function Inspector({
               ) : (
                 <p className="muted">
                   {node
-                    ? "This component has no independent domain-state record. Its backing code shows local adapter or file bookkeeping."
-                    : "See the message contract fields in Overview."}
+                    ? "No state schema is supplied for this component."
+                    : "See any supplied contract fields in Overview."}
                 </p>
               )}
             </>

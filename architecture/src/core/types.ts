@@ -33,9 +33,9 @@ export interface Connection {
   target: string;
   label: string;
   kind: string;
-  contract: string;
+  contract?: string;
   description: string;
-  example: unknown;
+  example?: unknown;
   when: string;
   failure: string;
   modes?: string[];
@@ -148,10 +148,10 @@ export interface ReplayAdapter {
     filename: string;
     mimeType: string;
   };
-  snapshot: (id: string, run: ReplayRun, cursor: number) => StateSnapshot;
-  metrics: (run: ReplayRun, cursor: number) => MetricPanel;
+  snapshot?: (id: string, run: ReplayRun, cursor: number) => StateSnapshot;
+  metrics?: (run: ReplayRun, cursor: number) => MetricPanel;
   /** undefined = not supported for this component; null = no record yet. */
-  recordedIO: (
+  recordedIO?: (
     id: string,
     run: ReplayRun,
     cursor: number,

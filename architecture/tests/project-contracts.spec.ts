@@ -84,3 +84,21 @@ test("normalized replay rejects empty runs and unknown highlights", () => {
   invalid.events[0].trace.nodes = ["missing"];
   expect(() => validateRun(project(), invalid)).toThrow("unknown component");
 });
+
+test("connections can describe calls without inventing message schemas", () => {
+  const p = project();
+  p.document.messageKinds.call = { label: "Calls", color: "#000" };
+  p.document.connections.push({
+    id: "call",
+    source: "a",
+    target: "a",
+    label: "Calls",
+    kind: "call",
+    description: "Recursive call",
+    when: "On invocation",
+    failure: "Propagates",
+  });
+  expect(() => validateProject(p)).not.toThrow();
+  p.document.connections[0].contract = "toString";
+  expect(() => validateProject(p)).toThrow("missing contract");
+});

@@ -84,3 +84,38 @@ test("static projects work without recorded runs or a runtime adapter", async ({
   await page.getByRole("tab", { name: "Code", exact: true }).click();
   await expect(page.locator(".code-block")).toContainText("processJob");
 });
+
+test("a Go HTTP example supports schema-less connections and event-only replay", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/?project=http-example");
+  await expect(page.locator(".react-flow__node-component")).toHaveCount(2);
+  await page.getByRole("button", { name: "Browse components" }).click();
+  await page
+    .getByRole("button", { name: "Inspect Health handler", exact: true })
+    .click();
+  const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await inspector.getByRole("tab", { name: "Code", exact: true }).click();
+  await expect(inspector.locator(".code-block")).toContainText("func Health");
+  await inspector.getByRole("tab", { name: "I/O", exact: true }).click();
+  await inspector.locator("summary").filter({ hasText: "HTTP call" }).click();
+  await expect(inspector).toContainText("No schema provided");
+  await inspector.getByRole("button", { name: "Inspect connection" }).click();
+  await inspector.getByRole("tab", { name: "Code", exact: true }).click();
+  await expect(inspector).toContainText("No source definition");
+  await page.getByRole("button", { name: "Walk through a request" }).click();
+  await expect(page.locator(".run-metrics")).toHaveCount(0);
+  await expect(page.locator(".decision-navigation")).toHaveCount(0);
+  await page.getByRole("button", { name: "Browse components" }).click();
+  await page
+    .getByRole("button", { name: "Inspect Health handler", exact: true })
+    .click();
+  await inspector.getByRole("tab", { name: "State", exact: true }).click();
+  await expect(inspector).toContainText("Recorded state unavailable");
+  await expect(inspector).toContainText("No recorded state available");
+  await page.getByRole("button", { name: "Next step", exact: true }).click();
+  await expect(page.locator(".run-player")).toContainText("Response written");
+  expect(errors).toEqual([]);
+});
