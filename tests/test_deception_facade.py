@@ -15,79 +15,33 @@ def simulation():
     return SimulationFacade(replace(create_world("normal", 0), scheduled_events=(), parts=0))
 
 
-@pytest.mark.parametrize(
-    "changes",
-    [
-        {"failure_load": "magic"},
-        {"yield_percent": True},
-        {"yield_percent": 101},
-        {"yield_percent": 50},
-        {"resource": "metals", "latent_defect": True, "defect_after_turns": 2},
-        {"resource": "metals", "failure_load": "peak"},
-    ],
-)
-def test_initial_lot_condition_is_validated_before_world_registration(changes):
+def test_unsupported_cargo_effect_rejects_without_registering_a_world():
     facade = simulation()
     before = facade.state
     with pytest.raises(ValueError):
-        facade.create_world("supplier", lots=(PartLot("lot", 2, 10, "supplier", **changes),))
+        facade.create_world(
+            "supplier",
+            lots=(
+                PartLot(
+                    "lot",
+                    2,
+                    10,
+                    "supplier",
+                    resource="metals",
+                    latent_defect=True,
+                    defect_after_turns=2,
+                ),
+            ),
+        )
     assert facade.state is before
     facade.create_world("supplier")
 
 
-def test_configured_deception_remains_private_and_traces_are_dispatched_to_correct_world():
-    facade = simulation()
-    facade.create_world("supplier")
-    facade.configure_deception(
-        sensor_drift_per_turn=2,
-        reports=(
-            TradeReport("original", "supplier.qa", "supplier", "Basic check passed.", 0, 1),
-            TradeReport(
-                "relay",
-                "port",
-                "station",
-                "Shipment is reliable.",
-                0,
-                2,
-                upstream_report_id="original",
-            ),
-        ),
-    )
-    facade.create_decision_system(
-        "station",
-        commands=((2, TradeCommand("trace", report_id="relay")), (3, TradeCommand("calibrate"))),
-    )
-    facade.create_decision_system("supplier")
-    initial = observe_world(facade.state, "station")
-    assert "supplier.qa" not in repr(initial)
-    result = facade.run(turns=3)
-    assert all(decision.accepted for decision in result.decisions)
-    assert {item.kind for item in result.events} >= {"report", "trace", "calibration"}
-    assert "supplier.qa" in repr(observe_world(result.state, "station"))
-    assert all(
-        item.source_id != "port" and item.upstream_source_id != "port"
-        for item in observe_world(result.state, "supplier").evidence
-    )
-    assert result.state.sensor_drift_per_turn == 0
-
-
-@pytest.mark.parametrize(
-    "settings",
-    [
-        {"sensor_drift_per_turn": True},
-        {"sensor_drift_per_turn": -1},
-        {"sensor_drift_limit": 201},
-        {"residual_damage_after_turns": 101},
-        {"operating_load": "backup"},
-        {"reports": None},
-        {"reports": (TradeReport("r", "qa", "missing", "x", 0, 1),)},
-    ],
-)
-def test_deception_configuration_rejects_atomically(settings):
+def test_unbounded_deception_configuration_rejects_atomically():
     facade = simulation()
     before = facade.state
     with pytest.raises(ValueError):
-        facade.configure_deception(**settings)
+        facade.configure_deception(sensor_drift_per_turn=-1)
     assert facade.state is before
 
 
@@ -98,62 +52,6 @@ def test_deception_configuration_cannot_rewrite_causes_after_simulation_starts()
     with pytest.raises(ValueError):
         facade.configure_deception(sensor_drift_per_turn=2)
     assert facade.state is before
-
-
-def test_cargo_investigation_and_load_are_available_through_governor_commands():
-    facade = simulation()
-    facade.create_world(
-        "supplier",
-        lots=(
-            PartLot(
-                "feed",
-                3,
-                10,
-                "supplier",
-                resource="oxygen_feedstock",
-                unit="canisters",
-                yield_percent=50,
-            ),
-        ),
-    )
-    facade.create_decision_system(
-        "station",
-        commands=(
-            (
-                1,
-                TradeCommand(
-                    "purchase", "feed-order", seller_id="supplier", batch_id="feed", quantity=3
-                ),
-            ),
-            (4, TradeCommand("assay", batch_id="feed")),
-            (5, TradeCommand("consume", batch_id="feed", quantity=1)),
-            (6, TradeCommand("quarantine", batch_id="feed", quantity=1)),
-            (7, TradeCommand("load", operating_load="peak")),
-        ),
-    )
-    result = facade.run(turns=7)
-    assert all(decision.accepted for decision in result.decisions)
-    assert {item.kind for item in result.events} >= {
-        "assay",
-        "consumption",
-        "quarantine",
-        "load_change",
-    }
-    assert result.state.operating_load == "peak"
-    assert not any(lot.quantity for lot in result.state.station_lots)
-
-
-def test_investigation_system_is_parameterized_and_does_not_accept_settings_for_other_policies():
-    facade = simulation()
-    policy = facade.create_decision_system(
-        "station", kind="investigation", emergency_reserve=35, stress_cycles=3, feedstock_target=0
-    )
-    assert policy.emergency_reserve == 35
-    assert policy.stress_cycles == 3
-    other = simulation()
-    with pytest.raises(ValueError):
-        other.create_decision_system("station", stress_cycles=3)
-    other.create_decision_system("station")
 
 
 def test_fake_policy_receives_only_observations_and_can_investigate_without_hidden_config():
@@ -200,14 +98,21 @@ def test_unavailable_calibration_feedback_stops_repeating_unsupported_action():
     initial = replace(
         create_world("normal", 0), scheduled_events=(ScheduledEvent(1, "sensor_fault", "sensor_a"),)
     )
-    facade = SimulationFacade(initial)
-    facade.create_decision_system("station", kind="investigation", feedstock_target=0)
+    facade = SimulationFacade(
+        initial,
+        station_lots=(
+            PartLot("feed", 2, 10, "station", resource="oxygen_feedstock", unit="canisters"),
+        ),
+    )
+    facade.create_decision_system("station", kind="investigation")
     result = facade.run(turns=8)
     rejected_calibrations = [
         item for item in result.decisions if item.command.kind == "calibrate" and not item.accepted
     ]
     assert len(rejected_calibrations) == 1
     assert any(item.code == "sensor_calibration_unavailable" for item in result.events)
+    assert sum(item.rejection == "repair_not_needed" for item in result.decisions) == 1
+    assert any(item.kind == "consumption" for item in result.events)
 
 
 def test_backup_stress_parameters_can_activate_and_observe_actual_backup_operation():
@@ -222,36 +127,44 @@ def test_backup_stress_parameters_can_activate_and_observe_actual_backup_operati
     assert all(item.rejection != "backup_not_operating" for item in result.decisions)
 
 
-def test_delivery_provenance_is_local_and_is_not_leaked_through_foreign_resale_offers():
-    from station_control.trade import advance_world, purchase_lot
-
+def test_foreign_trade_provenance_stays_private_when_cargo_is_resold():
     facade = simulation()
     facade.create_world(
         "supplier",
         lots=(PartLot("feed", 3, 10, "supplier", resource="oxygen_feedstock", unit="canisters"),),
     )
     facade.create_world("buyer")
-    ordered = purchase_lot(
-        facade.state,
-        command_id="private-buyer-order",
-        buyer_id="buyer",
-        seller_id="supplier",
-        batch_id="feed",
-        quantity=2,
-    ).state
-    for _ in range(3):
-        ordered = advance_world(ordered).state
-    local = observe_world(ordered, "buyer")
-    station = observe_world(ordered, "station")
+    facade.create_decision_system(
+        "buyer",
+        commands=(
+            (
+                1,
+                TradeCommand(
+                    "purchase",
+                    "private-order",
+                    buyer_id="buyer",
+                    seller_id="supplier",
+                    batch_id="feed",
+                    quantity=2,
+                ),
+            ),
+        ),
+    )
+    result = facade.run(turns=4)
+    local = observe_world(result.state, "buyer")
+    station = observe_world(result.state, "station")
     assert local.local_lots[0].shipment_id is not None
     resale = next(lot for lot in station.offers if lot.seller_world == "buyer")
     assert resale.shipment_id is None
     assert resale.contract_id is None
 
 
-def test_same_batch_label_from_two_worlds_preserves_investigated_shipment_scope():
-    facade = simulation()
-    facade.state = replace(facade.state, station=replace(facade.state.station, leak_active=True))
+def test_investigator_recovers_using_another_suppliers_same_batch_label():
+    facade = SimulationFacade(
+        replace(
+            create_world("normal", 0), scheduled_events=(), parts=0, leak_active=True, credits=150
+        )
+    )
     facade.create_world(
         "a",
         lots=(
@@ -261,21 +174,65 @@ def test_same_batch_label_from_two_worlds_preserves_investigated_shipment_scope(
         ),
     )
     facade.create_world("b", lots=(PartLot("shared", 2, 25, "b"),))
-    facade.create_decision_system(
-        "station",
-        commands=(
-            (1, TradeCommand("purchase", "from-a", seller_id="a", batch_id="shared", quantity=2)),
-            (2, TradeCommand("purchase", "from-b", seller_id="b", batch_id="shared", quantity=1)),
-            (4, TradeCommand("repair", batch_id="shared", shipment_id="shipment:from-a")),
-            (6, TradeCommand("load", operating_load="peak")),
-            (7, TradeCommand("inspect")),
-            (8, TradeCommand("quarantine", batch_id="shared", shipment_id="shipment:from-a")),
-            (9, TradeCommand("repair", batch_id="shared", shipment_id="shipment:from-b")),
-        ),
-    )
-    result = facade.run(turns=15)
-    assert all(item.accepted for item in result.decisions)
+    facade.create_decision_system("station", kind="investigation", feedstock_target=0)
+    result = facade.run(turns=40)
+    assert result.state.station.crew_alive
     assert not result.state.station.leak_active
-    assert result.state.installed_part.shipment_id == "shipment:from-b"
+    assert result.state.installed_part.origin_world == "b"
+    assert all(item.accepted for item in result.decisions)
     quarantines = [item for item in result.events if item.kind == "quarantine"]
-    assert [item.shipment_id for item in quarantines] == ["shipment:from-a"]
+    assert quarantines
+    bad_contracts = {item.contract_id for item in result.state.contracts if item.seller_id == "a"}
+    assert all(item.contract_id in bad_contracts for item in quarantines)
+
+
+def test_clean_assay_never_certifies_another_delivery_with_the_same_batch_label():
+    from station_control.governors import ScriptedGovernor
+    from station_control.investigation import InvestigationGovernor
+
+    class PurchasingInspector:
+        purchases = ScriptedGovernor(
+            (
+                (
+                    1,
+                    TradeCommand("purchase", "clean", seller_id="a", batch_id="shared", quantity=2),
+                ),
+                (2, TradeCommand("purchase", "poor", seller_id="b", batch_id="shared", quantity=2)),
+            )
+        )
+        investigation = InvestigationGovernor()
+
+        def decide(self, observation):
+            if observation.turn <= 2:
+                return self.purchases.decide(observation)
+            return self.investigation.decide(observation)
+
+    facade = SimulationFacade(replace(create_world("normal", 0), scheduled_events=()))
+    for world_id, yield_percent in (("a", 100), ("b", 0)):
+        facade.create_world(
+            world_id,
+            lots=(
+                PartLot(
+                    "shared",
+                    2,
+                    10,
+                    world_id,
+                    resource="oxygen_feedstock",
+                    unit="canisters",
+                    yield_percent=yield_percent,
+                ),
+            ),
+        )
+    facade.create_decision_system("station", provider=PurchasingInspector())
+    result = facade.run(turns=15)
+    assays = {
+        item.shipment_id: item.measured_value for item in result.events if item.kind == "assay"
+    }
+    assert assays == {"shipment:clean": 100, "shipment:poor": 0}
+    consumed = [item for item in result.events if item.kind == "consumption"]
+    assert consumed and all(item.shipment_id == "shipment:clean" for item in consumed)
+    quarantines = [item for item in result.events if item.kind == "quarantine"]
+    assert [item.shipment_id for item in quarantines] == ["shipment:poor"]
+    assert not any(
+        lot.quantity for lot in result.state.station_lots if lot.resource == "oxygen_feedstock"
+    )

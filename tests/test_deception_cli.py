@@ -39,12 +39,25 @@ def test_deception_stories_are_deterministic_offline_and_recover(story):
     assert result["crew_alive"]
     assert not result["leak_active"]
     assert result["turns_completed"] == 40
+    assert all(item["accepted"] for item in result["decisions"])
     assert result["original_sources_discovered"] == (2 if story == "resource_diversion" else 1)
     assert "latent_defect" not in first.stdout
     assert "yield_percent" not in first.stdout
     assert "sensor_drift_per_turn" not in first.stdout
     codes = {item["finding_code"] for item in result["events"]}
     if story == "supply_chain":
+        assays = {
+            item["batch_id"]: item["measured_value"]
+            for item in result["events"]
+            if item["kind"] == "assay"
+        }
+        assert assays == {"ice-feed-a": 50, "ice-feed-b": 100}
+        consumed = [item for item in result["events"] if item["kind"] == "consumption"]
+        assert consumed and all(item["batch_id"] == "ice-feed-b" for item in consumed)
+        repairs = [item for item in result["events"] if item["kind"] == "repair_complete"]
+        failures = [item for item in result["events"] if item["kind"] == "failure"]
+        assert repairs[0]["turn"] < failures[0]["turn"] < repairs[-1]["turn"] <= 20
+        assert all(item["turn"] < repairs[-1]["turn"] for item in failures)
         assert codes >= {
             "material_defect_confirmed",
             "sensor_drift_confirmed",

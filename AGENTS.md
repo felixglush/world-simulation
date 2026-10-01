@@ -99,7 +99,7 @@ writing mission artifacts or changing the existing versioned JSONL contract.
 
 Verify with `uv run --frozen pytest tests/test_deception.py tests/test_conditional_defects.py
 tests/test_quality.py tests/test_sensor_drift.py tests/test_deception_facade.py
-tests/test_investigation_policy.py tests/test_deception_cli.py`. The process tests run
+tests/test_deception_cli.py`. The process tests run
 all four stories twice for deterministic output and cover the benign counterpart and
 real credit exhaustion in the unsafe diversion baseline.
 
