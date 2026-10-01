@@ -191,3 +191,8 @@ sources live under `architecture/src/components`; registry configuration is in
 `architecture/components.json`. Preserve the offline Python/JSON-only Shiki setup,
 source-file line offsets, keyboard tabs, and clipboard error feedback when updating
 components. Run the browser suite after changes to these interactions.
+
+When changing the adversary action catalog or decision event schema, update
+`decisionHighlight` in `architecture/src/model.ts` and its browser review tests.
+Keep intent annotations separate from acceptance and world effects; unknown action
+types must remain unclassified, and a benign wait must not imply a safe world.

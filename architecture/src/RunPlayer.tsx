@@ -11,7 +11,13 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { eventTrace, format, parseRun, worldAt } from "./model";
+import {
+  decisionHighlight,
+  eventTrace,
+  format,
+  parseRun,
+  worldAt,
+} from "./model";
 import type { DemoRun, RunRecord } from "./model";
 interface Props {
   run: DemoRun;
@@ -38,21 +44,29 @@ export function RunPlayer({
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
-  const [all, setAll] = useState(false);
+  const [filter, setFilter] = useState("key");
+  const [pauseAtDecisions, setPauseAtDecisions] = useState(false);
   const [speed, setSpeed] = useState(1);
   const event = events[cursor],
     trace = eventTrace(event);
+  const decision = decisionHighlight(event);
+  const decisionIndices = events.flatMap((item, index) =>
+    decisionHighlight(item) ? [index] : [],
+  );
+  const previousDecision = decisionIndices.findLast((index) => index < cursor);
+  const nextDecision = decisionIndices.find((index) => index > cursor);
   const state = worldAt(events, cursor),
     before = worldAt(events, cursor - 1);
   const indices = events
     .map((_, index) => index)
-    .filter(
-      (index) =>
-        all ||
-        events[index].event_type !== "world_transition" ||
-        ["scheduled_event", "oxygen", "repairs", "captain_action"].includes(
-          events[index].consequence?.phase,
-        ),
+    .filter((index) =>
+      filter === "decisions"
+        ? Boolean(decisionHighlight(events[index]))
+        : filter === "all" ||
+          events[index].event_type !== "world_transition" ||
+          ["scheduled_event", "oxygen", "repairs", "captain_action"].includes(
+            events[index].consequence?.phase,
+          ),
     );
   useEffect(() => {
     if (!playing) return;
@@ -60,9 +74,25 @@ export function RunPlayer({
       setPlaying(false);
       return;
     }
-    const timer = setTimeout(() => setCursor(cursor + 1), 1200 / speed);
+    const timer = setTimeout(
+      () => {
+        setCursor(cursor + 1);
+        if (pauseAtDecisions && decisionHighlight(events[cursor + 1]))
+          setPlaying(false);
+      },
+      (decision ? 2400 : 1200) / speed,
+    );
     return () => clearTimeout(timer);
-  }, [playing, cursor, events.length, setCursor, setPlaying, speed]);
+  }, [
+    playing,
+    cursor,
+    events,
+    setCursor,
+    setPlaying,
+    speed,
+    pauseAtDecisions,
+    Boolean(decision),
+  ]);
   useEffect(() => {
     list.current
       ?.querySelector('[aria-current="step"]')
@@ -157,28 +187,68 @@ export function RunPlayer({
           {error}
         </div>
       )}
+      <div className="decision-navigation">
+        <span>Decision review</span>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={previousDecision == null}
+          onClick={() => {
+            setPlaying(false);
+            setCursor(previousDecision!);
+          }}
+        >
+          Previous decision
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={nextDecision == null}
+          onClick={() => {
+            setPlaying(false);
+            setCursor(nextDecision!);
+          }}
+        >
+          Next decision
+        </Button>
+        <label>
+          <input
+            type="checkbox"
+            checked={pauseAtDecisions}
+            onChange={(event) => setPauseAtDecisions(event.target.checked)}
+          />
+          Pause at decisions
+        </label>
+        <small>
+          Malicious = disruptive action type · benign = wait · acceptance shown
+          separately
+        </small>
+      </div>
       <div className="run-main">
         <div className="event-journal">
           <div className="journal-heading">
             <span>EVENT JOURNAL</span>
-            <label>
-              <input
-                type="checkbox"
-                checked={all}
-                onChange={(event) => setAll(event.target.checked)}
-              />
-              All phases
-            </label>
+            <select
+              aria-label="Event filter"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+            >
+              <option value="key">Key events</option>
+              <option value="decisions">Decisions only</option>
+              <option value="all">All phases</option>
+            </select>
           </div>
           <div className="event-list" ref={list}>
             {indices.map((index) => {
               const item = events[index],
                 itemTrace = eventTrace(item);
+              const marker = decisionHighlight(item);
               return (
                 <Button
                   variant="ghost"
                   key={item.sequence}
-                  className={cursor === index ? "current" : ""}
+                  className={`decision-row ${cursor === index ? "current" : ""}`}
+                  data-decision={marker?.tone}
                   aria-current={cursor === index ? "step" : undefined}
                   onClick={() => {
                     setPlaying(false);
@@ -189,7 +259,7 @@ export function RunPlayer({
                     {String(item.sequence).padStart(2, "0")}
                   </span>
                   <span>
-                    <strong>{itemTrace.title}</strong>
+                    <strong>{marker?.label ?? itemTrace.title}</strong>
                     <small>
                       Turn {item.turn} · {item.event_type}
                     </small>
@@ -202,7 +272,13 @@ export function RunPlayer({
             })}
           </div>
         </div>
-        <div className="event-stage">
+        <div className="event-stage" data-decision={decision?.tone}>
+          {decision && (
+            <div className="decision-spotlight" role="status">
+              <Badge variant="outline">{decision.label}</Badge>
+              <strong>{decision.outcome}</strong>
+            </div>
+          )}
           <div className="event-kicker">
             TURN {event?.turn ?? 0} <span>/ EVENT {event?.sequence ?? 0}</span>
             <b className={trace.private ? "private-badge" : "public-badge"}>

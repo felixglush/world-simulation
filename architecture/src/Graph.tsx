@@ -46,7 +46,7 @@ import {
   visibleComponents,
   visibleConnections,
 } from "./model";
-import type { Component, Connection, Mode } from "./model";
+import type { Component, Connection, Mode, DecisionHighlight } from "./model";
 
 export const icons = {
   user: UserRound,
@@ -69,6 +69,7 @@ export const icons = {
   cloud: Cloud,
 };
 interface CardData extends Record<string, unknown> {
+  decision?: DecisionHighlight | null;
   component: Component;
   tone: string;
   active: boolean;
@@ -93,6 +94,7 @@ const ComponentNode = memo(({ data }: NodeProps<Node<CardData>>) => {
   const Icon = icons[data.component.icon as keyof typeof icons] ?? Workflow;
   return (
     <div
+      data-decision={data.decision?.tone}
       className={`component-card ${data.active ? "is-active" : ""} ${data.dim ? "is-dim" : ""}`}
       style={
         {
@@ -107,6 +109,9 @@ const ComponentNode = memo(({ data }: NodeProps<Node<CardData>>) => {
             <Handle id={`out-${position}`} type="source" position={position} />
           </span>
         ),
+      )}
+      {data.decision && (
+        <span className="canvas-decision-badge">{data.decision.label}</span>
       )}
       <div className="card-heading">
         <span className="component-icon">
@@ -197,6 +202,7 @@ const nodeTypes = { component: ComponentNode, boundary: BoundaryNode };
 const edgeTypes = { message: MessageEdge };
 
 interface Props {
+  decision: DecisionHighlight | null;
   view: string;
   mode: Mode;
   privateFlows: boolean;
@@ -209,6 +215,7 @@ interface Props {
   onClear: () => void;
 }
 export function Graph({
+  decision,
   view,
   mode,
   privateFlows,
@@ -285,6 +292,7 @@ export function Graph({
             component,
             tone: service.color,
             active: focusNodes.has(component.id),
+            decision: decision?.actor === component.id ? decision : null,
             dim: focus && !focusNodes.has(component.id),
             onCode: (id: string) => onSelect("component", id, true),
           },
@@ -335,6 +343,7 @@ export function Graph({
     activeNodes,
     activeEdges,
     onSelect,
+    decision,
   ]);
   useEffect(() => {
     if (initialized)

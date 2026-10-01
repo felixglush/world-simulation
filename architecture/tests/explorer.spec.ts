@@ -225,3 +225,102 @@ test("inspector supports keyboard tabs, highlighted source, and copying the defi
     "class StationState",
   );
 });
+
+test("decision review highlights actors, distinguishes waits, and pauses at assessments", async ({
+  page,
+}) => {
+  const { readFileSync } = await import("node:fs");
+  const run = JSON.parse(readFileSync("src/demo-runs.json", "utf8"))[0];
+  const events = run.records.filter((r: any) => r.record_type === "event");
+  await page.goto("/");
+  await page.getByRole("button", { name: "Walk through a turn" }).click();
+  await expect(page.locator(".decision-spotlight")).toContainText(
+    "Adversary · Malicious action",
+  );
+  await expect(
+    page.locator(
+      '.react-flow__node[data-id="adversary"] .canvas-decision-badge',
+    ),
+  ).toContainText("Malicious action");
+  await page
+    .getByRole("button", { name: "Next decision", exact: true })
+    .click();
+  await expect(page.locator(".decision-spotlight")).toContainText(
+    "Jev · Assessment",
+  );
+  await expect(
+    page.locator('.react-flow__node[data-id="jev"] .canvas-decision-badge'),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Next decision", exact: true })
+    .click();
+  await expect(page.locator(".decision-spotlight")).toContainText(
+    "Captain · Decision",
+  );
+  const waitIndex = events.findIndex(
+    (r: any) =>
+      r.event_type === "adversary_decision" &&
+      r.decision.action.kind === "wait",
+  );
+  await page
+    .getByRole("slider", { name: "Run progress" })
+    .fill(String(waitIndex));
+  await expect(page.locator(".decision-spotlight")).toContainText(
+    "Benign wait",
+  );
+  await page
+    .getByRole("combobox", { name: "Event filter" })
+    .selectOption("decisions");
+  await expect(
+    page.locator(".event-list button:not([data-decision])"),
+  ).toHaveCount(0);
+  const assessmentIndex = events.findIndex(
+    (r: any) => r.event_type === "dispatch",
+  );
+  await page
+    .getByRole("slider", { name: "Run progress" })
+    .fill(String(assessmentIndex - 1));
+  await page.getByRole("checkbox", { name: "Pause at decisions" }).check();
+  await page.getByRole("button", { name: "Play run", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Play run", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("slider", { name: "Run progress" })).toHaveValue(
+    String(assessmentIndex),
+  );
+});
+
+test("rejected adversary actions stay distinct from benign and unknown choices", async ({
+  page,
+}) => {
+  const { readFileSync } = await import("node:fs");
+  const run = JSON.parse(readFileSync("src/demo-runs.json", "utf8"))[0];
+  const adversary = run.records.find(
+    (r: any) => r.event_type === "adversary_decision",
+  );
+  adversary.consequence.accepted = false;
+  await page.goto("/");
+  await page.getByRole("button", { name: "Walk through a turn" }).click();
+  const load = async () => {
+    await page.getByLabel("Import run file").setInputFiles({
+      name: "review.jsonl",
+      mimeType: "application/json",
+      buffer: Buffer.from(
+        run.records.map((r: unknown) => JSON.stringify(r)).join("\n"),
+      ),
+    });
+    await page
+      .getByRole("button", { name: "Next decision", exact: true })
+      .click();
+  };
+  await load();
+  await expect(page.locator(".decision-spotlight")).toContainText(
+    "Malicious action",
+  );
+  await expect(page.locator(".decision-spotlight")).toContainText("rejected");
+  adversary.decision.action.kind = "future_action";
+  await load();
+  await expect(page.locator(".decision-spotlight")).toContainText(
+    "Unclassified action",
+  );
+});
