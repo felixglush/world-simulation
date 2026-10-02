@@ -119,8 +119,11 @@ def test_resource_governors_have_independent_identity_and_parameters():
         cash_reserve=100,
         strategy="reserve",
     )
-    result = facade.run(turns=1)
+    result = facade.run(turns=4)
     assert [contract.buyer_id for contract in result.state.contracts] == ["a"]
+    assert result.state.contracts[0].status == "settled"
+    assert sum(lot.quantity for lot in observe_world(result.state, "a").local_lots) == 3
+    assert observe_world(result.state, "b").credits == 100
 
 
 def test_income_policy_uses_custom_world_price_parameters_for_new_resources():
