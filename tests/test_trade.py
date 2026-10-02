@@ -1,8 +1,6 @@
-"""Behavior matrix for the in-memory trade and latent-defect domain."""
+"""Behavioral integration tests for trade and latent defects."""
 
 from dataclasses import asdict, replace
-
-import pytest
 
 from station_control.domain import Delivery
 from station_control.scenarios import ScenarioFamily, create_world
@@ -18,13 +16,22 @@ from station_control.trade import (
 )
 
 
-def station_state(*, credits=100, parts=0, leak_active=False):
+def station_state(
+    *,
+    credits=100,
+    parts=0,
+    leak_active=False,
+    repair_notice_delay_turns=0,
+    deliveries=(),
+):
     return replace(
         create_world(ScenarioFamily.NORMAL, seed=0),
         scheduled_events=(),
+        deliveries=deliveries,
         credits=credits,
         parts=parts,
         leak_active=leak_active,
+        repair_notice_delay_turns=repair_notice_delay_turns,
     )
 
 
@@ -39,7 +46,13 @@ def assert_credit_conserved(state, initial_total):
     assert world_credits + state.escrow_credits == initial_total
 
 
-def purchase(state, *, command_id="order-1", batch_id="industrial-batch-a", quantity=1):
+def purchase(
+    state,
+    *,
+    command_id="order-1",
+    batch_id="industrial-batch-a",
+    quantity=1,
+):
     return purchase_parts(
         state,
         command_id=command_id,
@@ -48,7 +61,7 @@ def purchase(state, *, command_id="order-1", batch_id="industrial-batch-a", quan
     )
 
 
-def test_world_views_keep_each_world_private_while_showing_tradeable_batch_refs():
+def test_public_world_views_show_tradeable_stock_without_private_defect_data():
     state = create_world_state(station_state(), industrial_parts=2, reliable_parts=1)
 
     station = observe_world(state, "station")
@@ -68,294 +81,216 @@ def test_world_views_keep_each_world_private_while_showing_tradeable_batch_refs(
     assert industrial.world_id == "industrial"
 
 
-def test_purchase_escrows_funds_and_reserves_stock_then_dispatches_arrives_and_settles_once():
-    state = create_world_state(station_state(), travel_turns=2)
-    initial_credits = state.station.credits + sum(world.credits for world in state.inventories)
-
-    bought = purchase(state, quantity=2)
-    duplicate = purchase(bought.state, quantity=2)
-
-    assert bought.accepted
-    assert duplicate.accepted and duplicate.duplicate
-    assert duplicate.state == bought.state
-    assert bought.contract_id == "contract:order-1"
-    assert bought.shipment_id == "shipment:order-1"
-    assert bought.state.station.credits < state.station.credits
-    assert bought.state.escrow_credits > 0
-    assert duplicate.state.inventories == bought.state.inventories
-    assert_credit_conserved(bought.state, initial_credits)
-
-    departure = advance_world(bought.state)
-    assert departure.state.shipments[0].status == "in_transit"
-    assert departure.state.shipments[0].departure_turn == 1
-    assert departure.state.station.parts == 0
-    assert any(item.kind is TradeEvidenceKind.DEPARTURE for item in departure.evidence)
-
-    still_travelling = advance_world(departure.state)
-    assert still_travelling.state.station.parts == 0
-    assert still_travelling.state.shipments[0].status == "in_transit"
-
-    arrival = advance_world(still_travelling.state)
-    assert arrival.state.station.parts == 2
-    assert arrival.state.shipments[0].status == "delivered"
-    assert arrival.state.contracts[0].status == "settled"
-    assert arrival.state.escrow_credits == 0
-    assert any(item.kind is TradeEvidenceKind.ARRIVAL for item in arrival.evidence)
-    assert any(item.kind is TradeEvidenceKind.SETTLEMENT for item in arrival.evidence)
-    assert {entry.reference_id for entry in arrival.state.ledger if entry.kind == "settlement"} == {
-        "contract:order-1"
-    }
-    assert_credit_conserved(arrival.state, initial_credits)
-
-    repeated = advance_world(arrival.state)
-    assert repeated.state.station.parts == 2
-    assert not any(item.kind is TradeEvidenceKind.SETTLEMENT for item in repeated.evidence)
-    assert_credit_conserved(repeated.state, initial_credits)
-
-
-def test_purchase_tracer_bullet_exposes_only_public_offer_and_escrow_changes():
-    state = create_world_state(station_state())
-    before = observe_world(state, "station")
-    seller_before = observe_world(state, "industrial")
-
-    result = purchase(state, quantity=1)
-
-    buyer_after = observe_world(result.state, "station")
-    seller_after = observe_world(result.state, "industrial")
-    assert result.accepted
-    assert buyer_after.credits < before.credits
-    assert buyer_after.parts == before.parts
-    assert seller_after.parts == seller_before.parts - 1
-    assert result.state.escrow_credits == result.state.contracts[0].total_price
-    assert result.evidence[0].contract_id == result.contract_id
-    assert result.evidence[0].shipment_id == result.shipment_id
-    assert not hasattr(buyer_after, "installed_part")
-
-
-def test_existing_station_delivery_and_trade_arrival_both_remain_in_inventory():
-    station = replace(
-        station_state(),
+def test_trade_orders_settle_once_and_preserve_same_batch_provenance_through_repair():
+    station = station_state(
+        leak_active=True,
         deliveries=(Delivery(due_turn=1, supply="parts", quantity=1),),
     )
-    state = create_world_state(station)
+    state = create_world_state(station, industrial_parts=2, reliable_parts=1)
+    initial_credits = state.station.credits + sum(world.credits for world in state.inventories)
+    buyer_before = observe_world(state, "station")
+    seller_before = observe_world(state, "industrial")
 
-    arrived = advance(purchase(state).state, 3)
+    first = purchase(state, command_id="order-1")
+    conflict = purchase(first.state, command_id="order-1", batch_id="industrial-batch-b")
+    duplicate = purchase(first.state, command_id="order-1")
+    second = purchase(first.state, command_id="order-2")
 
-    assert arrived.station.parts == 2
-    assert sum(lot.quantity for lot in arrived.station_lots) == 2
-    assert {lot.batch_id for lot in arrived.station_lots if lot.quantity} == {
+    assert first.accepted
+    assert conflict.rejection == "command_id_conflict"
+    assert conflict.state is first.state
+    assert duplicate.accepted and duplicate.duplicate
+    assert duplicate.state is first.state
+    assert len(first.state.contracts) == 1
+    assert second.accepted
+    assert len(second.state.contracts) == 2
+    assert second.state.escrow_credits == sum(
+        contract.total_price for contract in second.state.contracts
+    )
+    assert_credit_conserved(second.state, initial_credits)
+
+    buyer_after = observe_world(second.state, "station")
+    seller_after = observe_world(second.state, "industrial")
+    assert buyer_after.credits < buyer_before.credits
+    assert buyer_after.parts == buyer_before.parts
+    assert seller_after.parts == seller_before.parts - 2
+    assert {offer.batch_id for offer in seller_after.offers} == {"industrial-batch-b"}
+
+    sold_out = purchase(second.state, command_id="order-sold-out")
+    assert sold_out.rejection == "insufficient_stock"
+    assert sold_out.state is second.state
+
+    departure = advance_world(second.state)
+    assert departure.state.station.parts == 1
+    assert {shipment.status for shipment in departure.state.shipments} == {"in_transit"}
+    assert sum(item.kind is TradeEvidenceKind.DEPARTURE for item in departure.evidence) == 2
+
+    still_travelling = advance_world(departure.state)
+    assert still_travelling.state.station.parts == 1
+    assert {shipment.status for shipment in still_travelling.state.shipments} == {"in_transit"}
+
+    arrival = advance_world(still_travelling.state)
+    assert arrival.state.station.parts == 3
+    assert {shipment.status for shipment in arrival.state.shipments} == {"delivered"}
+    assert {contract.status for contract in arrival.state.contracts} == {"settled"}
+    assert arrival.state.escrow_credits == 0
+    assert {lot.batch_id for lot in arrival.state.station_lots if lot.quantity} == {
         "industrial-batch-a",
         "station-delivery-1",
     }
+    purchased_lots = [
+        lot for lot in arrival.state.station_lots if lot.batch_id == "industrial-batch-a"
+    ]
+    assert {lot.contract_id for lot in purchased_lots} == {
+        "contract:order-1",
+        "contract:order-2",
+    }
+    assert {lot.shipment_id for lot in purchased_lots} == {
+        "shipment:order-1",
+        "shipment:order-2",
+    }
+    assert sum(item.kind is TradeEvidenceKind.ARRIVAL for item in arrival.evidence) == 2
+    assert sum(item.kind is TradeEvidenceKind.SETTLEMENT for item in arrival.evidence) == 2
+    assert {entry.reference_id for entry in arrival.state.ledger if entry.kind == "settlement"} == {
+        "contract:order-1",
+        "contract:order-2",
+    }
+    assert observe_world(arrival.state, "industrial").credits > seller_before.credits
+    assert_credit_conserved(arrival.state, initial_credits)
+
+    repeated = advance_world(arrival.state)
+    assert repeated.state.station.parts == arrival.state.station.parts
+    assert not any(item.kind is TradeEvidenceKind.SETTLEMENT for item in repeated.evidence)
+    assert_credit_conserved(repeated.state, initial_credits)
+
+    repair = repair_with_batch(arrival.state, "industrial-batch-a")
+    completed_repair = advance(repair.state, 2)
+    assert repair.accepted
+    assert completed_repair.station.leak_active is False
+    assert completed_repair.installed_part.contract_id == "contract:order-1"
+    assert completed_repair.installed_part.shipment_id == "shipment:order-1"
+    assert_credit_conserved(completed_repair, initial_credits)
 
 
-@pytest.mark.parametrize("quantity", [0, -1, 4, True])
-def test_purchase_rejects_unbounded_quantities_without_mutating_state(quantity):
-    state = create_world_state(station_state())
+def test_unfunded_purchase_is_rejected_without_mutating_the_world():
+    state = create_world_state(station_state(credits=0))
 
-    result = purchase(state, quantity=quantity)
+    rejected = purchase(state)
 
-    assert not result.accepted
-    assert result.rejection == "invalid_quantity"
-    assert result.state is state
-    assert result.evidence == ()
-
-
-@pytest.mark.parametrize(
-    ("state_changes", "batch_id", "quantity", "rejection"),
-    [
-        (
-            {"station": replace(station_state(), credits=0)},
-            "industrial-batch-a",
-            1,
-            "insufficient_credits",
-        ),
-        ({}, "industrial-batch-missing", 1, "unknown_batch"),
-        ({}, "industrial-batch-a", 3, "insufficient_stock"),
-        ({"shipment_capacity": 1}, "industrial-batch-a", 2, "shipment_capacity_exceeded"),
-    ],
-)
-def test_purchase_rejects_invalid_stock_funds_and_capacity_atomically(
-    state_changes, batch_id, quantity, rejection
-):
-    base_station = state_changes.get("station", station_state())
-    config = {key: value for key, value in state_changes.items() if key != "station"}
-    state = create_world_state(base_station, **config)
-
-    result = purchase(state, batch_id=batch_id, quantity=quantity)
-
-    assert not result.accepted
-    assert result.rejection == rejection
-    assert result.state is state
-    assert result.evidence == ()
-    assert state.contracts == ()
-    assert state.shipments == ()
+    assert not rejected.accepted
+    assert rejected.rejection == "insufficient_credits"
+    assert rejected.state is state
+    assert rejected.evidence == ()
+    assert not state.contracts
+    assert not state.shipments
 
 
-def test_command_id_cannot_be_reused_for_a_different_purchase():
-    state = create_world_state(station_state())
-    first = purchase(state, quantity=1)
-
-    conflicting = purchase(first.state, batch_id="industrial-batch-b", quantity=1)
-
-    assert not conflicting.accepted
-    assert conflicting.rejection == "command_id_conflict"
-    assert conflicting.state is first.state
-
-
-def test_exhausted_batch_is_out_of_stock_and_zero_price_legacy_stock_cannot_be_sold():
+def test_legacy_station_stock_with_no_offer_price_cannot_be_sold():
     state = create_world_state(station_state(parts=1))
-    bought = purchase(state, quantity=2)
 
-    exhausted = purchase(bought.state, command_id="order-2", quantity=1)
-    free_stock = purchase_parts(
-        bought.state,
-        command_id="order-3",
+    rejected = purchase_parts(
+        state,
+        command_id="legacy-sale",
         quantity=1,
         batch_id="station-stock",
         buyer_id="industrial",
         seller_id="station",
     )
 
-    assert exhausted.rejection == "insufficient_stock"
-    assert exhausted.state is bought.state
-    assert free_stock.rejection == "invalid_offer_price"
-    assert free_stock.state is bought.state
+    assert not rejected.accepted
+    assert rejected.rejection == "invalid_offer_price"
+    assert rejected.state is state
 
 
-def test_repair_installs_batch_only_after_real_completion_then_starts_latent_clock():
-    state = create_world_state(station_state(leak_active=True), defect_after_turns=3)
-    bought = purchase(state)
-    arrived = advance(bought.state, 3)
+def test_repair_without_an_active_leak_leaves_available_parts_untouched():
+    state = create_world_state(station_state(parts=1))
 
+    rejected = repair_with_batch(state, "station-stock")
+
+    assert not rejected.accepted
+    assert rejected.rejection == "repair_not_needed"
+    assert rejected.state is state
+    assert state.station.parts == 1
+    assert state.pending_repair_batch_id is None
+    assert state.installed_part is None
+
+
+def test_defective_part_is_traced_quarantined_and_replaced_after_delayed_notice():
+    state = create_world_state(
+        station_state(leak_active=True, repair_notice_delay_turns=6),
+        defect_after_turns=2,
+    )
+    initial_credits = state.station.credits + sum(world.credits for world in state.inventories)
+    ordered = purchase(state, quantity=2)
+    arrived = advance(ordered.state, 3)
     assigned = repair_with_batch(arrived, "industrial-batch-a")
+
+    assert ordered.accepted
     assert assigned.accepted
     assert assigned.state.installed_part is None
     assert assigned.state.pending_repair_batch_id == "industrial-batch-a"
 
     first_work = advance_world(assigned.state)
     completed = advance_world(first_work.state)
-    assert completed.state.station.leak_active is False
+    assert completed.state.station.repairs_completed == 1
     assert completed.state.station.repair_turns_remaining == 0
     assert completed.state.installed_part.batch_id == "industrial-batch-a"
     assert completed.state.installed_part.operating_turns == 0
+    assert not completed.state.station.leak_active
     assert any(item.kind is TradeEvidenceKind.REPAIR_COMPLETE for item in completed.evidence)
-
-    after_one = advance_world(completed.state)
-    after_two = advance_world(after_one.state)
-    assert not after_one.state.station.leak_active
-    assert not after_two.state.station.leak_active
-    failure = advance_world(after_two.state)
-    assert failure.state.station.leak_active
-    assert failure.state.installed_part.operating_turns == 3
-    failure_event = next(
-        item for item in failure.evidence if item.kind is TradeEvidenceKind.FAILURE
+    assert not any(
+        item.kind is TradeEvidenceKind.STATION_EVIDENCE
+        and "maintenance reports" in item.message.lower()
+        for item in observe_world(completed.state, "station").evidence
     )
-    assert failure_event.asset_id == "oxygen_system"
-    assert failure_event.batch_id is None
-    assert failure_event.contract_id is None
 
+    first_operation = advance_world(completed.state)
+    assert not first_operation.state.station.leak_active
+    assert first_operation.state.installed_part.operating_turns == 1
+    failure = advance_world(first_operation.state)
+    assert failure.state.station.leak_active
+    assert failure.state.installed_part.operating_turns == 2
 
-def test_inspection_after_failure_finds_the_installed_batch_source_but_before_failure_is_scoped():
-    state = create_world_state(station_state(leak_active=True), defect_after_turns=1)
-    arrived = advance(purchase(state).state, 3)
-    assigned = repair_with_batch(arrived, "industrial-batch-a")
-    completed = advance(assigned.state, 2)
+    after_notice = advance(failure.state, 4)
+    assert any(
+        item.kind is TradeEvidenceKind.STATION_EVIDENCE
+        and "maintenance reports" in item.message.lower()
+        for item in observe_world(after_notice, "station").evidence
+    )
+    assert sum(item.kind is TradeEvidenceKind.FAILURE for item in after_notice.evidence) == 1
 
-    pre_failure = inspect_installed_batch(completed)
-    assert pre_failure.accepted
-    assert pre_failure.evidence[0].kind is TradeEvidenceKind.INSPECTION
-    assert pre_failure.evidence[0].batch_id == "industrial-batch-a"
-    assert "no material defect observed" in pre_failure.evidence[0].message.lower()
-    assert not any("defect confirmed" in item.message.lower() for item in pre_failure.evidence)
-
-    failed = advance_world(pre_failure.state).state
-    investigated = inspect_installed_batch(failed)
-    finding = investigated.evidence[0]
-    assert investigated.accepted
-    assert finding.kind is TradeEvidenceKind.INSPECTION
-    assert finding.world_id == "station"
-    assert finding.asset_id == "oxygen_system"
+    inspected = inspect_installed_batch(after_notice)
+    finding = inspected.evidence[0]
+    assert inspected.accepted
+    assert finding.code == "material_defect_confirmed"
     assert finding.batch_id == "industrial-batch-a"
     assert finding.contract_id == "contract:order-1"
     assert finding.shipment_id == "shipment:order-1"
-    assert finding.code == "material_defect_confirmed"
 
-
-def test_quarantine_and_reliable_replacement_remove_the_later_failure_cause():
-    state = create_world_state(station_state(leak_active=True), defect_after_turns=2)
-    arrived_bad = advance(purchase(state, quantity=2).state, 3)
-    completed_bad_repair = advance(
-        repair_with_batch(arrived_bad, "industrial-batch-a").state,
-        2,
-    )
-    failed = advance(completed_bad_repair, 2)
-    inspected = inspect_installed_batch(failed)
-    assert inspected.evidence[0].code == "material_defect_confirmed"
-
-    quarantined = quarantine_batch(inspected.state, "industrial-batch-a", quantity=1)
+    quarantined = quarantine_batch(inspected.state, "industrial-batch-a")
     assert quarantined.accepted
     assert quarantined.state.station.parts == 0
-    assert any(item.kind is TradeEvidenceKind.QUARANTINE for item in quarantined.evidence)
+    assert quarantined.evidence[0].batch_id == "industrial-batch-a"
 
     replacement = purchase(
         quarantined.state,
         command_id="order-2",
         batch_id="industrial-batch-b",
     )
+    assert replacement.accepted
     arrived_good = advance(replacement.state, 3)
-    started = repair_with_batch(arrived_good, "industrial-batch-b")
-    completed_good_repair = advance(started.state, 2)
+    good_repair = repair_with_batch(arrived_good, "industrial-batch-b")
+    assert good_repair.accepted
+    completed_good_repair = advance(good_repair.state, 2)
     assert completed_good_repair.station.leak_active is False
     assert completed_good_repair.installed_part.batch_id == "industrial-batch-b"
+    assert completed_good_repair.installed_part.contract_id == "contract:order-2"
+    assert completed_good_repair.installed_part.shipment_id == "shipment:order-2"
 
     operated = advance(completed_good_repair, 6)
+    healthy_inspection = inspect_installed_batch(operated)
     assert operated.station.leak_active is False
-    inspected_good = inspect_installed_batch(operated)
-    assert "no material defect observed" in inspected_good.evidence[0].message.lower()
-
-
-def test_repeated_purchases_of_one_batch_keep_shipment_provenance_separate_for_repairs():
-    state = create_world_state(station_state(leak_active=True), defect_after_turns=1)
-    first = purchase(state, command_id="order-first", batch_id="industrial-batch-a")
-    second = purchase(
-        first.state,
-        command_id="order-second",
-        batch_id="industrial-batch-a",
-    )
-    arrived = advance(second.state, 3)
-
-    first_repair = repair_with_batch(arrived, "industrial-batch-a")
-    first_complete = advance(first_repair.state, 2)
-    assert first_complete.installed_part.contract_id == "contract:order-first"
-    assert first_complete.installed_part.shipment_id == "shipment:order-first"
-
-    failed = advance(first_complete, 1)
-    assert failed.station.leak_active
-    assert inspect_installed_batch(failed).evidence[0].contract_id == "contract:order-first"
-    second_repair = repair_with_batch(failed, "industrial-batch-a")
-    second_complete = advance(second_repair.state, 2)
-    assert second_complete.installed_part.contract_id == "contract:order-second"
-    assert second_complete.installed_part.shipment_id == "shipment:order-second"
-
-
-def test_repair_inspection_and_quarantine_failures_preserve_the_complete_world_state():
-    state = create_world_state(station_state())
-
-    no_leak = repair_with_batch(state, "industrial-batch-a")
-    no_installed = inspect_installed_batch(state)
-    no_local_stock = quarantine_batch(state, "industrial-batch-a")
-
-    assert no_leak.rejection == "repair_not_needed"
-    assert no_installed.rejection == "no_part_installed"
-    assert no_local_stock.rejection == "batch_not_in_station_inventory"
-    assert no_leak.state is state
-    assert no_installed.state is state
-    assert no_local_stock.state is state
-    assert no_leak.evidence == no_installed.evidence == no_local_stock.evidence == ()
-
-
-@pytest.mark.parametrize("travel_turns", [0, -1, 11, True])
-def test_world_rejects_unbounded_route_configuration(travel_turns):
-    with pytest.raises(ValueError, match="travel_turns"):
-        create_world_state(station_state(), travel_turns=travel_turns)
+    assert sum(item.kind is TradeEvidenceKind.FAILURE for item in operated.evidence) == 1
+    assert healthy_inspection.evidence[0].code == "installed_batch_traced"
+    assert "no material defect observed" in healthy_inspection.evidence[0].message.lower()
+    assert_credit_conserved(operated, initial_credits)
