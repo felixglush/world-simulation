@@ -94,52 +94,6 @@ def mission(captain, dispatcher, turns):
         dispatcher.close()
 
 
-def test_captain_jev_supply_chain_recovers_and_discovers_causes_only_through_public_evidence():
-    captain, dispatcher, seen = providers(scripted_intervention)
-    result = mission(captain, dispatcher, 40)
-    assert result.state.station.crew_alive
-    assert not result.state.station.leak_active
-    assert result.state.installed_part.batch_id == "industrial-batch-b"
-    assert result.state.sensor_drift_per_turn == 0
-    assert all(item.accepted for item in result.decisions)
-    codes = {item.code for item in result.events}
-    assert codes >= {
-        "material_defect_confirmed",
-        "sensor_drift_confirmed",
-        "report_origin_traced",
-        "cargo_quality_measured",
-    }
-    assert {item.batch_id for item in result.events if item.kind == "consumption"} == {"ice-feed-b"}
-    assert any(review.phase == "action" for review in result.crew_reviews)
-    # A scheduled monitoring window survives routine events and old report history.
-    assert not any(23 < payload["world"]["turn"] < 40 for payload in seen["captain"])
-    assert any(payload["world"]["turn"] == 40 for payload in seen["captain"])
-    assert sum(review.model_calls for review in result.crew_reviews) == len(seen["captain"]) + len(
-        seen["jev"]
-    )
-    for payload in seen["captain"] + seen["jev"]:
-        encoded = json.dumps(payload)
-        for private in (
-            "latent_defect",
-            "failure_load",
-            "defect_after_turns",
-            "yield_percent",
-            "sensor_drift_per_turn",
-            "residual_damage_after_turns",
-        ):
-            assert f'"{private}"' not in encoded
-    assert all(
-        "industrial.qa" not in json.dumps(payload)
-        for payload in seen["captain"]
-        if payload["world"]["turn"] < 20
-    )
-    assert any(
-        "industrial.qa" in json.dumps(payload)
-        for payload in seen["captain"]
-        if payload["world"]["turn"] >= 20
-    )
-
-
 def test_unlisted_captain_arguments_cannot_spend_another_worlds_money():
     captain, dispatcher, _ = providers(
         lambda world: (

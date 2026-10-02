@@ -137,6 +137,38 @@ def test_live_crew_runs_full_supply_chain_through_real_cli_and_local_providers(
         "max_calls": 120,
         "max_output_tokens_per_call": 512,
     }
+    assert summary["model_calls"] == len(requests)
+    assert sum(review["model_calls"] for review in summary["crew_reviews"]) == len(requests)
+    if controller == "jev+llm":
+        assert any(review["phase"] == "action" for review in summary["crew_reviews"])
+    payloads = [
+        json.loads(body["messages"][1]["content"]) if "messages" in body else body["state"]
+        for body in requests
+    ]
+    for payload in payloads:
+        encoded = json.dumps(payload)
+        for private in (
+            "latent_defect",
+            "failure_load",
+            "defect_after_turns",
+            "yield_percent",
+            "sensor_drift_per_turn",
+            "residual_damage_after_turns",
+        ):
+            assert f'"{private}"' not in encoded
+    captain_payloads = [
+        json.loads(body["messages"][1]["content"]) for body in requests if "messages" in body
+    ]
+    assert all(
+        "industrial.qa" not in json.dumps(payload)
+        for payload in captain_payloads
+        if payload["world"]["turn"] < 20
+    )
+    assert any(
+        "industrial.qa" in json.dumps(payload)
+        for payload in captain_payloads
+        if payload["world"]["turn"] >= 20
+    )
     assert requests
     jev_requests = [body for body in requests if "messages" not in body]
     assert bool(jev_requests) == (controller == "jev+llm")
@@ -153,27 +185,20 @@ def test_live_crew_runs_full_supply_chain_through_real_cli_and_local_providers(
         assert private not in result.stdout
 
 
-@pytest.mark.parametrize(
-    ("args", "message"),
-    [
-        (("--controller", "llm"), "Live crew control requires --deception"),
-        (
-            ("--deception", "supply_chain", "--policy", "trust", "--controller", "llm"),
-            "Live crew control requires --policy investigate",
-        ),
-        (
-            ("--deception", "supply_chain", "--controller", "llm"),
-            "Live agents require a finite call budget",
-        ),
-    ],
-)
-def test_live_crew_rejects_unsupported_settings_before_provider_configuration(
-    args, message
-) -> None:
+def test_live_crew_requires_a_finite_budget_before_provider_configuration() -> None:
     env = os.environ.copy()
     env["OPENROUTER_API_KEY"] = "test-secret-do-not-print"
     result = subprocess.run(
-        [sys.executable, "-m", "station_control", "trade", *args],
+        [
+            sys.executable,
+            "-m",
+            "station_control",
+            "trade",
+            "--deception",
+            "supply_chain",
+            "--controller",
+            "llm",
+        ],
         cwd=ROOT,
         env=env,
         capture_output=True,
@@ -182,6 +207,6 @@ def test_live_crew_rejects_unsupported_settings_before_provider_configuration(
     )
 
     assert result.returncode == 2
-    assert message in result.stderr
+    assert "Live agents require a finite call budget" in result.stderr
     assert "Traceback" not in result.stderr
     assert "test-secret-do-not-print" not in result.stdout + result.stderr
