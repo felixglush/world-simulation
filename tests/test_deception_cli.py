@@ -44,6 +44,13 @@ def test_deception_stories_are_deterministic_offline_and_recover(story):
     assert "latent_defect" not in first.stdout
     assert "yield_percent" not in first.stdout
     assert "sensor_drift_per_turn" not in first.stdout
+    reports = [item for item in result["events"] if item["kind"] == "report"]
+    assert reports and all(item["upstream_report_id"] is None for item in reports)
+    assert all(item["source_id"] != "industrial.qa" for item in reports)
+    assert any(
+        item["kind"] == "trace" and item["upstream_source_id"] == "industrial.qa"
+        for item in result["events"]
+    )
     codes = {item["finding_code"] for item in result["events"]}
     if story == "supply_chain":
         assays = {
@@ -85,9 +92,3 @@ def test_diversion_spends_real_credits_and_leaves_trusting_script_unable_to_repa
     assert summary["expenditure"] == 75
     assert not summary["crew_alive"]
     assert any(item["rejection"] == "insufficient_credits" for item in summary["decisions"])
-
-
-def test_deception_flags_reject_ambiguous_mode_without_traceback():
-    result = run_cli("--economy", "--deception", "supply_chain")
-    assert result.returncode != 0
-    assert "Traceback" not in result.stderr

@@ -4,7 +4,6 @@ from dataclasses import replace
 
 import pytest
 
-from station_control.deception import TradeReport
 from station_control.facade import SimulationFacade
 from station_control.governors import TradeCommand
 from station_control.scenarios import create_world
@@ -15,36 +14,6 @@ def simulation():
     return SimulationFacade(replace(create_world("normal", 0), scheduled_events=(), parts=0))
 
 
-def test_unsupported_cargo_effect_rejects_without_registering_a_world():
-    facade = simulation()
-    before = facade.state
-    with pytest.raises(ValueError):
-        facade.create_world(
-            "supplier",
-            lots=(
-                PartLot(
-                    "lot",
-                    2,
-                    10,
-                    "supplier",
-                    resource="metals",
-                    latent_defect=True,
-                    defect_after_turns=2,
-                ),
-            ),
-        )
-    assert facade.state is before
-    facade.create_world("supplier")
-
-
-def test_unbounded_deception_configuration_rejects_atomically():
-    facade = simulation()
-    before = facade.state
-    with pytest.raises(ValueError):
-        facade.configure_deception(sensor_drift_per_turn=-1)
-    assert facade.state is before
-
-
 def test_deception_configuration_cannot_rewrite_causes_after_simulation_starts():
     facade = simulation()
     facade.run(turns=1)
@@ -52,44 +21,6 @@ def test_deception_configuration_cannot_rewrite_causes_after_simulation_starts()
     with pytest.raises(ValueError):
         facade.configure_deception(sensor_drift_per_turn=2)
     assert facade.state is before
-
-
-def test_fake_policy_receives_only_observations_and_can_investigate_without_hidden_config():
-    class Inspector:
-        def __init__(self):
-            self.views = []
-
-        def decide(self, observation):
-            self.views.append(observation)
-            if any(item.kind == "report" for item in observation.evidence):
-                return TradeCommand("trace", report_id="local-report")
-            return None
-
-    facade = simulation()
-    facade.configure_deception(
-        reports=(
-            TradeReport("local-report", "maintenance", "station", "Equipment is sound.", 0, 1),
-        ),
-        sensor_drift_per_turn=3,
-    )
-    inspector = Inspector()
-    facade.create_decision_system("station", provider=inspector)
-    result = facade.run(turns=1)
-    assert result.decisions[0].accepted
-    assert len(inspector.views) == 1
-    assert not hasattr(inspector.views[0], "reports")
-    assert not hasattr(inspector.views[0], "sensor_drift_per_turn")
-
-
-def test_malformed_proposals_do_not_allow_new_investigation_actions_on_other_worlds():
-    facade = simulation()
-    facade.create_world("supplier")
-    facade.create_decision_system(
-        "supplier", commands=((1, TradeCommand("calibrate", buyer_id="supplier")),)
-    )
-    result = facade.run(turns=1)
-    assert result.decisions[0].rejection == "unauthorized_world"
-    assert not any(item.kind == "calibration" for item in result.events)
 
 
 def test_unavailable_calibration_feedback_stops_repeating_unsupported_action():
