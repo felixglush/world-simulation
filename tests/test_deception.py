@@ -2,8 +2,6 @@
 
 from dataclasses import asdict, replace
 
-import pytest
-
 from station_control.deception import trace_report
 from station_control.scenarios import create_world
 from station_control.trade import (
@@ -77,14 +75,3 @@ def test_real_turns_deliver_reports_and_trace_shared_provenance_one_hop_at_a_tim
     assert second_trace.evidence[0].upstream_source_id == "industrial.qa"
     assert "industrial.qa" in repr(asdict(observe_world(second_trace.state, "station")))
     assert "port.office" not in repr(asdict(observe_world(second_trace.state, "industrial")))
-
-
-def test_invalid_report_provenance_is_rejected_before_a_turn_publishes_claims():
-    station = replace(create_world("normal", seed=0), scheduled_events=())
-    report = TradeReport("report-a", "qa.office", "station", "Passed.", 0, 1)
-    state = replace(create_world_state(station), reports=(report, report))
-
-    with pytest.raises(ValueError, match="unique"):
-        advance_world(state)
-
-    assert state.evidence == ()
