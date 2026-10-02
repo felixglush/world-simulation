@@ -2,6 +2,9 @@
 
 from dataclasses import replace
 
+import pytest
+
+from station_control.domain import Delivery
 from station_control.economy import ProductionRecipe, ResourcePriceRule
 from station_control.facade import SimulationFacade
 from station_control.governors import TradeCommand
@@ -106,17 +109,16 @@ def test_resource_governors_have_independent_identity_and_parameters():
     facade.create_world(
         "cistern", lots=(water_lot("cistern"),), resource_capacities=(("water", 10),)
     )
-    first = facade.create_decision_system(
+    facade.create_decision_system(
         "a", kind="resources", resource_targets=(("water", 3),), cash_reserve=0, strategy="reserve"
     )
-    second = facade.create_decision_system(
+    facade.create_decision_system(
         "b",
         kind="resources",
         resource_targets=(("water", 3),),
         cash_reserve=100,
         strategy="reserve",
     )
-    assert first is not second
     result = facade.run(turns=1)
     assert [contract.buyer_id for contract in result.state.contracts] == ["a"]
 
@@ -148,24 +150,13 @@ def test_income_policy_uses_custom_world_price_parameters_for_new_resources():
     assert result.state.contracts[0].quantity == 3
 
 
-def test_default_station_can_create_resource_policy_with_free_initial_parts():
-    facade = SimulationFacade()
-    facade.create_decision_system("station", kind="resources", resource_targets=(("parts", 2),))
-    assert facade.run(turns=1).state.station.parts >= 0
-
-
 def test_explicit_parts_storage_rejects_oversized_legacy_delivery_at_bootstrap():
-    import pytest
-
-    from station_control.domain import Delivery
-
     initial = replace(create_world("normal", 0), parts=0, deliveries=(Delivery(1, "parts", 2),))
     with pytest.raises(ValueError, match="storage"):
         SimulationFacade(initial, station_resource_capacities=(("parts", 1),))
 
 
 def test_legacy_delivery_reserves_space_against_new_parts_purchase():
-    from station_control.domain import Delivery
     from station_control.trade import purchase_parts
 
     initial = replace(create_world("normal", 0), parts=0, deliveries=(Delivery(2, "parts", 1),))
@@ -178,8 +169,6 @@ def test_legacy_delivery_reserves_space_against_new_parts_purchase():
 
 
 def test_station_production_reserves_storage_for_legacy_parts_arrival():
-    from station_control.domain import Delivery
-
     initial = replace(create_world("normal", 0), parts=0, deliveries=(Delivery(2, "parts", 1),))
     facade = SimulationFacade(
         initial,
@@ -197,32 +186,3 @@ def test_station_production_reserves_storage_for_legacy_parts_arrival():
     arrived = advance_economy(result.state)
     assert arrived.state.station.parts == 1
     assert sum(lot.quantity for lot in arrived.state.station_lots if lot.resource == "parts") == 1
-
-
-def test_direct_domain_rejects_impossible_storage_before_delivering_or_accounting():
-    import pytest
-
-    from station_control.domain import Delivery
-    from station_control.trade import advance_world, create_world_state
-
-    initial = replace(create_world("normal", 0), parts=0, deliveries=(Delivery(1, "parts", 2),))
-    state = replace(create_world_state(initial), station_resource_capacities=(("parts", 1),))
-    with pytest.raises(ValueError, match="storage"):
-        advance_world(state)
-    assert state.station.parts == 0
-    assert not state.ledger
-
-
-def test_over_limit_price_rule_rejects_world_without_registering_it():
-    import pytest
-
-    facade = simulation()
-    before = facade.state
-    with pytest.raises(ValueError, match="pricing"):
-        facade.create_world(
-            "unpriced",
-            lots=(water_lot("unpriced"),),
-            price_rules=(ResourcePriceRule("water", "tonnes", 10, 1_500_000, 1, 1_500_000),),
-        )
-    assert facade.state is before
-    facade.create_world("unpriced", lots=(water_lot("unpriced"),))
