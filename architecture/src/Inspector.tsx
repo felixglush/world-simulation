@@ -1,3 +1,5 @@
+import { Fields } from "./ContractFields";
+import { InputOutput } from "./InputOutput";
 import type { CSSProperties } from "react";
 import { Button } from "./components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
@@ -23,7 +25,7 @@ import {
 } from "./model";
 import type { DemoRun, RunRecord, SourceRef } from "./model";
 export type Selection = { kind: "component" | "message"; id: string };
-export type InspectorTab = "overview" | "code" | "state" | "event";
+export type InspectorTab = "overview" | "code" | "state" | "event" | "io";
 interface Props {
   selected: Selection;
   tab: InspectorTab;
@@ -109,6 +111,7 @@ export function Inspector({
               "overview",
               "code",
               "state",
+              "io",
               ...(replay ? ["event"] : []),
             ] as InspectorTab[]
           ).map((item) => (
@@ -117,17 +120,36 @@ export function Inspector({
                 ? "Code"
                 : item === "state"
                   ? "State"
-                  : item === "event"
-                    ? "Run event"
-                    : "Overview"}
+                  : item === "io"
+                    ? "I/O"
+                    : item === "event"
+                      ? "Run event"
+                      : "Overview"}
             </TabsTrigger>
           ))}
         </TabsList>
         <TabsContent value={tab} className="inspector-content min-h-0">
+          {tab === "io" && (
+            <InputOutput
+              componentId={node?.id}
+              connection={edge ?? undefined}
+              events={events}
+              cursor={cursor}
+              replay={replay}
+              onSelect={onSelect}
+            />
+          )}
           {tab === "overview" &&
             (node ? (
               <>
                 <p className="lead">{node.summary}</p>
+                <Button
+                  variant="outline"
+                  className="wide"
+                  onClick={() => setTab("io")}
+                >
+                  Input → output schemas & examples
+                </Button>
                 <h3>Responsibilities</h3>
                 <ul className="responsibilities">
                   {node.responsibilities.map((item) => (
@@ -363,22 +385,5 @@ function SourceLinks({ refs }: { refs: SourceRef[] }) {
         </a>
       ))}
     </div>
-  );
-}
-function Fields({ reference }: { reference: SourceRef }) {
-  const fields = sourceFor(reference).fields;
-  return fields.length ? (
-    <div className="contract-fields">
-      {fields.map((field) => (
-        <div key={field.name}>
-          <code>{field.name}</code>
-          <span>{field.type}</span>
-        </div>
-      ))}
-    </div>
-  ) : (
-    <p className="muted">
-      See the backing implementation for local fields and behavior.
-    </p>
   );
 }
