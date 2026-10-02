@@ -104,7 +104,11 @@ def test_purchase_to_stress_investigation_and_replacement_removes_defect_and_res
 
     operated = advance(completed, 6)
     assert not operated.station.leak_active
-    assert inspect_installed_batch(operated).evidence[0].code == "installed_batch_traced"
+    verified = inspect_installed_batch(operated, method="peak")
+    assert verified.accepted
+    assert not verified.state.station.leak_active
+    assert verified.evidence[0].method == "peak"
+    assert verified.evidence[0].code == "installed_batch_traced"
 
 
 def test_backup_sensitive_defect_fails_only_when_the_backup_is_actually_operating():
@@ -128,25 +132,6 @@ def test_backup_sensitive_defect_fails_only_when_the_backup_is_actually_operatin
     failure = next(item for item in failed.evidence if item.kind is TradeEvidenceKind.FAILURE)
     assert failure.operating_load == "backup"
     assert failed.state.installed_part.defect_confirmed
-
-
-def test_healthy_replacement_passes_peak_stress_without_a_false_defect_finding():
-    state = create_world_state(station_state(leak_active=True))
-    bought = purchase_lot(
-        state,
-        command_id="healthy-order",
-        batch_id="industrial-batch-b",
-        quantity=1,
-    )
-    arrived = advance(bought.state, 3)
-    installed = advance(repair_with_batch(arrived, "industrial-batch-b").state, 2)
-
-    tested = inspect_installed_batch(installed, method="peak")
-
-    assert tested.accepted
-    assert not tested.state.station.leak_active
-    assert tested.evidence[0].method == "peak"
-    assert tested.evidence[0].code == "installed_batch_traced"
 
 
 def test_fatal_oxygen_turn_stops_defect_exposure_sensor_drift_and_due_report_publication():
