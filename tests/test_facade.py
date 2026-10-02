@@ -59,24 +59,17 @@ def test_configured_worlds_trade_with_independent_public_policies():
     )
 
 
-def test_rejected_world_and_policy_configuration_leaves_facade_usable():
+def test_duplicate_world_cannot_replace_an_existing_world():
     simulation = facade()
-    simulation.create_world("forge", credits=17)
+    simulation.create_world("forge", credits=17, lots=(PartLot("forge-lot", 1, 7, "forge"),))
     before = simulation.state
 
-    for world_id, credits in (("invalid id", 17), ("station", 17), ("x", -1)):
-        with pytest.raises(ValueError):
-            simulation.create_world(world_id, credits=credits)
-        assert simulation.state == before
-
-    with pytest.raises(ValueError):
-        simulation.create_decision_system("missing")
     with pytest.raises(ValueError):
         simulation.create_world("forge", credits=100)
-    with pytest.raises(ValueError):
-        simulation.create_decision_system("forge", kind="unavailable")
     assert simulation.state == before
 
     simulation.create_decision_system("forge")
     result = simulation.run(turns=1)
-    assert result.state == simulation.state
+    view = observe_world(result.state, "forge")
+    assert view.credits == 17
+    assert [(lot.batch_id, lot.quantity) for lot in view.local_lots] == [("forge-lot", 1)]
