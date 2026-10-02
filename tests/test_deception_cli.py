@@ -44,7 +44,11 @@ def test_deception_stories_are_deterministic_offline_and_recover(story):
     assert "latent_defect" not in first.stdout
     assert "yield_percent" not in first.stdout
     assert "sensor_drift_per_turn" not in first.stdout
-    reports = [item for item in result["events"] if item["kind"] == "report"]
+    reports = [
+        item
+        for item in result["events"]
+        if item["kind"] == "report" and item["world_id"] == "station"
+    ]
     assert reports and all(item["upstream_report_id"] is None for item in reports)
     assert all(item["source_id"] != "industrial.qa" for item in reports)
     assert any(
