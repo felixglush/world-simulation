@@ -33,11 +33,36 @@ def test_offline_trade_story_is_deterministic_and_recovers() -> None:
     assert result["crew_alive"]
     assert result["repairs_completed"] == 2
     assert not result["leak_active"]
-    kinds = [event["kind"] for event in result["events"]]
-    for kind in ("purchase", "arrival", "repair_complete", "failure", "inspection", "quarantine"):
-        assert kind in kinds
-    assert kinds.index("repair_complete") < kinds.index("failure") < kinds.index("inspection")
-    assert "defect_after_cycles" not in runs[0].stdout
+    assert all(
+        decision["accepted"] and decision["rejection"] is None for decision in result["decisions"]
+    )
+
+    events = result["events"]
+
+    def event_index(kind: str, batch_id: str | None = None) -> int:
+        return next(
+            index
+            for index, event in enumerate(events)
+            if event["kind"] == kind and (batch_id is None or event["batch_id"] == batch_id)
+        )
+
+    story_order = (
+        event_index("purchase", "industrial-batch-a"),
+        event_index("arrival", "industrial-batch-a"),
+        event_index("settlement", "industrial-batch-a"),
+        event_index("repair_complete", "industrial-batch-a"),
+        event_index("failure"),
+        event_index("inspection"),
+        event_index("quarantine"),
+        event_index("purchase", "industrial-batch-b"),
+        event_index("arrival", "industrial-batch-b"),
+        event_index("settlement", "industrial-batch-b"),
+        event_index("repair_complete", "industrial-batch-b"),
+    )
+    assert story_order == tuple(sorted(story_order))
+    assert events[story_order[5]]["finding_code"] == "material_defect_confirmed"
+    assert "latent_defect" not in runs[0].stdout
+    assert "defect_after_turns" not in runs[0].stdout
 
 
 def test_trade_cli_rejects_invalid_horizon() -> None:
