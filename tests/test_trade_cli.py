@@ -55,16 +55,20 @@ def test_trade_cli_rejects_invalid_horizon() -> None:
 def test_offline_economy_story_produces_ships_and_settles_across_four_worlds():
     env = os.environ.copy()
     env.pop("OPENROUTER_API_KEY", None)
-    run = subprocess.run(
-        [sys.executable, "-m", "station_control", "trade", "--economy", "--turns", "20"],
-        cwd=ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
-    assert run.returncode == 0, run.stderr
-    result = json.loads(run.stdout)
+    runs = [
+        subprocess.run(
+            [sys.executable, "-m", "station_control", "trade", "--economy", "--turns", "20"],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        for _ in range(2)
+    ]
+    assert runs[0].returncode == runs[1].returncode == 0, runs[0].stderr
+    assert runs[0].stdout == runs[1].stdout
+    result = json.loads(runs[0].stdout)
     assert result["economy"]
     assert set(result["worlds"]) == {"station", "industrial", "ice_moon", "agricultural_world"}
     assert result["model_calls"] == 0
