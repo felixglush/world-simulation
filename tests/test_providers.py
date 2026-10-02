@@ -32,6 +32,7 @@ from station_control.controllers import (
 )
 from station_control.providers import CallBudget, JevDispatchProvider, OpenRouterCaptainProvider
 from station_control.scenarios import ScenarioFamily
+from station_control.trade import create_world_state
 
 
 def _jev_payload(
@@ -774,3 +775,30 @@ def test_event_screening_and_captain_actions_share_budget_through_real_adapters(
         assert failure["consequence"]["code"] == "budget_exhausted"
         assert failure["consequence"]["metadata"]["request_made"] is False
         assert [event["event_type"] for event in failure["evidence"]] == ["action"]
+
+
+def test_providers_reject_authoritative_world_state_before_http_io() -> None:
+    requests = 0
+
+    def handle(_: httpx2.Request) -> httpx2.Response:
+        nonlocal requests
+        requests += 1
+        return httpx2.Response(200, json=_jev_payload())
+
+    world_state = create_world_state()
+    jev = _jev(handle)
+    captain = _captain(handle)
+    try:
+        with pytest.raises(ProviderError) as jev_error:
+            jev.classify(replace(_dispatch_context(), world=world_state))
+        with pytest.raises(ProviderError) as captain_error:
+            captain.decide(replace(_captain_context(), world=world_state))
+    finally:
+        jev.close()
+        captain.close()
+
+    assert requests == 0
+    assert jev_error.value.code is ProviderErrorCode.INVALID_INPUT
+    assert jev_error.value.metadata["request_made"] is False
+    assert captain_error.value.code is ProviderErrorCode.INVALID_INPUT
+    assert captain_error.value.metadata["request_made"] is False

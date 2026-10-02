@@ -45,6 +45,7 @@ from .controllers import (
     ProviderErrorCode,
     Subsystem,
 )
+from .domain import SensorReading
 from .provider_support import (
     DEFAULT_TIMEOUT_SECONDS as DEFAULT_TIMEOUT_SECONDS,
 )
@@ -64,6 +65,14 @@ from .provider_support import (
     measure_latency_ms,
     reported_cost,
     validate_configuration,
+)
+from .trade_types import (
+    PublicContract,
+    PublicLot,
+    PublicShipment,
+    PublicWorldView,
+    TradeEvidence,
+    TradeEvidenceKind,
 )
 
 DEFAULT_CAPTAIN_BASE_URL = "https://openrouter.ai/api/v1"
@@ -87,6 +96,13 @@ _ALLOWED_ACTION_FIELDS = {
     "follow_up_turn",
     "reason",
     "evidence_sequences",
+    "seller_id",
+    "batch_id",
+    "shipment_id",
+    "method",
+    "repair_mode",
+    "report_id",
+    "operating_load",
 }
 
 
@@ -362,12 +378,15 @@ class OpenRouterCaptainProvider:
 
 
 def _dispatch_state(context: DispatchContext) -> dict[str, object]:
-    return {
+    state: dict[str, object] = {
         "report": _evidence(context.report),
         "public_events": [asdict(event) for event in context.events],
         "station": _station(context.station),
         "accessible_evidence": [_evidence(item) for item in context.evidence],
     }
+    if context.world is not None:
+        state["world"] = _public_world_view(context.world)
+    return state
 
 
 def _captain_payload(context: CaptainContext) -> dict[str, object]:
@@ -376,13 +395,129 @@ def _captain_payload(context: CaptainContext) -> dict[str, object]:
         or context.inspection_budget_remaining < 0
     ):
         raise ProviderError(ProviderErrorCode.INVALID_INPUT)
-    return {
+    payload: dict[str, object] = {
         "instruction_version": context.instruction_version,
         "incident": _evidence(context.incident),
         "public_events": [asdict(event) for event in context.events],
         "station": _station(context.station),
         "accessible_evidence": [_evidence(item) for item in context.evidence],
         "inspection_budget_remaining": context.inspection_budget_remaining,
+    }
+    if context.world is not None:
+        payload["world"] = _public_world_view(context.world)
+    return payload
+
+
+def _public_world_view(view: PublicWorldView) -> dict[str, object]:
+    if not isinstance(view, PublicWorldView):
+        raise ProviderError(ProviderErrorCode.INVALID_INPUT)
+    sensors = _public_items(view.oxygen_sensors, SensorReading)
+    offers = _public_items(view.offers, PublicLot)
+    local_lots = _public_items(view.local_lots, PublicLot)
+    contracts = _public_items(view.contracts, PublicContract)
+    shipments = _public_items(view.shipments, PublicShipment)
+    evidence = _public_items(view.evidence, TradeEvidence)
+    if any(not isinstance(item.kind, TradeEvidenceKind) for item in evidence):
+        raise ProviderError(ProviderErrorCode.INVALID_INPUT)
+    return {
+        "world_id": view.world_id,
+        "turn": view.turn,
+        "credits": view.credits,
+        "parts": view.parts,
+        "oxygen_sensors": [
+            {
+                "sensor": reading.sensor,
+                "oxygen": reading.oxygen,
+                "sampled_turn": reading.sampled_turn,
+                "source": reading.source,
+            }
+            for reading in sensors
+        ],
+        "backup_oxygen": view.backup_oxygen,
+        "available_crew": view.available_crew,
+        "crew_alive": view.crew_alive,
+        "repair_turns_remaining": view.repair_turns_remaining,
+        "offers": [_public_lot(lot) for lot in offers],
+        "local_lots": [_public_lot(lot) for lot in local_lots],
+        "contracts": [_public_contract(contract) for contract in contracts],
+        "shipments": [_public_shipment(shipment) for shipment in shipments],
+        "evidence": [_public_trade_evidence(item) for item in evidence],
+        "operating_load": view.operating_load,
+        "backup_active": view.backup_active,
+    }
+
+
+def _public_items(items: object, item_type: type) -> tuple[Any, ...]:
+    if not isinstance(items, tuple) or any(type(item) is not item_type for item in items):
+        raise ProviderError(ProviderErrorCode.INVALID_INPUT)
+    return items
+
+
+def _public_lot(lot: PublicLot) -> dict[str, object]:
+    return {
+        "batch_id": lot.batch_id,
+        "quantity": lot.quantity,
+        "unit_price": lot.unit_price,
+        "origin_world": lot.origin_world,
+        "resource": lot.resource,
+        "unit": lot.unit,
+        "seller_world": lot.seller_world,
+        "contract_id": lot.contract_id,
+        "shipment_id": lot.shipment_id,
+    }
+
+
+def _public_contract(contract: PublicContract) -> dict[str, object]:
+    return {
+        "contract_id": contract.contract_id,
+        "buyer_id": contract.buyer_id,
+        "seller_id": contract.seller_id,
+        "batch_id": contract.batch_id,
+        "quantity": contract.quantity,
+        "unit_price": contract.unit_price,
+        "status": contract.status,
+        "resource": contract.resource,
+        "unit": contract.unit,
+    }
+
+
+def _public_shipment(shipment: PublicShipment) -> dict[str, object]:
+    return {
+        "shipment_id": shipment.shipment_id,
+        "contract_id": shipment.contract_id,
+        "origin": shipment.origin,
+        "destination": shipment.destination,
+        "batch_id": shipment.batch_id,
+        "quantity": shipment.quantity,
+        "status": shipment.status,
+        "departure_turn": shipment.departure_turn,
+        "arrival_turn": shipment.arrival_turn,
+        "resource": shipment.resource,
+        "unit": shipment.unit,
+    }
+
+
+def _public_trade_evidence(item: TradeEvidence) -> dict[str, object]:
+    return {
+        "sequence": item.sequence,
+        "turn": item.turn,
+        "kind": item.kind.value,
+        "message": item.message,
+        "world_id": item.world_id,
+        "asset_id": item.asset_id,
+        "batch_id": item.batch_id,
+        "contract_id": item.contract_id,
+        "shipment_id": item.shipment_id,
+        "finding_code": item.finding_code,
+        "source_id": item.source_id,
+        "report_id": item.report_id,
+        "observed_turn": item.observed_turn,
+        "upstream_source_id": item.upstream_source_id,
+        "upstream_report_id": item.upstream_report_id,
+        "method": item.method,
+        "operating_load": item.operating_load,
+        "measured_value": item.measured_value,
+        "measured_unit": item.measured_unit,
     }
 
 

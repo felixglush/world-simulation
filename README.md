@@ -7,15 +7,78 @@ Companion Page: https://chatgpt.com/space/page_fc5b19900a188191a26a38b452913a17
 Explore the [interactive architecture canvas](architecture/README.md): zoom through service boundaries, inspect backing code and state, and replay an adversarial run event by event.
 This flow applies to `jev+llm` mode. Jev assesses public events in batches; the captain chooses actions. The application routes alerts and classification failures to review, and validates proposals before execution. Action results return to Jev, with further actions scheduled for a later turn. The audit log also preserves private adversary activity and hidden world transitions; those records stay outside the crew AIs' inputs.
 
+## From one crew to world governors
+
+The first diagram follows the decision cycle for one station crew. The next diagram widens the view: each world has a governor with its own observations, objectives, and decision context. The expanded station governor shows where the original Captain/Jev flow fits within that local decision boundary. Other worlds can use different policies, created through the same facade.
+
+![Station Control worlds and their governors: the station crew decision flow expanded inside a local governor, with authoritative world and trade rules outside](docs/images/station-control-world-governors.png)
+
+The original ideas remain in place:
+
+| Original idea | Where it appears in the wider system |
+| --- | --- |
+| Public evidence guides decisions. | Each governor receives local observations and action results. Hidden causes enter its view only through observable symptoms and scoped findings. |
+| Jev classifies; the captain chooses interventions. | The expanded station crew retains classification, incident routing, monitoring, and captain review. Trade worlds use their configured governor policies. |
+| Python validates proposals and owns reality. | Authoritative world and trade rules enforce resources, funds, crew, and capacity before changing state. Contracts and shipments connect worlds through those rules. |
+| Scenarios and adversaries influence the world. | Scheduled events and validated disruptions remain outside the governor's decision boundary. Their observable effects return as evidence. |
+| Review separates evidence, decisions, and actual outcomes. | Station mission logs and trade ledgers and summaries support commander review and evaluation. Private world facts stay outside governor inputs. |
+
+Production, pricing, and shipment-specific investigations extend this cycle. A defective batch can cross worlds and fail later under load; the governor must investigate the resulting evidence, trace its source, and propose a remedy. The Python rules determine what that remedy actually changes.
+
 ## Purpose and current product
 
 Station Control tests how an AI crew keeps a space station operational when equipment fails or reports are misleading. Crew survival is the primary objective. Resource use, incident handling, and decision cost show how well the crew performs.
 
-The product simulates one station with six crew members and one life-support system. It has two oxygen sensors, three controller options, and an optional AI adversary. You can run individual scenarios or combine sabotage scenarios in one mission. A command-line interface lets you select models, save results, replay decisions, and run new comparisons.
+Core missions simulate a station with six crew members, one life-support system, two oxygen sensors, three controller options, and an optional AI adversary. Trade scenarios connect the station to suppliers and producing worlds. You can run individual scenarios or combine sabotage scenarios in one mission. A command-line interface lets you select models, save mission results, replay decisions, and run new comparisons.
 
 This document describes simulator version `0.3.2`, which adds full world auditing and public-event classification to the structured-evidence simulator. This simulator version is separate from the package version in `pyproject.toml`.
 
 Use the product to find a decision failure and understand its cause. Change one setting. Then test the change on missions that you did not use to select it. Keep results from the rules controller separate from evidence about live AI performance.
+
+## Multi-world trade, economy, and delayed deception
+
+Worlds and independent decision systems are created through `SimulationFacade`, with configurable inventories, credits, production recipes, pricing rules, resource targets, and reserves. Governors choose actions from their own public observations and market offers. The world engine validates proposals and owns the resulting state.
+
+Trade moves finite stock and credits through contracts, shipments, delivery, and settlement. Production turns resources into goods, and prices respond to available stock. A ledger accounts for purchases, revenue, production, consumption, samples, losses, and quarantine. Transport capacity and emergency reserves constrain decisions.
+
+Deception can have consequences long after an apparently successful repair:
+
+- Defective parts fail after use under particular operating conditions.
+- Stabilization stops an immediate fault while leaving residual damage.
+- Cargo arrives in the promised quantity but produces less usable oxygen.
+- Sensor drift gradually distorts reserve estimates.
+- Apparently corroborating reports repeat a shared source.
+
+An investigation governor tests equipment under relevant loads, calibrates sensors, assays cargo, traces report provenance, quarantines affected deliveries, and obtains replacements while preserving emergency credits. Assays consume samples, and inspections establish findings only under the conditions tested. Findings identify the relevant asset and shipment; hidden causes become discoverable through investigation. A clean sample from one delivery cannot certify another delivery with the same batch label.
+
+| Story | What it demonstrates |
+| --- | --- |
+| `supply_chain` | Defective parts, poor cargo quality, drift, and copied claims. |
+| `incomplete_repair` | Recovery followed by failure from residual damage. |
+| `resource_diversion` | Small purchases consume the budget needed for an emergency. |
+| `benign` | Sound supplies and repairs without false accusations. |
+
+```bash
+uv run --frozen python -m station_control trade --economy --turns 20
+uv run --frozen python -m station_control trade --deception supply_chain --turns 40
+uv run --frozen python -m station_control trade --deception resource_diversion --policy trust --turns 40
+```
+
+Deception stories use the `investigate` policy by default. Use `--policy trust` to compare against a deliberately unsafe purchase-and-repair sequence. Run for 40 turns to include investigation, replacement, and later recurrence checks. The `trade` command prints a JSON summary with public evidence, decisions, and ledger-based measures. Saved mission logs, replay, and rerun use the `run`, `replay`, and `rerun` commands described below.
+
+For an AI crew, select `--controller llm` for the captain or `--controller jev+llm` for Jev and the captain; `rules` remains the default. Live crew control requires a deception story with the `investigate` policy, an `OPENROUTER_API_KEY`, model IDs, a finite shared call budget, and a captain output-token limit. The summary records resolved model IDs and budget without the credential.
+
+Run from the repository root:
+
+```bash
+export OPENROUTER_API_KEY=...
+uv run --frozen python -m station_control trade --deception supply_chain \
+  --controller jev+llm --captain-model "<captain-model-id>" \
+  --jev-model typesafe/jev-1.13 --max-calls 120 \
+  --max-output-tokens-per-call 512 --turns 40
+```
+
+Facade-based callers can register the same providers with `create_decision_system("station", kind="crew", captain=..., dispatcher=..., history_limit=..., escalation_threshold=...)`. Crew decisions are available for the station world.
 
 ## Roles and access to information
 
@@ -201,7 +264,7 @@ Private context, reasoning, actions, rejections, and point use are saved separat
 
 | Setting | Options and defaults |
 | --- | --- |
-| CLI controller | `llm` by default; `jev+llm` or explicit offline `rules`. |
+| CLI controller | `llm` by default; `jev+llm` or explicit `rules`. |
 | Scenario | Original type, YAML preset, custom file, or YAML combination. Default is `normal`. |
 | Seed | Integer. Default 0. |
 | Duration | 1–336 turns. Default 336. |
@@ -219,7 +282,7 @@ All live roles use OpenRouter. Set `OPENROUTER_API_KEY` in the environment. Sele
 
 A live captain requires its model. `jev+llm` also requires a Jev model. `--adversary llm` requires an adversary model. Select captain and adversary models that support tool calls. Every live run requires explicit positive `--max-calls` and `--max-output-tokens-per-call` values.
 
-Enabled roles share the call limit. The output-token limit applies to the captain and adversary. Jev's SDK has no documented equivalent. Requests have no retries and use a 30-second timeout. These limits are not a dollar cap. Routine checks use fake providers. Live experiments require an explicit budget and recorded settings. `.env.example` is not loaded automatically.
+Enabled roles share the call limit. The output-token limit applies to the captain and adversary. Jev's SDK has no documented equivalent. Requests have no retries and use a 30-second timeout. These limits are not a dollar cap. Live experiments require an explicit budget and recorded settings. `.env.example` is not loaded automatically.
 
 Rerun retains the saved adversary mode and disruption allowance. Use `--adversary off` to disable it. New model choices come from current flags or environment values, not saved model IDs. Rerun uses the saved YAML definition even if its source files changed or were removed. A new seed selects timing windows again. To change spacing, select the source scenarios again.
 
@@ -241,13 +304,11 @@ Replay connects **what happened → what the crew could observe → what Jev jud
 
 For a controlled controller comparison, disable the adaptive adversary and keep the scenario definition and seed fixed. Adaptive runs test response to an opponent that reacts to current state. They do not provide identical external events across controllers.
 
-The documented inspection experiment remains an offline rules comparison. It uses development seeds 1 and 2, then separate test seeds 101 and 202. With no inspection slots, the misleading-report mission loses the crew. With one slot, the crew repairs the leak and survives 48 turns. These results do not measure live AI improvement.
-
 ## Product status and source documents
 
-Available features include the station simulation, original missions, 15 YAML presets, custom scenarios, parallel sabotage, the optional AI adversary, and per-run model selection. Saved logs support replay, rerun, and separate outcome measures.
+Available features include the station simulation, original missions, 15 YAML presets, custom scenarios, parallel sabotage, the optional AI adversary, and per-run model selection. Multi-world trade adds configurable governors, finite inventories, contracts and shipments, production, stock-based pricing, delayed physical consequences, and shipment-specific investigations. Saved station mission logs support replay, rerun, and separate outcome measures.
 
-Remaining work includes scenario answer keys, difficulty calibration, and live AI evaluation on separate test missions. Interactive player sabotage, graphical mission controls, custom generated adversary dialogue, and learned predictive world models remain future work. Offline tests do not establish live model compatibility or performance.
+Remaining work includes scenario answer keys, difficulty calibration, and live AI evaluation on separate test missions. Interactive player sabotage, graphical mission controls, custom generated adversary dialogue, and learned predictive world models remain future work.
 
 See [AGENTS.md](AGENTS.md) for setup, run commands, and development checks.
 
@@ -259,7 +320,6 @@ Implementation and operating references:
 - [World rules and action validation](https://github.com/felixglush/world-simulation/blob/43fefc3feae24f13d3a51dbd7e442c365a95812f/station_control/domain.py)
 - [Mission loop and simulator version](https://github.com/felixglush/world-simulation/blob/43fefc3feae24f13d3a51dbd7e442c365a95812f/station_control/application.py)
 - [Independent evaluation](https://github.com/felixglush/world-simulation/blob/43fefc3feae24f13d3a51dbd7e442c365a95812f/station_control/evaluation.py)
-- [Offline experiment](https://github.com/felixglush/world-simulation/blob/43fefc3feae24f13d3a51dbd7e442c365a95812f/docs/mvp-experiment.md)
 - [Verification guidance](https://github.com/felixglush/world-simulation/blob/43fefc3feae24f13d3a51dbd7e442c365a95812f/docs/verification.md)
 
 ## Future exploration of world models
