@@ -251,7 +251,7 @@ are pinned to the generator's Git revision; regenerate after committing runtime 
 so those links address the matching source. The bundled code is available offline.
 
 Use the repository-installed PR Lens guidance at `.agents/skills/pr-lens/SKILL.md` for
-source-backed walkthroughs; this explorer uses React Flow and runs locally.
+source-backed walkthroughs; this explorer uses React Flow and supports local and GitHub Pages viewing.
 See `architecture/README.md` for setup, generation, browser testing, and standalone builds.
 Verify with the generator's `--check`, then `npm run check`, `npm run build`, and `npm test`
 inside `architecture/`. Use `npm run format:check` for hand-maintained frontend files.
@@ -262,12 +262,12 @@ Stop the optional Vite development server with Ctrl-C when finished.
 The architecture UI uses Vercel AI Elements for source/JSON viewing, shadcn/ui
 (Radix) for inspector/replay controls, and Tailwind via the Vite plugin. Component
 sources live under `architecture/src/components`; registry configuration is in
-`architecture/components.json`. Preserve the offline Python/JSON-only Shiki setup,
+`architecture/components.json`. Preserve the offline bundled-language Shiki setup,
 source-file line offsets, keyboard tabs, and clipboard error feedback when updating
 components. Run the browser suite after changes to these interactions.
 
 When changing the adversary action catalog or decision event schema, update
-`decisionHighlight` in `architecture/src/model.ts` and its browser review tests.
+`decisionHighlight` in `architecture/src/projects/station-control/runtime.ts` and its browser review tests.
 Keep intent annotations separate from acceptance and world effects; unknown action
 types must remain unclassified, and a benign wait must not imply a safe world.
 
@@ -275,3 +275,17 @@ The architecture inspector's I/O tab derives input/output contracts from directe
 connections and generated Python field schemas. Update connection examples with
 contract changes. Keep illustrative examples separate from recorded AI inputs and
 outputs; logs may contain only partial requests or flattened result projections.
+
+Keep the architecture explorer reusable: shared UI/core must not import concrete
+project adapters or bundled JSON data. `main.tsx` is the composition root;
+`core/types.ts` defines the versioned document and normalized replay contracts.
+Keep Station Control event semantics in `projects/station-control/`. New projects
+supply metadata and optional replay adapters instead of adding project IDs to UI
+branches. Run `npm run check` for dependency boundaries and `npm test` for both the
+Station Control and independent/static examples. See `architecture/docs/modularity.md`.
+
+GitHub Pages deploys only `architecture/dist` through
+`.github/workflows/architecture-pages.yml`. Keep README canvas/example links current.
+Verify `?run=<id>` links remain paused and navigable; never bundle private logs or
+credentials. PR builds validate without deploying. See `architecture/README.md`
+for the required GitHub Actions Pages setting and temporary bootstrap branch.

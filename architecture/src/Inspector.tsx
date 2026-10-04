@@ -13,17 +13,8 @@ import {
   Layers3,
   X,
 } from "lucide-react";
-import {
-  byId,
-  componentSnapshot,
-  format,
-  kindLabels,
-  model,
-  sourceFor,
-  sourceUrl,
-  worldAt,
-} from "./model";
-import type { DemoRun, RunRecord, SourceRef } from "./model";
+import { useProject, format } from "./core/project";
+import type { DemoRun, RunRecord, SourceRef } from "./core/project";
 export type Selection = { kind: "component" | "message"; id: string };
 export type InspectorTab = "overview" | "code" | "state" | "event" | "io";
 interface Props {
@@ -32,7 +23,7 @@ interface Props {
   setTab: (tab: InspectorTab) => void;
   onClose: () => void;
   onSelect: (kind: "component" | "message", id: string) => void;
-  run: DemoRun;
+  run?: DemoRun;
   events: RunRecord[];
   cursor: number;
   replay: boolean;
@@ -48,6 +39,8 @@ export function Inspector({
   cursor,
   replay,
 }: Props) {
+  const { project, model, byId, kindLabels, sourceFor, sourceUrl } =
+    useProject();
   const node = selected.kind === "component" ? byId[selected.id] : null;
   const edge =
     selected.kind === "message"
@@ -60,14 +53,14 @@ export function Inspector({
     setSourceChoice(0);
     setExample(false);
   }, [selected.id]);
-  const source = sourceFor(refs[Math.min(sourceChoice, refs.length - 1)]);
-  const snapshot = node
-    ? componentSnapshot(node.id, run, events, cursor)
-    : null;
-  const previous =
-    node && ["world", "adversary-validation"].includes(node.id)
-      ? worldAt(events, cursor - 1)
-      : {};
+  const source = refs.length
+    ? sourceFor(refs[Math.min(sourceChoice, refs.length - 1)])
+    : undefined;
+  const snapshot =
+    node && run && project.replay
+      ? project.replay.snapshot(node.id, run, cursor)
+      : { label: "No recorded state available.", value: null };
+  const previous = snapshot.previous ?? {};
   const connections = node
     ? model.connections.filter(
         (item) => item.source === node.id || item.target === node.id,
@@ -133,7 +126,7 @@ export function Inspector({
             <InputOutput
               componentId={node?.id}
               connection={edge ?? undefined}
-              events={events}
+              run={run}
               cursor={cursor}
               replay={replay}
               onSelect={onSelect}
@@ -166,7 +159,12 @@ export function Inspector({
                       key={item.id}
                       onClick={() => onSelect("message", item.id)}
                     >
-                      <span className={`message-dot ${item.kind}`} />
+                      <span
+                        className="message-dot"
+                        style={{
+                          background: model.messageKinds[item.kind].color,
+                        }}
+                      />
                       <span>
                         <strong>{item.label}</strong>
                         <small>
@@ -231,50 +229,53 @@ export function Inspector({
                 <SourceLinks refs={refs} />
               </>
             ))}
-          {tab === "code" && (
-            <>
-              <p className="muted">
-                Actual Python source bundled from the repository. Select a
-                definition to inspect its implementation.
-              </p>
-              <label className="field-label">
-                Definition
-                <select
-                  value={sourceChoice}
-                  onChange={(event) =>
-                    setSourceChoice(Number(event.target.value))
-                  }
+          {tab === "code" &&
+            (source ? (
+              <>
+                <p className="muted">
+                  Actual source bundled from the repository. Select a definition
+                  to inspect its implementation.
+                </p>
+                <label className="field-label">
+                  Definition
+                  <select
+                    value={sourceChoice}
+                    onChange={(event) =>
+                      setSourceChoice(Number(event.target.value))
+                    }
+                  >
+                    {refs.map((ref, index) => (
+                      <option key={ref.symbol} value={index}>
+                        {ref.symbol}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <a
+                  className="source-file"
+                  href={sourceUrl(source)}
+                  target="_blank"
+                  rel="noreferrer"
                 >
-                  {refs.map((ref, index) => (
-                    <option key={ref.symbol} value={index}>
-                      {ref.symbol}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <a
-                className="source-file"
-                href={sourceUrl(source)}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {source.path}
-                <ExternalLink size={14} />
-              </a>
-              <SourceBlock
-                className="code-block source-code"
-                aria-label={`Source code for ${source.symbol}`}
-                code={source.code}
-                language="python"
-                title={`${source.symbol} · lines ${source.startLine}–${source.endLine}`}
-                style={
-                  {
-                    "--source-line-offset": source.startLine - 1,
-                  } as CSSProperties
-                }
-              />
-            </>
-          )}
+                  {source.path}
+                  <ExternalLink size={14} />
+                </a>
+                <SourceBlock
+                  className="code-block source-code"
+                  aria-label={`Source code for ${source.symbol}`}
+                  code={source.code}
+                  language={source.language}
+                  title={`${source.symbol} · lines ${source.startLine}–${source.endLine}`}
+                  style={
+                    {
+                      "--source-line-offset": source.startLine - 1,
+                    } as CSSProperties
+                  }
+                />
+              </>
+            ) : (
+              <p>No source definition is indexed for this component.</p>
+            ))}
           {tab === "state" && (
             <>
               <div className="ownership">
@@ -289,12 +290,14 @@ export function Inspector({
                   <h3>
                     {replay
                       ? `Recorded state · event ${events[cursor]?.sequence}`
-                      : "Demo state · initial event"}
+                      : run
+                        ? "Demo state · initial event"
+                        : "Recorded state unavailable"}
                   </h3>
                   <p className="muted">{snapshot!.label}</p>
-                  {["world", "adversary-validation"].includes(node.id) ? (
+                  {snapshot.fields !== undefined ? (
                     <div className="state-table">
-                      {Object.entries(snapshot!.value ?? {}).map(
+                      {Object.entries(snapshot.fields ?? {}).map(
                         ([key, value]) => {
                           const changed =
                             cursor > 0 &&
@@ -351,11 +354,11 @@ export function Inspector({
           {tab === "event" && (
             <>
               <p className="muted">
-                Exact selected audit event. Private fields are available for
-                review here and are excluded from crew model inputs.
+                Exact selected recorded event. Consult the project adapter for
+                visibility and redaction rules.
               </p>
               <SourceBlock
-                code={format(events[cursor])}
+                code={format(events[cursor]?.raw)}
                 language="json"
                 title="Recorded audit event"
               />
@@ -367,6 +370,7 @@ export function Inspector({
   );
 }
 function SourceLinks({ refs }: { refs: SourceRef[] }) {
+  const { sourceFor, sourceUrl } = useProject();
   return (
     <div className="source-links">
       {refs.map((ref) => (

@@ -127,7 +127,7 @@ test("component exposes actual source and recorded state through a complete run"
   await inspector.getByRole("tab", { name: "State", exact: true }).click();
   const progress = page.getByRole("slider", { name: "Run progress" });
   await progress.fill((await progress.getAttribute("max")) as string);
-  await expect(page.locator(".world-flags")).toContainText("No active leak");
+  await expect(page.locator(".run-flags")).toContainText("No active leak");
   await expect(page.getByTestId("metric-parts")).toHaveText("1");
   await expect(inspector.locator(".state-table")).toContainText(
     "repairs_completed",

@@ -9,6 +9,36 @@ logical boundaries inside one process; only model requests cross an HTTPS bounda
 
 ## Open the explorer
 
+[Hosted canvas](https://felixglush.github.io/world-simulation/) ·
+[Example flow](https://felixglush.github.io/world-simulation/?run=demo_deception)
+
+The example opens a paused recorded run. Use **Play run**, **Next step**, or
+**Next decision** to follow adversary actions, Jev classifications, captain decisions,
+and world changes. Demo AI responses are scripted; no live simulator or model API
+starts. Code, state, schemas, and example logs are bundled. Imported logs stay in
+browser memory. Hosted links require the initial Pages setup below.
+
+### GitHub Pages
+
+Select **Settings → Pages → Build and deployment → Source → GitHub Actions**.
+The integration preparing this change could not enable Pages (GitHub HTTP 403).
+Then run **Actions → Architecture canvas → Run workflow**. Before this stack merges,
+the workflow runs on pushes to `codex/architecture-github-pages`; rerun its latest
+workflow after enabling Pages. If the `github-pages` environment restricts deployments,
+allow that branch. After merging, use `main` and remove the temporary feature branch
+from the workflow triggers, deploy condition, and environment rules.
+
+The workflow checks, tests, and builds before deployment. Pull requests only validate
+and upload the downloadable `architecture-offline` HTML artifact; they never deploy.
+Changes to `architecture/` on `main` automatically update the site. The artifact can
+also be opened without a server. Only bundled source and scripted fixtures are
+published; local `runs/` and credentials are excluded.
+
+`?run=<bundled-run-id>` opens a paused replay; unknown IDs show the overview. This
+works with any project adapter and can be combined with `?project=example&run=<id>`.
+
+### Local development
+
 Use Node 24 and npm 11:
 
 ```bash
@@ -70,7 +100,7 @@ This is a recorded-run player, not a second implementation of the simulator.
 ## Maintain and verify
 
 `src/model.json` owns the human-authored components, logical services, views, message
-contracts, and examples. `src/model.ts` projects audit records into display state.
+contracts, and examples. `src/projects/station-control/` projects audit records into generic display state.
 `Graph.tsx`, `Inspector.tsx`, and `RunPlayer.tsx` render those models independently.
 
 When Python interfaces or behavior change, update the model and run from the repository
@@ -116,8 +146,18 @@ navigation without advancing the run player.
 Install additional components selectively with `npx shadcn@latest add <component>`.
 The AI Elements code block was installed from
 `https://elements.ai-sdk.dev/api/registry/code-block.json`. Local adaptations use
-Shiki's JavaScript engine with bundled Python/JSON grammars and two GitHub themes,
+Shiki's JavaScript engine with bundled Python/JSON/JavaScript/TypeScript grammars and two GitHub themes,
 and key the token cache by full source text. Preserve these when refreshing from
 the registry: importing the full language loader inflates the offline artifact.
 `src/ui.css` defines shared design tokens and CSS layer ordering; the existing
 light diagram style remains in `src/styles.css`. No Vercel deployment is required.
+
+## Reuse in another codebase
+
+See the [modularity review and extension contract](docs/modularity.md).
+`App` accepts an `ArchitectureProject` rather than importing project data. Shared
+canvas, inspector, I/O, and playback components depend on `src/core/types.ts`.
+A project supplies a versioned architecture document and an optional replay adapter.
+The TypeScript job-queue example at `/?project=example` exercises the same UI;
+`/?project=static-example` demonstrates operation without any runtime recordings.
+`npm run check` enforces the shared UI → contracts dependency boundary.
