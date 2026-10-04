@@ -23,6 +23,7 @@ import {
   byId,
   demoRuns,
   eventTrace,
+  decisionHighlight,
   eventsOf,
   kindLabels,
   model,
@@ -389,6 +390,7 @@ function Explorer() {
             follow={follow}
             selected={selected}
             activeNodes={trace?.nodes ?? []}
+            decision={replay ? decisionHighlight(events[cursor]) : null}
             activeEdges={trace?.edges ?? []}
             onSelect={inspect}
             onClear={clear}

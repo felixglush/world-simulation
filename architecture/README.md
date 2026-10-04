@@ -36,10 +36,25 @@ require a connection; browsing the bundled code does not.
 - Click a component for its responsibilities and connections. **Code** opens actual
   Python definitions with line numbers; **State** shows state ownership, schemas, and
   values at the selected replay event. Click the code icon for direct source access.
+- The **I/O** tab groups incoming and outgoing message contracts with Python field
+  types, source definitions, and illustrative example payloads. For a connection,
+  it explicitly shows output from its sender → input to its receiver. Contracts
+  cover all configured modes; examples show selected fields rather than complete
+  serialized instances. AI actor panels also show the latest recorded input and
+  decision at or before the replay cursor. Saved evidence may omit request fields,
+  and persisted decisions may flatten result types or include audit identifiers.
 - Click a connection for its contract fields, payload example, timing, and failure policy.
 - Choose **Walk through a turn** to follow adversarial input, world changes, public
   events, Jev classification, captain proposals, validation, repair, and closure.
   Play, step, or scrub; **Follow event** moves the camera along the active path.
+- Actor decisions get labeled canvas badges, colored journal entries, and a review
+  banner: red for disruptive adversary choices, green for benign waits, blue for
+  captain decisions, and purple for Jev assessments. Accepted/rejected outcomes are
+  shown separately; unknown action types remain unclassified. These are reviewer
+  annotations based on recorded action types, not Jev verdicts or proof of impact.
+- Use **Previous/Next decision**, **Decisions only**, or **Pause at decisions** to
+  focus a review. Normal playback gives decisions twice the viewing time of other
+  events. In the current action catalog, the adversary's benign choice is `wait`.
 - Load a completed simulator 0.3.2+ schema-1 JSONL run to inspect your own data.
   Files stay in the browser; there is no upload or model request. The 5 MB limit
   keeps this small documentation viewer responsive.

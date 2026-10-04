@@ -148,6 +148,55 @@ export function worldAt(
   return state;
 }
 
+export interface DecisionHighlight {
+  actor: "adversary" | "captain" | "jev";
+  tone: "malicious" | "benign" | "unknown" | "captain" | "jev";
+  label: string;
+  outcome: string;
+}
+
+// Reviewer annotation of recorded choices, never a replacement for Jev's assessment.
+export function decisionHighlight(event?: RunRecord): DecisionHighlight | null {
+  if (event?.event_type === "adversary_decision") {
+    const kind = event.decision?.action?.kind;
+    const malicious = [
+      "start_silent_leak",
+      "mask_sensor",
+      "delay_pending_delivery",
+      "deceptive_report",
+    ].includes(kind);
+    const tone =
+      kind === "wait" ? "benign" : malicious ? "malicious" : "unknown";
+    const accepted = event.consequence?.accepted;
+    return {
+      actor: "adversary",
+      tone,
+      label:
+        tone === "benign"
+          ? "Adversary · Benign wait"
+          : tone === "malicious"
+            ? "Adversary · Malicious action"
+            : "Adversary · Unclassified action",
+      outcome: `${String(kind ?? "Unknown action")} · ${accepted === true ? "accepted" : accepted === false ? "rejected" : "outcome not recorded"}`,
+    };
+  }
+  if (event?.event_type === "dispatch")
+    return {
+      actor: "jev",
+      tone: "jev",
+      label: "Jev · Assessment",
+      outcome: `Urgency ${event.decision?.urgency ?? "unknown"}/100 · diagnosis ${event.decision?.diagnosis_supported ?? "unknown"}`,
+    };
+  if (event?.event_type === "captain_decision")
+    return {
+      actor: "captain",
+      tone: "captain",
+      label: "Captain · Decision",
+      outcome: `${String(event.decision?.kind ?? "Unknown action")} · proposed; validation follows`,
+    };
+  return null;
+}
+
 export function eventTrace(event?: RunRecord) {
   if (!event)
     return {
