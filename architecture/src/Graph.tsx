@@ -334,10 +334,16 @@ export function Graph({
     }
     const focus = focusNodes.size > 0;
     const graphNodes: Node[] = [];
+    const usedIds = new Set(components.map((c) => c.id));
+    const internalId = (candidate: string) => {
+      while (usedIds.has(candidate)) candidate = `_${candidate}`;
+      usedIds.add(candidate);
+      return candidate;
+    };
     services.forEach((service) => {
       const members = components.filter((node) => node.service === service.id);
       graphNodes.push({
-        id: `boundary-${service.id}`,
+        id: internalId(`boundary-${service.id}`),
         type: "boundary",
         position: {
           x: layout.boundaries[service.id].x,
@@ -402,7 +408,7 @@ export function Graph({
       };
     });
     graphNodes.push({
-      id: "routing-extent",
+      id: internalId("routing-extent"),
       type: "boundary",
       position: { x: layout.bounds.width, y: layout.bounds.height },
       data: { title: "", subtitle: "", color: "transparent", external: false },
