@@ -1221,18 +1221,18 @@ p {
   white-space: pre;
   flex: 1;
 }
-.world-metrics {
+.run-metrics {
   width: 272px;
   flex-shrink: 0;
   border-left: 1px solid #e3ebf1;
   padding: 0 17px 9px;
   overflow: auto;
 }
-.world-metrics .journal-heading {
+.run-metrics .journal-heading {
   padding: 0;
   height: 34px;
 }
-.world-metrics .journal-heading span {
+.run-metrics .journal-heading span {
   font-size: 8px;
   letter-spacing: 0;
   font-weight: 400;
@@ -1264,12 +1264,12 @@ p {
 .up {
   color: #229778;
 }
-.world-flags {
+.run-flags {
   display: flex;
   gap: 7px;
   margin: 8px 0;
 }
-.world-flags span {
+.run-flags span {
   font-size: 8px;
   border-radius: 3px;
   padding: 3px 5px;
@@ -1282,7 +1282,7 @@ p {
   color: #b9853b;
   background: #fff4e5;
 }
-.world-metrics > small {
+.run-metrics > small {
   font-size: 8px;
   color: #9aacba;
   line-height: 1.5;
@@ -1379,7 +1379,7 @@ p {
   .legend-note {
     display: none !important;
   }
-  .world-metrics {
+  .run-metrics {
     width: 210px;
   }
   .event-journal {
@@ -1593,15 +1593,15 @@ p {
     gap: 3px;
     margin-top: 9px;
   }
-  .world-metrics {
+  .run-metrics {
     width: 125px;
     padding: 0 10px;
   }
-  .world-metrics .journal-heading {
+  .run-metrics .journal-heading {
     font-size: 7px;
     letter-spacing: 0.6px;
   }
-  .world-metrics .journal-heading span {
+  .run-metrics .journal-heading span {
     display: none;
   }
   .metric {
@@ -1612,11 +1612,11 @@ p {
     font-size: 8px;
     min-width: 0;
   }
-  .world-flags {
+  .run-flags {
     flex-wrap: wrap;
     gap: 3px;
   }
-  .world-metrics > small {
+  .run-metrics > small {
     font-size: 7px;
   }
   .transport {
@@ -1671,26 +1671,6 @@ p {
 }
 
 /* Decision annotations are review aids, separate from public/private visibility. */
-[data-decision="malicious"] {
-  --decision-color: #b33e32;
-  --decision-bg: #fff0ec;
-}
-[data-decision="benign"] {
-  --decision-color: #20754a;
-  --decision-bg: #edf8f0;
-}
-[data-decision="unknown"] {
-  --decision-color: #756342;
-  --decision-bg: #f7f3e9;
-}
-[data-decision="captain"] {
-  --decision-color: #315aba;
-  --decision-bg: #eef3ff;
-}
-[data-decision="jev"] {
-  --decision-color: #7950ad;
-  --decision-bg: #f6efff;
-}
 .component-card[data-decision] {
   outline: 3px solid var(--decision-color);
   box-shadow: 0 0 0 8px var(--decision-bg);

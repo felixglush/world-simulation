@@ -21,12 +21,14 @@ import {
   useRef,
   useState,
 } from "react";
-import type { BundledLanguage, HighlighterCore, ThemedToken } from "shiki";
+import type { HighlighterCore, ThemedToken } from "shiki";
 // Bundle only the grammars used by the offline explorer; no runtime fetches.
 import { createHighlighterCore } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import python from "shiki/langs/python.mjs";
 import json from "shiki/langs/json.mjs";
+import typescript from "shiki/langs/typescript.mjs";
+import javascript from "shiki/langs/javascript.mjs";
 import light from "shiki/themes/github-light.mjs";
 import dark from "shiki/themes/github-dark.mjs";
 
@@ -111,7 +113,7 @@ const LineSpan = ({
 // Types
 type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   code: string;
-  language: BundledLanguage;
+  language: string;
   showLineNumbers?: boolean;
 };
 
@@ -139,20 +141,18 @@ const tokensCache = new Map<string, TokenizedCode>();
 // Subscribers for async token updates
 const subscribers = new Map<string, Set<(result: TokenizedCode) => void>>();
 
-const getTokensCacheKey = (code: string, language: BundledLanguage) => {
+const getTokensCacheKey = (code: string, language: string) => {
   return `${language}:${code}`;
 };
 
-const getHighlighter = (
-  language: BundledLanguage,
-): Promise<HighlighterCore> => {
+const getHighlighter = (language: string): Promise<HighlighterCore> => {
   const cached = highlighterCache.get(language);
   if (cached) {
     return cached;
   }
 
   const highlighterPromise = createHighlighterCore({
-    langs: [python, json],
+    langs: [python, json, typescript, javascript],
     themes: [light, dark],
     engine: createJavaScriptRegexEngine(),
   });
@@ -180,7 +180,7 @@ const createRawTokens = (code: string): TokenizedCode => ({
 // Synchronous highlight with callback for async results
 export const highlightCode = (
   code: string,
-  language: BundledLanguage,
+  language: string,
   // oxlint-disable-next-line eslint-plugin-promise(prefer-await-to-callbacks)
   callback?: (result: TokenizedCode) => void,
 ): TokenizedCode | null => {
@@ -375,7 +375,7 @@ export const CodeBlockContent = ({
   showLineNumbers = false,
 }: {
   code: string;
-  language: BundledLanguage;
+  language: string;
   showLineNumbers?: boolean;
 }) => {
   // Memoized raw tokens for immediate display

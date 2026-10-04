@@ -1,36 +1,10 @@
-import rawModel from "./model.json";
-import rawSources from "./source-index.json";
-import rawRuns from "./demo-runs.json";
+import rawModel from "../../model.json";
+import rawSources from "../../source-index.json";
+import rawRuns from "../../demo-runs.json";
 
 export type Mode = "jev+llm" | "llm" | "rules";
 export type MessageKind = "public" | "command" | "private" | "audit";
-export interface SourceRef {
-  path: string;
-  symbol: string;
-}
-export interface Component {
-  id: string;
-  title: string;
-  service: string;
-  icon: string;
-  summary: string;
-  responsibilities: string[];
-  sources: SourceRef[];
-  state: string;
-  stateTypes: string[];
-}
-export interface Connection {
-  id: string;
-  source: string;
-  target: string;
-  label: string;
-  kind: MessageKind;
-  contract: string;
-  description: string;
-  example: unknown;
-  when: string;
-  failure: string;
-}
+import type { Component, Connection, SourceRef } from "../../core/types";
 export interface Source extends SourceRef {
   startLine: number;
   endLine: number;
@@ -50,9 +24,6 @@ export const sourceIndex = rawSources as {
   simulatorVersion: string;
   sources: Record<string, Source>;
 };
-export const byId = Object.fromEntries(
-  model.components.map((node) => [node.id, node]),
-);
 export const sourceFor = (ref: SourceRef) =>
   sourceIndex.sources[`${ref.path}:${ref.symbol}`];
 export const sourceUrl = (source: Source) =>
@@ -98,30 +69,6 @@ export const demoRuns = rawRuns as unknown as DemoRun[];
 export const eventsOf = (run: DemoRun) =>
   run.records.filter((record) => record.record_type === "event");
 export const format = (value: unknown) => JSON.stringify(value, null, 2) ?? "—";
-
-export function visibleComponents(view: string, mode: Mode) {
-  const ids = model.views.find((item) => item.id === view)!.nodes;
-  return model.components.filter(
-    (node) =>
-      ids.includes(node.id) &&
-      !(node.id === "jev" && mode !== "jev+llm") &&
-      !(node.id === "captain" && mode === "rules") &&
-      !(node.id === "rules" && mode !== "rules"),
-  );
-}
-export function visibleConnections(
-  ids: string[],
-  mode: Mode,
-  privateFlows: boolean,
-) {
-  return model.connections.filter(
-    (edge) =>
-      ids.includes(edge.source) &&
-      ids.includes(edge.target) &&
-      (privateFlows || edge.kind !== "private") &&
-      !(edge.id === "direct-routing" && mode === "jev+llm"),
-  );
-}
 
 const worldFields = new Set(
   sourceFor(model.contracts.StationState).fields.map((field) => field.name),
