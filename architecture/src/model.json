@@ -1175,25 +1175,28 @@
   },
   "views": [
     {
-      "id": "overview",
-      "title": "System map",
-      "description": "The main README components, grouped by ownership.",
+      "id": "all",
+      "title": "Everything",
+      "description": "Follow the connections. Open any component to look inside.",
       "nodes": [
         "commander",
         "scenario",
-        "world",
+        "review",
         "adversary-validation",
+        "world",
+        "loop",
         "events",
         "routing",
-        "checks",
         "monitor",
+        "checks",
         "adversary",
         "jev",
         "captain",
         "rules",
+        "budget",
         "audit",
         "evaluation",
-        "review"
+        "api"
       ]
     },
     {
@@ -1226,7 +1229,7 @@
     },
     {
       "id": "audit",
-      "title": "Audit & replay",
+      "title": "Logging & evaluation",
       "description": "A full record of ordinary activity, private disruptions and outcomes.",
       "nodes": [
         "world",
@@ -1236,31 +1239,6 @@
         "audit",
         "evaluation",
         "review"
-      ]
-    },
-    {
-      "id": "all",
-      "title": "All components",
-      "description": "Logical boundaries plus SDK adapters, shared budget and external API.",
-      "nodes": [
-        "commander",
-        "scenario",
-        "review",
-        "adversary-validation",
-        "world",
-        "loop",
-        "events",
-        "routing",
-        "monitor",
-        "checks",
-        "adversary",
-        "jev",
-        "captain",
-        "rules",
-        "budget",
-        "audit",
-        "evaluation",
-        "api"
       ]
     }
   ]

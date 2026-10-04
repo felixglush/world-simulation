@@ -9,6 +9,7 @@ test("inspect a component and follow its message contract", async ({
   await expect(
     page.getByRole("heading", { name: "Architecture explorer" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Browse components" }).click();
   await page
     .getByRole("button", { name: "Inspect Jev classifier", exact: true })
     .click();
@@ -29,6 +30,7 @@ test("search focuses components across views and handles empty results", async (
   page,
 }) => {
   await page.goto("/");
+  await page.getByRole("button", { name: "Browse components" }).click();
   await page
     .getByRole("searchbox", { name: "Find a component or message" })
     .fill("RunLogWriter");
@@ -38,6 +40,7 @@ test("search focuses components across views and handles empty results", async (
   await expect(
     page.getByRole("complementary", { name: "Inspector" }),
   ).toContainText("RunLogWriter");
+  await page.getByRole("button", { name: "Browse components" }).click();
   await page.getByRole("searchbox").fill("no-such-component");
   await expect(
     page.getByText("No matching components or messages."),
@@ -48,6 +51,7 @@ test("controller modes and private-flow toggle reflect the runtime", async ({
   page,
 }) => {
   await page.goto("/");
+  await page.getByText("Display", { exact: true }).click();
   await page
     .getByRole("combobox", { name: "Controller mode" })
     .selectOption("rules");
@@ -59,11 +63,13 @@ test("controller modes and private-flow toggle reflect the runtime", async ({
     .getByRole("combobox", { name: "Controller mode" })
     .selectOption("jev+llm");
   await expect(page.locator('.react-flow__node[data-id="jev"]')).toBeVisible();
-  await page.getByRole("button", { name: "System map", exact: true }).click();
+  await page.getByRole("button", { name: "Everything", exact: true }).click();
   await expect(
     page.locator('.react-flow__edge[data-id="adversary-proposal"]'),
   ).toHaveCount(1);
+  await page.getByRole("checkbox", { name: "Message labels" }).check();
   await page.getByRole("checkbox", { name: "Show private flows" }).uncheck();
+  await page.getByText("Display", { exact: true }).click();
   await expect(
     page.locator('.react-flow__edge[data-id="adversary-proposal"]'),
   ).toHaveCount(0);
@@ -118,6 +124,10 @@ test("component exposes actual source and recorded state through a complete run"
   await page.goto("/");
   await page.getByRole("button", { name: "Walk through a turn" }).click();
   const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await page
+    .getByRole("group", { name: "Component World engine", exact: true })
+    .click();
+  await inspector.getByRole("tab", { name: "State", exact: true }).click();
   await expect(inspector).toContainText("Authoritative world state");
   await expect(inspector.locator(".state-table")).toContainText("oxygen");
   await inspector.getByRole("tab", { name: "Code", exact: true }).click();
@@ -190,6 +200,7 @@ test("standalone HTML works offline without a development server", async ({
   await expect(
     page.getByRole("heading", { name: "Architecture explorer" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Browse components" }).click();
   await page
     .getByRole("button", { name: "Inspect Jev classifier", exact: true })
     .click();
@@ -210,6 +221,9 @@ test("inspector supports keyboard tabs, highlighted source, and copying the defi
   const progress = page.getByRole("slider", { name: "Run progress" });
   const before = await progress.inputValue();
   const inspector = page.getByRole("complementary", { name: "Inspector" });
+  await page
+    .getByRole("group", { name: "Component World engine", exact: true })
+    .click();
   await inspector.getByRole("tab", { name: "Overview", exact: true }).click();
   await page.keyboard.press("ArrowRight");
   await expect(
@@ -268,6 +282,9 @@ test("decision review highlights actors, distinguishes waits, and pauses at asse
   await expect(page.locator(".decision-spotlight")).toContainText(
     "Benign wait",
   );
+  await page
+    .getByRole("button", { name: "Event journal", exact: true })
+    .click();
   await page
     .getByRole("combobox", { name: "Event filter" })
     .selectOption("decisions");
@@ -332,6 +349,7 @@ test("component I/O shows directional schemas, examples, and cursor-bounded reco
   const run = JSON.parse(readFileSync("src/demo-runs.json", "utf8"))[0];
   const events = run.records.filter((r: any) => r.record_type === "event");
   await page.goto("/");
+  await page.getByRole("button", { name: "Browse components" }).click();
   await page
     .getByRole("button", { name: "Inspect Jev classifier", exact: true })
     .click();
@@ -356,6 +374,7 @@ test("component I/O shows directional schemas, examples, and cursor-bounded reco
     '"urgency": 75',
   );
   await page.getByRole("button", { name: "Walk through a turn" }).click();
+  await page.getByRole("button", { name: "Browse components" }).click();
   await page
     .getByRole("button", { name: "Inspect Jev classifier", exact: true })
     .click();

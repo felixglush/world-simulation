@@ -13,6 +13,8 @@ export interface Source extends SourceRef {
   fields: { name: string; type: string }[];
 }
 export interface Component {
+  /** Optional supporting infrastructure, revealed by the detail toggle or inspection. */
+  detail?: "implementation";
   id: string;
   title: string;
   service: string;

@@ -13,6 +13,7 @@ test("the same explorer renders a TypeScript job pipeline and its replay", async
   await expect(page.locator('.react-flow__node[data-id="world"]')).toHaveCount(
     0,
   );
+  await page.getByRole("button", { name: "Browse components" }).click();
   await page
     .getByRole("button", { name: "Inspect Worker", exact: true })
     .click();
@@ -70,11 +71,9 @@ test("static projects work without recorded runs or a runtime adapter", async ({
 }) => {
   await page.goto("/?project=static-example");
   await expect(
-    page.getByRole("button", { name: "Run replay", exact: true }),
-  ).toBeDisabled();
-  await expect(
     page.getByRole("button", { name: "No recorded runs" }),
   ).toBeDisabled();
+  await page.getByRole("button", { name: "Browse components" }).click();
   await page
     .getByRole("button", { name: "Inspect Worker", exact: true })
     .click();

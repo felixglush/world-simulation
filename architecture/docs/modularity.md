@@ -4,14 +4,14 @@ The initial explorer had separate React files, but they shared a Station Control
 singleton and interpreted its event schema in the views. Splitting files did not
 make them reusable. This refactor makes the project-specific boundary explicit.
 
-| Coupling found | Resulting boundary |
-| --- | --- |
-| UI imports bundled Station Control JSON through `model.ts` | `App` accepts an `ArchitectureProject`; a provider scopes the document and indexes to that mounted explorer. |
-| Actor IDs, controller mode strings, hidden edges, colors, and default views in UI logic | Components/connections declare mode membership; project metadata supplies modes, colors, labels, and defaults. |
-| Python language and one GitHub repository assumed by the inspector | Each source declares its language and optional source URL. Unindexed components show an explicit empty state. |
-| World-state deltas, oxygen metrics, action classification, and JSONL envelopes interpreted in UI | A `ReplayAdapter` normalizes records and supplies snapshots, metrics, I/O pairs, import, and export. |
-| Captain/Jev/adversary event lookup inside the I/O view | `recordedIO` owns project-specific selection and provenance. |
-| A demo run required merely to render the canvas | Replay is optional. Static projects still expose components, schemas, source, and state ownership. |
+| Coupling found                                                                                   | Resulting boundary                                                                                             |
+| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| UI imports bundled Station Control JSON through `model.ts`                                       | `App` accepts an `ArchitectureProject`; a provider scopes the document and indexes to that mounted explorer.   |
+| Actor IDs, controller mode strings, hidden edges, colors, and default views in UI logic          | Components/connections declare mode membership; project metadata supplies modes, colors, labels, and defaults. |
+| Python language and one GitHub repository assumed by the inspector                               | Each source declares its language and optional source URL. Unindexed components show an explicit empty state.  |
+| World-state deltas, oxygen metrics, action classification, and JSONL envelopes interpreted in UI | A `ReplayAdapter` normalizes records and supplies snapshots, metrics, I/O pairs, import, and export.           |
+| Captain/Jev/adversary event lookup inside the I/O view                                           | `recordedIO` owns project-specific selection and provenance.                                                   |
+| A demo run required merely to render the canvas                                                  | Replay is optional. Static projects still expose components, schemas, source, and state ownership.             |
 
 ## Dependency direction
 
@@ -88,3 +88,27 @@ Project adapters are an application of [Adapter and Strategy](https://www.helloi
 Station Control and the job queue expose one renderer-facing interface while owning
 their own event semantics. Typed contracts preserve [encapsulation](https://www.hellointerview.com/learn/low-level-design/in-a-hurry/oop-concepts)
 of project-specific state interpretation.
+
+## Progressive detail and future code comparison
+
+The presentation now separates `CanvasToolbar` (focus/display), `ComponentBrowser`
+(search/navigation), `Graph` (rendering), and `RunPlayer` (recorded execution).
+Supporting infrastructure is optional metadata (`Component.detail`), independent
+of focus presets and actor IDs. Following a replay or selecting a component reveals
+its nodes without changing the focus preset. No PR Lens runtime is required.
+
+The attribute-rich PR Lens example suggests a useful next level of inspection:
+
+- Keep the main canvas at component/service level.
+- Expand a selected component into source-file and symbol detail: language, path,
+  class/function/component kind, methods, fields, signatures, and return types.
+- Add code relationships such as calls/implements/reads/writes only when an adapter
+  provides evidence. Current message-contract edges are not an extracted call graph.
+- Reserve Added/Modified/Removed, line counts, and signature-change annotations for
+  a separate comparison context backed by actual base/head revisions. Current
+  source snapshots and replay events cannot establish code-change status.
+
+The current inspector already exposes source paths, definitions, and field types.
+Symbol/member classification and comparison metadata are future adapter capabilities,
+not inferred badges or extra permanent content on every card. Keep runtime decision
+colors distinct from future Git change colors.

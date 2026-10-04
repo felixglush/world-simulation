@@ -289,3 +289,23 @@ GitHub Pages deploys only `architecture/dist` through
 Verify `?run=<id>` links remain paused and navigable; never bundle private logs or
 credentials. PR builds validate without deploying. See `architecture/README.md`
 for the required GitHub Actions Pages setting and temporary bootstrap branch.
+
+Keep the canvas quiet: one graph, data-driven focus presets, optional implementation
+detail, a collapsed component browser, and one replay entry point. Maintain replay
+position when hiding/reopening; following must reveal actors outside the selected
+focus. Keep I/O, code, state, event journal, and payloads accessible on demand.
+The field-notebook presentation lives in `architecture/src/notebook.css`; controls
+are separated into `CanvasToolbar` and `ComponentBrowser`. Verify desktop/mobile,
+keyboard navigation, generic adapters, and `tests/presentation.spec.ts` when changing
+this layout. Preserve the separate README infographic style.
+
+The architecture canvas uses bundled ELK.js for grouped layout and orthogonal edge
+routing. Keep React Flow card dimensions and handles aligned with
+`architecture/src/diagram/layout.ts`; render ELK bend points instead of regenerating
+endpoint-only paths. Test route/card collisions and initial viewport fitting with
+`architecture/tests/routing.spec.ts`. Preserve topology caching, stale-result guards,
+and offline bundling when changing the layout adapter.
+
+Opening the replay's Recorded message expands the bottom panel; closing it restores
+its compact height. Keep code readable and playback controls visible on desktop and
+mobile; verify the recorded-message case in `tests/presentation.spec.ts`.

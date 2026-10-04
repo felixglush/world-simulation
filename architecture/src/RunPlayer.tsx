@@ -46,6 +46,7 @@ export function RunPlayer({
   const adapter = project.replay!;
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  const [journalOpen, setJournalOpen] = useState(false);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("key");
   const [pauseAtDecisions, setPauseAtDecisions] = useState(false);
@@ -125,11 +126,14 @@ export function RunPlayer({
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   return (
-    <section className="run-player" aria-label={adapter.labels.region}>
+    <section
+      className={`run-player ${journalOpen ? "journal-open" : ""}`}
+      aria-label={adapter.labels.region}
+    >
       <div className="run-toolbar">
         <div className="run-label">
           <span className="live-dot" />
-          <strong>Run player</strong>
+          <strong>Replay notebook</strong>
           <Badge variant="outline" className="demo-badge">
             {run.badge}
           </Badge>
@@ -147,6 +151,14 @@ export function RunPlayer({
             </option>
           ))}
         </select>
+        <Button
+          variant="ghost"
+          className="text-button"
+          aria-expanded={journalOpen}
+          onClick={() => setJournalOpen(!journalOpen)}
+        >
+          Event journal
+        </Button>
         {adapter.import && (
           <Button
             variant="ghost"
@@ -225,7 +237,7 @@ export function RunPlayer({
         <small>{adapter.labels.decisionHelp}</small>
       </div>
       <div className="run-main">
-        <div className="event-journal">
+        <div className="event-journal" hidden={!journalOpen}>
           <div className="journal-heading">
             <span>EVENT JOURNAL</span>
             <select
@@ -275,6 +287,7 @@ export function RunPlayer({
         </div>
         <div
           className="event-stage"
+          data-sequence={String(event?.sequence ?? 0).padStart(2, "0")}
           data-decision={decision?.tone}
           style={decisionStyle(decision)}
         >
@@ -293,10 +306,10 @@ export function RunPlayer({
           </div>
           <h3>{trace.title}</h3>
           <p>{trace.body}</p>
-          <div className="event-payload">
-            <span>Recorded message</span>
+          <details className="event-payload">
+            <summary>Recorded message</summary>
             <code>{format(event?.payload)}</code>
-          </div>
+          </details>
         </div>
         <div className="run-metrics">
           <div className="journal-heading">
