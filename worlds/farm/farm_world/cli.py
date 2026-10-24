@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Sequence
 
 from station_control.provider_support import CallBudget
-from station_control.society.llm import LUNA, TERRA, OpenRouterChat
+from station_control.society.llm import LUNA, OpenRouterChat
 
 from .layout import START_DAY, default_world, layout_dict
 from .loop import FarmResult, merged_log, run_farm
 
-DEFAULT_MODELS = {"react": LUNA, "score": LUNA, "farmer": TERRA, "reflect": TERRA}
+DEFAULT_MODELS = {"react": LUNA, "score": LUNA, "farmer": LUNA, "reflect": LUNA}
 
 
 def _positive(value: str) -> int:
