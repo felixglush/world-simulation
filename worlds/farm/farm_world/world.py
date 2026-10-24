@@ -166,15 +166,15 @@ def check_params(name: str, params: dict[str, Any]) -> str | None:
             return f"{key} must be a short string"
         if kind == "bool" and type(value) is not bool:
             return f"{key} must be true or false"
-        if kind == "variety" and value not in ("winter", "spring"):
+        if kind == "variety" and not (isinstance(value, str) and value in ("winter", "spring")):
             return "variety must be winter or spring"
-        if kind == "good" and value not in GOODS:
+        if kind == "good" and not (isinstance(value, str) and value in GOODS):
             return f"{key} must be one of {GOODS}"
-        if kind == "building" and value not in BUILDINGS:
+        if kind == "building" and not (isinstance(value, str) and value in BUILDINGS):
             return f"{key} must be one of {tuple(BUILDINGS)}"
         if kind == "farmer" and not (isinstance(value, str) and 0 < len(value) <= 64):
             return f"{key} must be a farmer id"
-        if kind == "item" and value not in MILLABLE:
+        if kind == "item" and not (isinstance(value, str) and value in MILLABLE):
             return f"{key} must be one of {MILLABLE}"
         if kind.startswith("num"):
             _, low, high = kind.split(":")

@@ -228,3 +228,23 @@ def test_the_run_log_orders_trades_and_gifts_between_thinking_and_the_day_snapsh
     kinds = [e["type"] for e in log]
     assert kinds[0] == "gate" and kinds[-1] == "day"
     assert {"gift", "trade"} <= set(kinds)
+
+
+def test_the_farmer_tool_schema_can_express_every_action_parameter():
+    from farm_world.roles import FARMER_SCHEMA
+    from farm_world.world import ACTION_PARAMS
+
+    props = FARMER_SCHEMA["properties"]["actions"]["items"]["properties"]
+    for params in ACTION_PARAMS.values():
+        assert set(params) <= set(props)
+    for good in ("timber", "stone", "coin", "flour"):
+        assert good in props["item"]["enum"]
+        assert good in props["give_item"]["enum"]
+    assert set(props["kind"]["enum"]) == {"granary", "threshing_floor", "mill"}
+
+
+def test_malformed_parameter_types_are_rejected_not_raised():
+    world = default_world()
+    for bad in (["mill"], {"a": 1}, 3, None):
+        assert not world.act("rice_1", "build", kind=bad).ok
+    assert not world.act("rice_1", "give", to="rice_2", item=["rice"], qty=1).ok

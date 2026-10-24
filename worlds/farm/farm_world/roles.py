@@ -6,6 +6,7 @@ from station_control.society.agents import RoleSpec
 from station_control.society.gate import GateConfig
 from station_control.society.roles import PLAN_SCHEMA
 
+from .economy import BUILDINGS, GOODS
 from .world import ACTIONS
 
 HANDBOOK = """\
@@ -87,7 +88,15 @@ _ACTION_PARAMS = {
     "mm": {"type": "number", "minimum": 1, "maximum": 150},
     "units": {"type": "number", "minimum": 0.5, "maximum": 20},
     "variety": {"type": "string", "enum": ["winter", "spring"]},
-    "item": {"type": "string", "enum": ["paddy_dry", "wheat_grain"]},
+    "item": {"type": "string", "enum": list(GOODS)},
+    "kind": {"type": "string", "enum": list(BUILDINGS)},
+    "to": {"type": "string"},
+    "qty": {"type": "number", "minimum": 1, "maximum": 5000},
+    "give_item": {"type": "string", "enum": list(GOODS)},
+    "give_qty": {"type": "number", "minimum": 1, "maximum": 5000},
+    "want_item": {"type": "string", "enum": list(GOODS)},
+    "want_qty": {"type": "number", "minimum": 1, "maximum": 5000},
+    "offer_id": {"type": "string"},
 }
 
 FARMER_SCHEMA = {
