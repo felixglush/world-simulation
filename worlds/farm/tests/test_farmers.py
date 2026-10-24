@@ -219,3 +219,13 @@ def test_the_first_mover_rotates_each_day():
 
     agents = {name: None for name in ("a", "b", "c")}
     assert [_order(agents, t)[0] for t in range(4)] == ["a", "b", "c", "a"]
+
+
+def test_the_day_snapshot_records_what_the_farmer_did_before_the_daily_reset():
+    world = default_world()
+    farmer = next(iter(world.farmers))
+    assert world.act(farmer, "scout", plot=next(iter(world.plots))).ok
+    world.end_day()
+    seen = world.events[-1]["farmers"][farmer]
+    assert seen["activity"] == "scout"
+    assert seen["labor"] < 10

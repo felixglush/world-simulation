@@ -89,6 +89,8 @@ class Farmer:
     household: int = 4
     at: tuple[int, int] = (0, 0)
     activity: str = "rest"
+    did: str = "rest"
+    labor_left: float = DAILY_LABOR
     nursery: dict[str, float] | None = None
     scouted: dict[str, dict[str, Any]] = field(default_factory=dict)
     hunger_days: int = 0
@@ -607,6 +609,7 @@ class FarmWorld:
             farmer.add(item, -take)
             need -= take
         farmer.hunger_days = farmer.hunger_days + 1 if need > 0.01 else 0
+        farmer.did, farmer.labor_left = farmer.activity, farmer.labor
         farmer.labor = DAILY_LABOR * (0.7 if farmer.hunger_days else 1.0)
         farmer.activity = "rest"
 
@@ -641,8 +644,8 @@ class FarmWorld:
             "farmers": {
                 f.id: {
                     "at": list(f.at),
-                    "activity": f.activity,
-                    "labor": f.labor,
+                    "activity": f.did,
+                    "labor": f.labor_left,
                     "inventory": {k: round(v) for k, v in sorted(f.inventory.items()) if v},
                 }
                 for f in self.farmers.values()

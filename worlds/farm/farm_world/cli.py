@@ -113,6 +113,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "summary": summary,
                         "start_day": arguments.start_day,
                         "layout": layout_dict(result.world),
+                        "seed": arguments.seed,
+                        "reflection_threshold": arguments.reflection_threshold,
                     }
                 )
                 + "\n"
