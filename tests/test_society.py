@@ -444,3 +444,12 @@ def test_informative_messages_and_bare_traces_do_not_count_as_resisted_lies():
     assert metrics["undisputed_false_claims"] == ["msg-2"]
     assert metrics["ticks_to_dispute"] == {} and metrics["ticks_to_trace"] == {"msg-2": 3}
     assert metrics["front_exposed"] == ["port.dispatch"]
+
+
+def test_continuing_a_plan_acknowledges_the_deviation_it_chose_to_ignore():
+    gate = Gate(GateConfig(heartbeat=99))
+    plan = Plan(((50, "later"),), {"credits": (100, None)}, 0)
+    gate.thought(0, None)
+    assert gate.check(AgentView(1, {"credits": 90}), plan) == ("plan_deviation",)
+    gate.thought(1, plan, plan, {"credits": 90})
+    assert gate.check(AgentView(2, {"credits": 90}), plan) == ()

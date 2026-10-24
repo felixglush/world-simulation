@@ -140,14 +140,14 @@ class Agent:
         due = self.gate.step_due(old_plan, tick)
         react = rec.ask(tick, self.agent_id, self._react_request(context))
         if react is None:
-            self.gate.thought(tick, old_plan)
+            self.gate.thought(tick, old_plan, old_plan, view.signals)
             return None
         reacts = react.data.get("react") is True
         if not reacts and not due:
             rec.emit(
                 tick, self.agent_id, "continue", reason=str(react.data.get("reason", ""))[:200]
             )
-            self.gate.thought(tick, old_plan)
+            self.gate.thought(tick, old_plan, old_plan, view.signals)
             return None
         reply = rec.ask(
             tick,
@@ -161,13 +161,13 @@ class Agent:
             ),
         )
         if reply is None:
-            self.gate.thought(tick, old_plan)
+            self.gate.thought(tick, old_plan, old_plan, view.signals)
             return None
         try:
             decision, plan = self._parse(reply.data, tick)
         except (TypeError, ValueError, KeyError) as error:
             rec.emit(tick, self.agent_id, "malformed", detail=str(error)[:120])
-            self.gate.thought(tick, old_plan)
+            self.gate.thought(tick, old_plan, old_plan, view.signals)
             return None
         self.gate.thought(tick, old_plan, plan or old_plan, view.signals)
         if plan is not None:
