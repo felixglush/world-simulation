@@ -13,7 +13,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
+STATION_ROOT = ROOT / "worlds" / "station"
+sys.path.insert(0, str(STATION_ROOT))
 
 from station_control.adversary import (  # noqa: E402
     AdversaryAction,
@@ -51,7 +52,7 @@ def source_bundle():
     output = {}
     for ref in refs:
         path, symbol = ref["path"], ref["symbol"]
-        text = (ROOT / path).read_text()
+        text = (STATION_ROOT / path).read_text()
         tree = ast.parse(text)
         node = next((node for node in tree.body if getattr(node, "name", None) == symbol), None)
         if node is None:
