@@ -12,6 +12,7 @@ from ..governors import TradeCommand
 from .gate import AgentView, Gate, GateConfig, Plan
 from .llm import ChatModel, ChatReply, ChatRequest
 from .memory import MemoryStream, evidence_importance
+from .tools import ATTESTATION_KINDS, LOOKUP_TOOLS, MAX_LOOKUPS_PER_TICK
 
 MAX_PLAN_STEPS = 4
 MIN_PLAN_LEAD = 3
@@ -38,6 +39,20 @@ class OutgoingMessage:
     identity: str
     text: str
     intent: str = "inform"
+    echoes: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Lookup:
+    tool: str
+    arg: str
+
+
+@dataclass(frozen=True, slots=True)
+class Attestation:
+    kind: str
+    batch_id: str
+    recipient: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +63,8 @@ class Decision:
     relied_on: tuple[str, ...] = ()
     disputes: tuple[str, ...] = ()
     rationale: str = ""
+    lookups: tuple[Lookup, ...] = ()
+    attestations: tuple[Attestation, ...] = ()
 
 
 @dataclass(slots=True)
@@ -370,6 +387,10 @@ class Agent:
                 tuple(_strings(data.get("relied_on"))),
                 tuple(_strings(data.get("disputes"))),
                 rationale,
+                tuple(_lookups(data.get("lookups"))),
+                tuple(_attestations(data.get("attestations")))
+                if self.spec.role == "supplier"
+                else (),
             ),
             plan,
         )
@@ -429,14 +450,43 @@ def _messages(value: object, identities: tuple[str, ...]) -> list[OutgoingMessag
             raise ValueError("invalid message")
         identity = item.get("as") or identities[0]
         intent = item.get("intent", "inform")
+        echoes = item.get("echoes")
         out.append(
             OutgoingMessage(
                 str(item.get("to", "")),
                 str(identity),
                 item["text"],
                 intent if intent in INTENTS else "inform",
+                echoes if isinstance(echoes, str) and echoes else None,
             )
         )
+    return out
+
+
+def _lookups(value: object) -> list[Lookup]:
+    out = []
+    for item in value[:MAX_LOOKUPS_PER_TICK] if isinstance(value, list) else []:
+        if (
+            isinstance(item, dict)
+            and item.get("tool") in LOOKUP_TOOLS
+            and isinstance(item.get("arg"), str)
+            and item["arg"].strip()
+        ):
+            out.append(Lookup(item["tool"], item["arg"].strip()[:120]))
+    return out
+
+
+def _attestations(value: object) -> list[Attestation]:
+    out = []
+    for item in value[:1] if isinstance(value, list) else []:
+        if (
+            isinstance(item, dict)
+            and item.get("kind") in ATTESTATION_KINDS
+            and isinstance(item.get("batch_id"), str)
+        ):
+            out.append(
+                Attestation(item["kind"], item["batch_id"], str(item.get("to") or "station"))
+            )
     return out
 
 

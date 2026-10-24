@@ -49,7 +49,17 @@ def deception_metrics(result, adversary_ids: frozenset[str]) -> dict[str, object
         for report_id in disputed
         if report_id in honest_ids
     )
+    unmasked = sorted(
+        {
+            e["arg"]
+            for e in result.log
+            if e.get("type") == "lookup"
+            and e.get("code") == "sender_unregistered"
+            and e["arg"] in fronts
+        }
+    )
     return {
+        "unregistered_fronts_found": unmasked,
         "adversary_messages": len(lies),
         "deceptive_messages": len(deceptive),
         "fronts_used": sorted(fronts - {"contact.anon"}),

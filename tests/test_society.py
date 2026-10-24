@@ -453,3 +453,92 @@ def test_continuing_a_plan_acknowledges_the_deviation_it_chose_to_ignore():
     assert gate.check(AgentView(1, {"credits": 90}), plan) == ("plan_deviation",)
     gate.thought(1, plan, plan, {"credits": 90})
     assert gate.check(AgentView(2, {"credits": 90}), plan) == ()
+
+
+# Tools ------------------------------------------------------------------------------------
+
+
+def test_verify_sender_distinguishes_registered_from_unlisted_parties():
+    from station_control.society.tools import verify_sender
+
+    registry = frozenset({"port.dispatch"})
+    assert verify_sender(registry, "port.dispatch", 3).code == "sender_registered"
+    assert verify_sender(registry, "industrial.qa-desk", 3).code == "sender_unregistered"
+
+
+def test_recall_returns_the_agents_own_memories():
+    from station_control.society.tools import recall
+
+    memory = MemoryStream("captain")
+    memory.add(4, "observation", "Inspection found a material defect in industrial-batch-a", 9)
+    memory.add(5, "observation", "Routine log entry", 1)
+    answer = recall(memory, "material defect", 9)
+    assert answer.code == "recall_result" and "material defect" in answer.text
+
+
+def test_attestations_state_only_facts_from_the_attesters_own_view():
+    from station_control.society.tools import build_attestation
+
+    runner = run_story(FakeChat(ScriptedModels()), SocietyConfig("supply_chain", 30))
+    state = runner["result"].state
+    view = observe_world(state, "industrial")
+    sale = build_attestation("sale", "industrial-batch-a", view)
+    assert sale.startswith("[ATTESTED]") and "station" in sale and "industrial-batch-a" in sale
+    cert = build_attestation("no_certificate", "industrial-batch-a", view)
+    assert "no qualification certificate" in cert
+    assert build_attestation("sale", "ice-feed-a", view) is None
+    assert build_attestation("recall", "unknown-batch", view) is None
+
+
+def test_scripted_story_uses_lookups_and_attestations():
+    outcome = run_story(FakeChat(ScriptedModels()), SocietyConfig("supply_chain", 30))
+    log = outcome["result"].log
+    lookups = [e for e in log if e["type"] == "lookup"]
+    assert {e["code"] for e in lookups} == {"sender_unregistered", "recall_result"}
+    captain_texts = [r.text for r in outcome["agents"]["captain"].memory.records]
+    assert any("not in the registry" in text for text in captain_texts)
+    attested = [m for m in outcome["result"].messages if m.text.startswith("[ATTESTED]")]
+    assert attested and attested[0].identity == "industrial.governor"
+    assert outcome["metrics"]["unregistered_fronts_found"] == ["industrial.qa-desk"]
+
+
+def test_a_forged_echo_shares_its_source_when_traced():
+    outcome = run_story(FakeChat(ScriptedModels()), SocietyConfig("supply_chain", 30))
+    state = outcome["result"].state
+    echo = next(r for r in state.reports if r.report_id == "msg-2")
+    assert echo.upstream_report_id == "msg-1"
+    traces = [e for e in outcome["result"].evidence if e.report_id == "msg-2" and e.kind == "trace"]
+    assert traces and "repeats msg-1" in traces[0].message
+
+
+def test_an_echo_of_an_unknown_report_is_rejected_and_crews_cannot_echo():
+    state = create_deception_simulation("benign").state
+    state = replace(state, station=replace(state.station, turn=2))
+    router = _router()
+    _, message, rejection = router.send(
+        state, "adversary", "port.dispatch", "station", "Also confirmed.", "deceive", "msg-404"
+    )
+    assert message is None and rejection == "invalid_echo"
+    _, ok, _ = router.send(
+        state, "adversary", "port.dispatch", "station", "Confirmed.", "deceive", "supplier-check"
+    )
+    assert ok is not None and ok.upstream == "supplier-check"
+
+
+def test_attestation_for_an_unsold_batch_is_rejected_in_the_run():
+    def handler(request):
+        if request.purpose == "react_check":
+            return {"react": True, "reason": "go"}
+        if request.purpose in {"score_importance", "reflect"}:
+            return _idle(request)
+        if request.role == "supplier":
+            return {
+                "command": {"kind": "none"},
+                "attestations": [{"kind": "sale", "batch_id": "never-sold", "to": "station"}],
+                "rationale": "bad",
+            }
+        return _idle(request)
+
+    outcome = run_story(FakeChat(handler), SocietyConfig("supply_chain", 4, adversary=False))
+    assert any(e["type"] == "attestation_rejected" for e in outcome["result"].log)
+    assert not outcome["result"].messages

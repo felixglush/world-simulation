@@ -28,6 +28,17 @@ ADVERSARY_ALIAS = "contact.anon"
 FRONTS = ("industrial.qa-desk", "port.dispatch")
 CAPTAIN_SOURCE = "station.captain"
 SUPPLIER_SOURCE = "industrial.governor"
+# Listed parties. The QA desk front is not listed; the dispatch channel is listed but hijacked.
+REGISTRY = frozenset(
+    {
+        CAPTAIN_SOURCE,
+        SUPPLIER_SOURCE,
+        "industrial.qa",
+        "port.office",
+        "maintenance.office",
+        "port.dispatch",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +97,7 @@ def run_story(
         identities[ADVERSARY_ID] = frozenset(speak)
         mailboxes[ADVERSARY_ID] = frozenset(speak)
         agents[ADVERSARY_ID] = adversary
-    router = MessageRouter(worlds, identities, mailboxes)
+    router = MessageRouter(worlds, identities, mailboxes, REGISTRY)
     recorder = Recorder(chat)
     result = run_society(state, tuple(seats), router, recorder, turns=config.turns)
     adversary_ids = frozenset(identities.get(ADVERSARY_ID, frozenset()))

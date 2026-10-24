@@ -62,7 +62,11 @@ class ScriptedModels:
                 self.failed = True
             if item["code"] == "repair_complete":
                 self.repair_done = True
-        disputes = [i["ref"] for i in items if i["code"] == "report_origin_traced"]
+        disputes = [
+            i["ref"]
+            for i in items
+            if i["code"] in ("report_origin_traced", "report_provenance_traced")
+        ]
         answer: dict[str, object] = {"command": {"kind": "none"}, "plan": plan, "rationale": "s"}
         untraced = [c for c in self.claims if c not in self.traced]
         parts = [x for x in world["local_lots"] if x["resource"] == "parts" and x["quantity"] > 0]
@@ -70,6 +74,10 @@ class ScriptedModels:
         if self.failed and not self.inspected:
             self.inspected = True
             answer["command"] = {"kind": "inspect", "method": "peak"}
+            answer["lookups"] = [
+                {"tool": "verify_sender", "arg": "industrial.qa-desk"},
+                {"tool": "recall", "arg": "batch defect"},
+            ]
         elif self.failed and untraced:
             self.traced.add(untraced[0])
             answer["command"] = {"kind": "trace", "report_id": untraced[0]}
@@ -129,11 +137,8 @@ class ScriptedModels:
         asked = [m for m in context["new_items"] if m["ref"].startswith("msg-")]
         answer: dict[str, object] = {"command": {"kind": "none"}, "rationale": "s"}
         if asked:
-            answer["messages"] = [
-                {
-                    "to": "station",
-                    "text": "We have no QA desk and issued no qualification report for batch A.",
-                }
+            answer["attestations"] = [
+                {"kind": "no_certificate", "batch_id": "industrial-batch-a", "to": "station"}
             ]
         return answer
 
@@ -163,7 +168,13 @@ class ScriptedModels:
         elif tick >= 4 and not self.sent_follow_up:
             self.sent_follow_up = True
             messages.append(
-                {"to": "station", "as": "port.dispatch", "text": FOLLOW_UP, "intent": "deceive"}
+                {
+                    "to": "station",
+                    "as": "port.dispatch",
+                    "text": FOLLOW_UP,
+                    "intent": "deceive",
+                    "echoes": "msg-1",
+                }
             )
         if tick >= 3 and not self.masked:
             if any(a["kind"] == "mask_sensor" for a in context["world"]["allowed_actions"]):

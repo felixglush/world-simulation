@@ -14,9 +14,10 @@ from ..adversary import (
 from ..trade import WorldAdvanceResult, WorldState, advance_world, observe_world
 from ..trade_mission import GovernorDecision, execute_command, rejection_feedback
 from ..trade_types import PublicWorldView, TradeEvidence, TradeEvidenceKind
-from .agents import Agent, Decision, Recorder
+from .agents import Agent, Decision, OutgoingMessage, Recorder
 from .gate import AgentView, Observation, public_agent_view
 from .messages import Message, MessageRouter
+from .tools import build_attestation, recall, verify_sender
 
 ADVERSARY = "adversary"
 
@@ -60,6 +61,7 @@ def run_society(
     reliance: list[tuple[int, str, tuple[str, ...], tuple[str, ...]]] = []
     disruptions: list[tuple[int, str, str | None, bool]] = []
     crew_notes: list[Observation] = []
+    answers: dict[str, list[Observation]] = {}
     for _ in range(turns):
         advanced: WorldAdvanceResult = advance_world(state)
         state = advanced.state
@@ -89,6 +91,9 @@ def run_society(
                 public = observe_world(state, seat.world_id)
                 view = public_agent_view(public, seen[agent.agent_id], inbox)
                 world = _crew_world(public, router)
+            waiting = answers.pop(agent.agent_id, [])
+            if waiting:
+                view = replace(view, items=(*view.items, *waiting))
             proposals.append((seat, agent.step(view, world, rec)))
 
         for seat, decision in proposals:
@@ -104,7 +109,25 @@ def run_society(
                 state = _apply_crew(state, seat, decision, decisions, evidence, crew_notes, rec)
                 if decision.relied_on or decision.disputes:
                     reliance.append((tick, agent.agent_id, decision.relied_on, decision.disputes))
-            for out in decision.messages:
+            _lookup(state, seat, decision, router, answers, rec)
+            outgoing = list(decision.messages)
+            for attestation in decision.attestations:
+                text = (
+                    build_attestation(
+                        attestation.kind, attestation.batch_id, observe_world(state, seat.world_id)
+                    )
+                    if seat.world_id
+                    else None
+                )
+                if text is None:
+                    rec.emit(
+                        tick, agent.agent_id, "attestation_rejected", batch=attestation.batch_id
+                    )
+                    continue
+                outgoing.append(
+                    OutgoingMessage(attestation.recipient, seat.source_id, text, "inform")
+                )
+            for out in outgoing:
                 state, message, rejection = router.send(
                     state,
                     agent.agent_id,
@@ -112,6 +135,7 @@ def run_society(
                     out.recipient,
                     out.text,
                     out.intent,
+                    out.echoes if seat.world_id is None else None,
                 )
                 if message is None:
                     rec.emit(
@@ -232,6 +256,28 @@ def _apply_adversary(
     return state, spent
 
 
+def _lookup(
+    state: WorldState,
+    seat: Seat,
+    decision: Decision,
+    router: MessageRouter,
+    answers: dict[str, list[Observation]],
+    rec: Recorder,
+) -> None:
+    """Answer information lookups from the world's registry or the agent's own memory."""
+    tick = state.station.turn
+    agent = seat.agent
+    for item in decision.lookups:
+        if item.tool == "verify_sender" and seat.world_id is not None:
+            answer = verify_sender(router.registry, item.arg, tick)
+        elif item.tool == "recall":
+            answer = recall(agent.memory, item.arg, tick)
+        else:
+            continue
+        answers.setdefault(agent.agent_id, []).append(answer)
+        rec.emit(tick, agent.agent_id, "lookup", tool=item.tool, arg=item.arg, code=answer.code)
+
+
 def _crew_world(view: PublicWorldView, router: MessageRouter) -> dict[str, object]:
     return {
         "world_id": view.world_id,
@@ -286,4 +332,9 @@ def _adversary_world(state: WorldState, budget: int, router: MessageRouter) -> d
     context = adversary_context(state.station, budget)
     data = json.loads(json.dumps(asdict(context), default=str))
     data["directory"] = sorted(router.recipients())
+    data["known_reports"] = [
+        {"id": r.report_id, "source": r.source_id, "to": r.recipient_world, "text": r.message}
+        for r in state.reports
+        if r.receipt_turn <= state.station.turn + 1
+    ][-12:]
     return data

@@ -152,6 +152,14 @@ deception metrics (false claims relied on, actions taken on them, ticks to dispu
 exposed). `--output` writes the event log (gates, calls, plans, reflections, messages, actions) as
 JSONL and refuses to overwrite.
 
+Agents also have information tools whose answers come from the world, not the model. The captain
+and supplier can `verify_sender` (registry lookup: an unlisted identity such as a front is
+flagged, a listed but hijacked channel is not) and everyone can `recall` from their own memory;
+answers arrive as evidence on the next review. The supplier can send an attestation (`sale`,
+`no_certificate`, or `recall`) that the harness builds only from the supplier's own contracts and
+evidence. The adversary can set `echoes` on a message to repeat an earlier report, so its lie
+looks corroborated until `trace` shows the shared source.
+
 Verify offline with `uv run --frozen pytest tests/test_society.py`. It covers memory retrieval,
 routine-run merging, reflection citations, the gate (quiet ticks, heartbeat, edge triggers), the
 private-state leak check, message rules (claims only, no impersonation, rate limits), byte-identical

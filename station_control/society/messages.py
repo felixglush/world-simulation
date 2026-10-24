@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, replace
 
-from ..deception import TradeReport
+from ..deception import TradeReport, validate_reports
 from ..trade_types import WorldState
 
 MAX_MESSAGE_CHARS = 300
@@ -25,6 +25,7 @@ class Message:
     sent_at: int
     deliver_at: int
     intent: str = "inform"
+    upstream: str | None = None
 
 
 class MessageRouter:
@@ -35,12 +36,14 @@ class MessageRouter:
         agent_worlds: dict[str, str],
         identities: dict[str, frozenset[str]],
         mailboxes: dict[str, frozenset[str]],
+        registry: frozenset[str] = frozenset(),
     ) -> None:
         """`agent_worlds` maps agent to home world; `identities` maps agent to the source IDs it
         may speak as; `mailboxes` maps agent to non-world recipient IDs it receives for."""
         self._worlds = agent_worlds
         self._identities = identities
         self._mailboxes = mailboxes
+        self.registry = registry
         self._sent: list[Message] = []
         self._per_tick: dict[tuple[str, int], int] = {}
         self._per_pair: dict[tuple[str, str], int] = {}
@@ -71,6 +74,7 @@ class MessageRouter:
         recipient: str,
         text: str,
         intent: str = "inform",
+        upstream: str | None = None,
     ) -> tuple[WorldState, Message | None, str | None]:
         """Queue one message; returns (state, message, rejection)."""
         tick = state.station.turn
@@ -98,10 +102,9 @@ class MessageRouter:
             tick,
             tick + DELIVERY_LATENCY,
             intent if intent in {"inform", "deceive", "probe"} else "inform",
+            upstream,
         )
-        self._sent.append(message)
-        self._per_tick[(sender, tick)] = self._per_tick.get((sender, tick), 0) + 1
-        self._per_pair[pair] = self._per_pair.get(pair, 0) + 1
+        report = None
         if recipient in self._worlds.values():
             report = TradeReport(
                 message.message_id,
@@ -110,7 +113,19 @@ class MessageRouter:
                 message.text,
                 tick,
                 message.deliver_at,
+                upstream_report_id=upstream,
             )
+            try:
+                validate_reports(
+                    state.reports + (report,),
+                    {"station", *self._worlds.values(), *(w.world_id for w in state.inventories)},
+                )
+            except ValueError:
+                return state, None, "invalid_echo" if upstream else "invalid_report"
+        self._sent.append(message)
+        self._per_tick[(sender, tick)] = self._per_tick.get((sender, tick), 0) + 1
+        self._per_pair[pair] = self._per_pair.get(pair, 0) + 1
+        if report is not None:
             state = replace(state, reports=state.reports + (report,))
         self._pending.append(message)
         return state, message, None
