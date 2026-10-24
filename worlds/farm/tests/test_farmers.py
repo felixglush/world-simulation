@@ -183,6 +183,18 @@ def test_the_merged_log_orders_thinking_then_work_then_the_day():
     assert first[0]["source"] == "agent"
 
 
+def test_the_sink_streams_every_row_as_the_run_goes_and_matches_the_final_log():
+    rows = []
+    world = default_world(seed=7, start_day=140)
+    chat = FakeChat(handler(idle))
+    result = run_farm(world, chat, days=2, sink=rows.append)
+    assert rows[0]["type"] == "start" and rows[0]["day"] == 140
+    ordered = sorted(rows[1:], key=lambda e: (e["day"], e["type"] == "day", e.get("hour", 0)))
+    assert len(rows) - 1 == len(merged_log(result, 140))
+    assert [e["type"] for e in rows if e["type"] == "day"] == ["day", "day"]
+    assert ordered[0]["day"] == 140
+
+
 def test_the_cli_refuses_to_run_without_a_finite_budget():
     from farm_world.cli import main
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -54,10 +55,12 @@ def run_farm(
     *,
     days: int,
     reflection_threshold: int = REFLECTION_THRESHOLD,
+    sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> FarmResult:
     """Each day has ten working hours. A farmer's decision is a queue of work that runs hour by
     hour; they are asked again when the queue is empty or a message reaches them, and a
-    message arrives in the hour it is sent."""
+    message arrives in the hour it is sent. `sink` receives every log row as it happens: a "start"
+    snapshot, each hour's events, and the day snapshot when the day ends."""
     if type(days) is not int or not 1 <= days <= MAX_DAYS:
         raise ValueError(f"A farm run lasts between 1 and {MAX_DAYS} days")
     rec = Recorder(chat)
@@ -68,6 +71,17 @@ def run_farm(
     busy = {f: 0 for f in agents}
     held: dict[str, list[Any]] = {f: [] for f in agents}  # delivered but not yet read
     start = world.day
+    flushed = [0, 0]  # rows already sent to the sink: agent events, world events
+
+    def flush() -> None:
+        if sink is None:
+            return
+        for row in _rows(rec.events[flushed[0] :], world.events[flushed[1] :], start):
+            sink(row)
+        flushed[:] = [len(rec.events), len(world.events)]
+
+    if sink is not None:
+        sink({**world.snapshot(), "type": "start", "source": "world"})
     for _ in range(days):
         tick = world.day - start
         rested: set[str] = set()  # asked and had nothing to do: not asked again today
@@ -109,9 +123,11 @@ def run_farm(
                         busy[farmer_id] = pause - 1
                         continue
                 busy[farmer_id] = _work(world, agents[farmer_id], farmer_id, queue, tick, rec)
+            flush()
         busy = {f: 0 for f in agents}
         rec.hour = None
         world.end_day()
+        flush()
     return FarmResult(
         world,
         tuple(rec.events),
@@ -204,10 +220,16 @@ def _speak(
         rec.emit(tick, farmer_id, "message_sent", id=message.message_id, to=to, text=message.text)
 
 
+def _rows(
+    agent_events: Sequence[dict[str, Any]], world_events: Sequence[dict[str, Any]], start_day: int
+) -> list[dict[str, Any]]:
+    rows = [{**e, "day": start_day + e["tick"], "source": "agent"} for e in agent_events]
+    return rows + [{**e, "source": "world"} for e in world_events]
+
+
 def merged_log(result: FarmResult, start_day: int) -> list[dict[str, Any]]:
     """One ordered log: agent thinking, then what the world did, then the day's snapshot."""
-    rows = [{**e, "day": start_day + e["tick"], "source": "agent"} for e in result.events]
-    rows += [{**e, "source": "world"} for e in result.world.events]
+    rows = _rows(result.events, result.world.events, start_day)
 
     def when(event: dict[str, Any]) -> tuple[int, int, int]:
         if event["type"] == "day":

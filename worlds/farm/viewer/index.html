@@ -18,7 +18,9 @@
   header { grid-column: 1 / 3; display: flex; gap: 16px; align-items: center; padding: 8px 16px;
     background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   header h1 { font-size: 15px; margin: 0; }
-  header .stat { color: var(--muted); }
+  header #live.on { color: #e5484d; font-weight: 700; }
+  .stat { color: var(--muted); }
+  #live.on { color: #e5484d; font-weight: 700; }
   header .stat b { color: var(--ink); font-weight: 600; }
   header .spacer { flex: 1; }
   main { position: relative; overflow: hidden; }
@@ -59,6 +61,8 @@
   <span class="stat">Date <b id="date">-</b></span>
   <span class="stat" id="weather">-</span>
   <span class="stat">River <b id="river">-</b></span>
+  <span class="stat" id="live" style="display:none"></span>
+  <label class="stat" id="followbox" style="display:none"><input type="checkbox" id="follow" checked> Follow live</label>
   <span class="spacer"></span>
   <label class="stat">Open a run log <input type="file" id="file" accept=".jsonl,.json,.txt"></label>
 </header>
@@ -101,25 +105,69 @@ function dateName(day) {
   return "Dec 31";
 }
 
-async function loadText(text) {
-  const rows = text.split("\n").filter(Boolean).map(l => JSON.parse(l));
-  header = rows[0].type === "run" ? rows[0] : null;
-  const body = header ? rows.slice(1) : rows;
+// A run log is a header row, then rows as they happen. While a run is going the file keeps
+// growing; `follow` re-reads the tail and the newest hours appear on a provisional day that
+// borrows the last snapshot's terrain until the day ends.
+let rows = [], offset = 0, finished = false, startSnap = null;
+
+async function loadText(text, more, keep) {
+  const added = text.split("\n").filter(Boolean).map(l => JSON.parse(l));
+  rows = more ? rows.concat(added) : added;
+  header = rows[0] && rows[0].type === "run" ? rows[0] : null;
+  const body = rows.filter(e => e.type !== "run");
+  finished = body.some(e => e.type === "summary");
+  startSnap = body.find(e => e.type === "start") || null;
   layout = (header && header.layout) || layout || await (await fetch("layout.json")).json();
   indexTiles();
   const byDay = new Map();
   for (const e of body) {
+    if (e.type === "summary" || e.type === "start" || e.day === undefined) continue;
     if (!byDay.has(e.day)) byDay.set(e.day, {day: e.day, snap: null, events: []});
     const d = byDay.get(e.day);
     if (e.type === "day") d.snap = e; else d.events.push(e);
   }
-  days = [...byDay.values()].filter(d => d.snap).sort((a, b) => a.day - b.day);
+  const all = [...byDay.values()].sort((a, b) => a.day - b.day);
+  days = all.filter(d => d.snap);
+  const open = all.find(d => !d.snap);
+  const base = days.length ? days[days.length - 1].snap : startSnap;
+  if (open && base) {
+    open.snap = {...base, day: open.day};
+    open.live = Math.min(HOURS, Math.max(1, ...open.events.map(e => hourOf(e) + 1)));
+    days.push(open);
+  } else if (!open && !days.length && startSnap) {
+    days.push({day: startSnap.day, snap: startSnap, events: [], live: 1});
+  }
   if (!days.length) { $("empty").firstElementChild.textContent = "That file has no day snapshots."; return; }
   first = days[0].day;
   $("empty").style.display = "none";
-  const scrub = $("scrub"); scrub.max = frameCount() - 1; scrub.value = 0;
-  pos = 0; playing = false; $("play").textContent = "Play";
+  const scrub = $("scrub"); scrub.max = frameCount() - 1;
+  if (!more && !keep) { scrub.value = 0; pos = 0; playing = false; $("play").textContent = "Play"; }
+  else if ($("follow").checked) { pos = frameCount() - 1; scrub.value = pos; }
+  $("live").textContent = finished ? "finished" : "● live";
+  $("live").className = "stat" + (finished ? "" : " on");
   buildMessages(); show();
+}
+
+// Follow a growing log. The server (serve.py) returns only the bytes after `from`; a plain
+// static host ignores it and sends the whole file, which is detected by the missing header.
+async function follow(url) {
+  $("live").style.display = ""; $("followbox").style.display = "";
+  const poll = async () => {
+    if (finished) return;
+    try {
+      const res = await fetch(url + (url.includes("?") ? "&" : "?") + "from=" + offset, {cache: "no-store"});
+      if (res.ok) {
+        const partial = res.headers.get("X-Log-Offset") !== null;
+        const bytes = await res.arrayBuffer();
+        let text = new TextDecoder().decode(bytes);
+        if (!partial) text = text.slice(0, text.lastIndexOf("\n") + 1);   // whole file: drop a half-written line
+        if (partial) offset += bytes.byteLength;
+        if (text) await loadText(text, partial && rows.length > 0, !partial);
+      }
+    } catch (e) { /* the run has not started or the server is restarting: try again */ }
+    setTimeout(poll, 1500);
+  };
+  poll();
 }
 
 function indexTiles() {
@@ -249,7 +297,7 @@ function lerp(a, b, k) { return a + (b - a) * k; }
 
 // The timeline is in hours: frame = day index * HOURS + hour. Terrain and crops come from the
 // day's end-of-day snapshot; farmers and speech come from the hourly events.
-const frameCount = () => days.length * HOURS;
+const frameCount = () => days.length * HOURS - (days.length && days[days.length - 1].live ? HOURS - days[days.length - 1].live : 0);
 function cur() {
   const f = Math.max(0, Math.min(frameCount() - 1, pos)), frame = Math.floor(f);
   return {frame, i: Math.floor(frame / HOURS), h: frame % HOURS, k: f - frame};
@@ -403,8 +451,8 @@ canvas.addEventListener("mousemove", ev => {
 });
 canvas.addEventListener("mouseleave", () => $("tip").style.display = "none");
 
-$("play").onclick = () => { if (!days.length) return; if (pos >= frameCount() - 1) pos = 0; playing = !playing; $("play").textContent = playing ? "Pause" : "Play"; };
-$("scrub").oninput = ev => { pos = +ev.target.value; playing = false; $("play").textContent = "Play"; show(); };
+$("play").onclick = () => { if (!days.length) return; $("follow").checked = false; if (pos >= frameCount() - 1) pos = 0; playing = !playing; $("play").textContent = playing ? "Pause" : "Play"; };
+$("scrub").oninput = ev => { $("follow").checked = false; pos = +ev.target.value; playing = false; $("play").textContent = "Play"; show(); };
 document.addEventListener("keydown", ev => {
   if (ev.target.tagName === "INPUT" || ev.target.tagName === "SELECT") return;
   if (ev.key === " ") { ev.preventDefault(); $("play").click(); }
@@ -418,8 +466,9 @@ stage.addEventListener("dragleave", () => $("drop").style.display = "none");
 stage.addEventListener("drop", async ev => { ev.preventDefault(); $("drop").style.display = "none"; const f = ev.dataTransfer.files[0]; if (f) await loadText(await f.text()); });
 
 (async () => {
-  const url = new URLSearchParams(location.search).get("log");
-  if (url) { try { await loadText(await (await fetch(url)).text()); } catch (e) { $("empty").firstElementChild.textContent = "Could not load " + url; } }
+  const params = new URLSearchParams(location.search), url = params.get("log");
+  if (url && params.has("live")) follow(url);
+  else if (url) { try { await loadText(await (await fetch(url)).text()); } catch (e) { $("empty").firstElementChild.textContent = "Could not load " + url; } }
 })();
 requestAnimationFrame(render);
 </script>

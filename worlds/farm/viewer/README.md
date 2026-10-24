@@ -14,3 +14,14 @@ You can also drop any run log onto the page. Space plays or pauses, the arrow ke
 ## Hourly replay
 
 The scrubber steps one working hour at a time (ten per day, 07:00 to 16:00). Terrain, crops and water come from the day's end-of-day snapshot; farmers walk between the tiles where their actions happened, and speech bubbles, trades and the message feed are placed at the hour they were sent. Arrow keys step an hour, shift plus arrow steps a day. Logs written before the hourly loop still play (every action lands at 07:00).
+
+## Live view
+
+`python -m farm_world --output RUN.jsonl` writes the log as the run goes (a `run` header, a `start` snapshot, each hour's events, and a day snapshot at the end of every day; a `summary` row closes it). To watch a run as it happens:
+
+```bash
+python worlds/farm/viewer/serve.py RUN.jsonl      # start before or after the run
+# open http://127.0.0.1:8000/?log=/run.jsonl&live=1
+```
+
+The page asks for the bytes after the last row it has every 1.5 seconds and adds the new hours on a provisional day that uses the previous day's terrain until that day's snapshot lands. "Follow live" keeps the view on the newest hour; scrubbing or pressing Play turns it off. No hosting is needed: the log is a file on the machine running the simulation, so a static host such as Vercel cannot see it. To share a finished run, host the viewer folder and the `.jsonl` as static files and open `index.html?log=run.jsonl`.

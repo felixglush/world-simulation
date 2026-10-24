@@ -6,13 +6,13 @@ import argparse
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from station_control.provider_support import CallBudget
 from station_control.society.llm import LUNA, OpenRouterChat
 
 from .layout import START_DAY, default_world, layout_dict
-from .loop import FarmResult, merged_log, run_farm
+from .loop import FarmResult, run_farm
 
 DEFAULT_MODELS = {"react": LUNA, "score": LUNA, "farmer": LUNA, "reflect": LUNA}
 
@@ -91,10 +91,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     }
     budget = CallBudget(arguments.max_calls, arguments.max_output_tokens_per_call)
     chat = OpenRouterChat(models, budget)
+    handle = None
+    sink = None
+    if arguments.output is not None:
+        arguments.output.parent.mkdir(parents=True, exist_ok=True)
+        handle = arguments.output.open("x", encoding="utf-8")
+
+        def sink(row: dict[str, Any]) -> None:
+            # Written as the run goes, so the viewer can follow it live.
+            handle.write(json.dumps(row, sort_keys=True, default=str) + "\n")
+            handle.flush()
+
     try:
         world = default_world(arguments.seed, arguments.start_day)
+        if sink is not None:
+            sink(
+                {
+                    "type": "run",
+                    "start_day": arguments.start_day,
+                    "layout": layout_dict(world),
+                    "seed": arguments.seed,
+                    "reflection_threshold": arguments.reflection_threshold,
+                }
+            )
         result = run_farm(
-            world, chat, days=arguments.days, reflection_threshold=arguments.reflection_threshold
+            world,
+            chat,
+            days=arguments.days,
+            reflection_threshold=arguments.reflection_threshold,
+            sink=sink,
         )
     finally:
         chat.close()
@@ -106,23 +131,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "max_output_tokens_per_call": arguments.max_output_tokens_per_call,
         },
     )
-    if arguments.output is not None:
-        arguments.output.parent.mkdir(parents=True, exist_ok=True)
-        with arguments.output.open("x", encoding="utf-8") as handle:
-            handle.write(
-                json.dumps(
-                    {
-                        "type": "run",
-                        "summary": summary,
-                        "start_day": arguments.start_day,
-                        "layout": layout_dict(result.world),
-                        "seed": arguments.seed,
-                        "reflection_threshold": arguments.reflection_threshold,
-                    }
-                )
-                + "\n"
-            )
-            for event in merged_log(result, arguments.start_day):
-                handle.write(json.dumps(event, sort_keys=True, default=str) + "\n")
+    if handle is not None:
+        sink({"type": "summary", "summary": summary})
+        handle.close()
     print(json.dumps(summary, sort_keys=True))
     return 0
