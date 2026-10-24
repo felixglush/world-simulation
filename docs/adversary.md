@@ -15,7 +15,7 @@ Configure `OPENROUTER_API_KEY` in the environment. Select models that support to
 calling and replace the model placeholders below:
 
 ```bash
-uv run --frozen python -m station_control run \
+PYTHONPATH=worlds/station uv run --frozen python -m station_control run \
   --scenario false_authority --scenario partial_delivery \
   --adversary llm --adversary-budget 3 --turns 48 \
   --captain-model "<captain-model-id>" --adversary-model "<adversary-model-id>" \

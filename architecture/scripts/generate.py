@@ -52,7 +52,7 @@ def source_bundle():
     output = {}
     for ref in refs:
         path, symbol = ref["path"], ref["symbol"]
-        text = (STATION_ROOT / path).read_text()
+        text = (ROOT / path).read_text()
         tree = ast.parse(text)
         node = next((node for node in tree.body if getattr(node, "name", None) == symbol), None)
         if node is None:
