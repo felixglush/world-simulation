@@ -47,6 +47,19 @@ left standing lose grain.
 lost, not on rainy days), mill {item: paddy_dry or wheat_grain} (to rice or flour, 100 kg per \
 labor), save_seed {item} (keeps grain as seed, 200 kg per labor). Seed you do not save is \
 gone: each sowing eats the seed you hold.
+- build {kind: granary, threshing_floor or mill}: costs materials and labor, lands on free \
+ground near your home, and helps your whole community (granary: stored rice spoils a fifth as \
+fast; threshing_floor: threshing 50% faster; mill: milling three times faster). Each community \
+can have one of each. A granary needs 6 timber and 8 labor, a threshing_floor 4 timber and 6 \
+labor, a mill 6 timber, 8 stone and 10 labor. You start with some timber and stone; \
+Riverbend has more timber, Highfield more stone.
+- give {to, item, qty}: send goods to another farmer (a day to reach your community, two to \
+reach the other).
+- offer {to, give_item, give_qty, want_item, want_qty}: propose a swap to one farmer. Your \
+goods are held in escrow until the offer is taken, withdrawn or expires after 5 days. \
+accept {offer_id} takes an offer made to you; withdraw {offer_id} cancels yours. You may hold \
+3 open offers. Goods: rice, flour, paddy_dry, wheat_grain, rice_seed, wheat_seed, manure, \
+pest_control, coin, timber, stone.
 - rest.
 Send only the fields an action takes; the world rejects anything else.
 Your reply is a plan of work, not a diary. Say why in a sentence. Message people with \

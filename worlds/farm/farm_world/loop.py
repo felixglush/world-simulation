@@ -131,12 +131,13 @@ def _apply(
 
 
 def merged_log(result: FarmResult, start_day: int) -> list[dict[str, Any]]:
-    """One ordered log: agent thinking, then world actions, then the day's snapshot."""
-    order = {"agent": 0, "action": 1, "rejected": 1, "day": 2}
-    rows = []
-    for event in result.events:
-        rows.append({**event, "day": start_day + event["tick"], "source": "agent"})
-    for event in result.world.events:
-        rows.append({**event, "source": "world"})
-    kind = lambda e: order["agent"] if e["source"] == "agent" else order[e["type"]]  # noqa: E731
-    return sorted(rows, key=lambda e: (e["day"], kind(e)))
+    """One ordered log: agent thinking, then what the world did, then the day's snapshot."""
+    rows = [{**e, "day": start_day + e["tick"], "source": "agent"} for e in result.events]
+    rows += [{**e, "source": "world"} for e in result.world.events]
+
+    def phase(event: dict[str, Any]) -> int:
+        if event["source"] == "agent":
+            return 0
+        return 2 if event["type"] == "day" else 1
+
+    return sorted(rows, key=lambda e: (e["day"], phase(e)))

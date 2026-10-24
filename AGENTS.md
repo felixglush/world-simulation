@@ -28,6 +28,8 @@ PYTHONPATH=worlds/station:worlds/farm uv run --frozen python -m farm_world \
 
 The farm command is live only and always needs a finite `--max-calls` (about 5 calls per farmer per active day; 30 days is about 150 calls). It uses the same OpenRouter models and keyless cloud proxy as `society`: `--react-model` and `--score-model` default to Luna, `--farmer-model` and `--reflect-model` to Terra. The world has no scripted policy. Tests drive it with fixed fixture policies in `worlds/farm/tests/policies.py` and fake chat models, never live calls: `uv run --frozen pytest worlds/farm`.
 
+Every farmer action (labor cost, prerequisites, effect) is listed in `worlds/farm/ACTIONS.md`; building (granary, threshing floor, mill) and trade (escrowed offers, gifts, shipments with latency) live in `farm_world/economy.py`.
+
 ## Environment commands
 
 - Install: bash scripts/setup-cloud.sh

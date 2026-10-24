@@ -101,6 +101,28 @@ class Perception:
                 out.append(
                     Observation("food_low", f"About {days:.0f} days of food left.", turn=tick)
                 )
+        for offer in seen.get("offers_to_me", ()):
+            if offer["id"] not in last["offers"]:
+                give, want = offer["give"], offer["want"]
+                out.append(
+                    Observation(
+                        "offer",
+                        f"{offer['from']} offers you {give} for {want} ({offer['id']}, "
+                        f"{offer['days_left']} days left).",
+                        ref=offer["id"],
+                        turn=tick,
+                    )
+                )
+        mine_before, mine_now = last["my_offers"], now["my_offers"]
+        for offer_id in sorted(mine_before - mine_now):
+            out.append(
+                Observation(
+                    "offer_closed",
+                    f"Your offer {offer_id} is no longer open.",
+                    ref=offer_id,
+                    turn=tick,
+                )
+            )
         if now["nursery"] is not None and last["nursery"] is None:
             out.append(Observation("nursery", "Your nursery bed is sown.", turn=tick))
         return out
@@ -127,4 +149,6 @@ def _snapshot(me: str, seen: dict[str, Any]) -> dict[str, Any]:
         "hungry": seen["me"]["hungry"],
         "food_days": seen["me"]["food_days_left"],
         "nursery": seen["me"]["nursery_age_days"],
+        "offers": {o["id"] for o in seen.get("offers_to_me", ())},
+        "my_offers": {o["id"] for o in seen.get("my_open_offers", ())},
     }

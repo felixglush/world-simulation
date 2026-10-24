@@ -14,6 +14,16 @@ from typing import Any
 
 from . import crops
 from .crops import CropState
+from .economy import (
+    BUILDING_EFFECT,
+    BUILDINGS,
+    GOODS,
+    LATENCY_OTHER,
+    LATENCY_SAME,
+    MAX_OPEN_OFFERS,
+    Economy,
+    Structure,
+)
 from .weather import Climate, Weather
 
 DAILY_LABOR = 10.0
@@ -127,6 +137,17 @@ ACTION_PARAMS: dict[str, dict[str, str]] = {
     "dry": {"kg": "num:1:100000"},
     "mill": {"item": "item", "kg": "num:1:100000"},
     "save_seed": {"item": "item", "kg": "num:1:100000"},
+    "build": {"kind": "building"},
+    "offer": {
+        "to": "farmer",
+        "give_item": "good",
+        "give_qty": "num:1:5000",
+        "want_item": "good",
+        "want_qty": "num:1:5000",
+    },
+    "accept": {"offer_id": "str"},
+    "withdraw": {"offer_id": "str"},
+    "give": {"to": "farmer", "item": "good", "qty": "num:1:5000"},
 }
 ACTIONS = tuple(ACTION_PARAMS)
 MILLABLE = ("paddy_dry", "wheat_grain")
@@ -145,6 +166,12 @@ def check_params(name: str, params: dict[str, Any]) -> str | None:
             return f"{key} must be true or false"
         if kind == "variety" and value not in ("winter", "spring"):
             return "variety must be winter or spring"
+        if kind == "good" and value not in GOODS:
+            return f"{key} must be one of {GOODS}"
+        if kind == "building" and value not in BUILDINGS:
+            return f"{key} must be one of {tuple(BUILDINGS)}"
+        if kind == "farmer" and not (isinstance(value, str) and 0 < len(value) <= 64):
+            return f"{key} must be a farmer id"
         if kind == "item" and value not in MILLABLE:
             return f"{key} must be one of {MILLABLE}"
         if kind.startswith("num"):
@@ -174,6 +201,7 @@ class FarmWorld:
         self.channels = {c.id: c for c in channels}
         self.tiles = tiles
         self.well_used: dict[str, float] = defaultdict(float)
+        self.economy = Economy()
         self.weather: Weather = self.climate.weather(start_day)
         self.events: list[dict[str, Any]] = []
         self._rng_seed = seed
@@ -477,16 +505,135 @@ class FarmWorld:
         return ActionResult(True, f"{source} -> {target}: {kg:g} kg in", {"kg": kg})
 
     def _do_thresh(self, farmer: Farmer, kg: float = 1e9) -> ActionResult:
-        return self._process(farmer, "wheat_sheaves", "wheat_grain", 100, 0.95, kg)
+        rate = 150 if self.economy.has(farmer.community, "threshing_floor") else 100
+        return self._process(farmer, "wheat_sheaves", "wheat_grain", rate, 0.95, kg)
 
     def _do_dry(self, farmer: Farmer, kg: float = 1e9) -> ActionResult:
         return self._process(farmer, "paddy_wet", "paddy_dry", 400, 0.9, kg, rainy_blocks=True)
 
     def _do_mill(self, farmer: Farmer, item: str | None = None, kg: float = 1e9) -> ActionResult:
         item = item or ("paddy_dry" if farmer.has("paddy_dry") > 0 else "wheat_grain")
+        rate = 300 if self.economy.has(farmer.community, "mill") else 100
         if item == "paddy_dry":
-            return self._process(farmer, "paddy_dry", "rice", 100, 0.65, kg)
-        return self._process(farmer, "wheat_grain", "flour", 100, 0.75, kg)
+            return self._process(farmer, "paddy_dry", "rice", rate, 0.65, kg)
+        return self._process(farmer, "wheat_grain", "flour", rate, 0.75, kg)
+
+    # ---- building and trade -------------------------------------------------------------
+
+    def _free_tile(self, farmer: Farmer) -> tuple[int, int] | None:
+        taken = {(s.x, s.y) for s in self.economy.structures}
+        hx, hy = farmer.home
+        height, width = len(self.tiles), len(self.tiles[0])
+        spots = sorted(
+            ((x, y) for y in range(height) for x in range(width)),
+            key=lambda p: (abs(p[0] - hx) + abs(p[1] - hy), p[1], p[0]),
+        )
+        return next(
+            (p for p in spots if self.tiles[p[1]][p[0]] in ("grass", "upland") and p not in taken),
+            None,
+        )
+
+    def _do_build(self, farmer: Farmer, kind: str) -> ActionResult:
+        cost = BUILDINGS[kind]
+        if self.economy.has(farmer.community, kind):
+            return ActionResult(False, f"your community already has a {kind}")
+        short = [m for m, n in cost.items() if m != "labor" and farmer.has(m) < n]
+        if short:
+            need = ", ".join(f"{m} {n:g}" for m, n in cost.items() if m != "labor")
+            return ActionResult(False, f"a {kind} needs {need}; you lack {', '.join(short)}")
+        spot = self._free_tile(farmer)
+        if spot is None:
+            return ActionResult(False, "no free ground to build on")
+        if error := self._spend(farmer, cost["labor"]):
+            return ActionResult(False, error)
+        for material, qty in cost.items():
+            if material != "labor":
+                farmer.add(material, -qty)
+        number = len(self.economy.structures) + 1
+        self.economy.structures.append(
+            Structure(f"{kind}-{number}", kind, farmer.id, farmer.community, *spot, self.day)
+        )
+        farmer.at = spot
+        return ActionResult(
+            True, f"built a {kind}: {BUILDING_EFFECT[kind]}", {"x": spot[0], "y": spot[1]}
+        )
+
+    def _latency(self, a: Farmer, b: Farmer) -> int:
+        return LATENCY_SAME if a.community == b.community else LATENCY_OTHER
+
+    def _do_give(self, farmer: Farmer, to: str, item: str, qty: float) -> ActionResult:
+        other = self.farmers.get(to)
+        if other is None or other.id == farmer.id:
+            return ActionResult(False, f"{to} is not another farmer")
+        if farmer.has(item) < qty:
+            return ActionResult(False, f"you have only {farmer.has(item):g} {item}")
+        farmer.add(item, -qty)
+        self.economy.ship(to, item, qty, self.day + self._latency(farmer, other), farmer.id)
+        self._trade_event("gift", farmer.id, to, {item: qty}, {})
+        return ActionResult(True, f"sent {qty:g} {item} to {to}; it arrives in a day or two")
+
+    def _do_offer(
+        self,
+        farmer: Farmer,
+        to: str,
+        give_item: str,
+        give_qty: float,
+        want_item: str,
+        want_qty: float,
+    ) -> ActionResult:
+        other = self.farmers.get(to)
+        if other is None or other.id == farmer.id:
+            return ActionResult(False, f"{to} is not another farmer")
+        if len(self.economy.open_offers_from(farmer.id)) >= MAX_OPEN_OFFERS:
+            return ActionResult(False, f"you already have {MAX_OPEN_OFFERS} open offers")
+        if give_item == want_item:
+            return ActionResult(False, "an offer must swap different goods")
+        if farmer.has(give_item) < give_qty:
+            return ActionResult(False, f"you have only {farmer.has(give_item):g} {give_item}")
+        farmer.add(give_item, -give_qty)
+        offer = self.economy.new_offer(
+            farmer.id, to, (give_item, give_qty), (want_item, want_qty), self.day
+        )
+        return ActionResult(
+            True,
+            f"offered {to} {give_qty:g} {give_item} for {want_qty:g} {want_item} ({offer.id}); "
+            "your goods are held until it is taken, withdrawn or expires",
+            {"offer_id": offer.id},
+        )
+
+    def _do_withdraw(self, farmer: Farmer, offer_id: str) -> ActionResult:
+        offer = self.economy.offers.get(offer_id)
+        if offer is None or offer.sender != farmer.id or offer.status != "open":
+            return ActionResult(False, f"{offer_id} is not one of your open offers")
+        offer.status = "withdrawn"
+        farmer.add(*offer.give)
+        return ActionResult(True, f"withdrew {offer_id}; your goods are back in the barn")
+
+    def _do_accept(self, farmer: Farmer, offer_id: str) -> ActionResult:
+        offer = self.economy.offers.get(offer_id)
+        if offer is None or offer.to != farmer.id or offer.status != "open":
+            return ActionResult(False, f"{offer_id} is not an open offer to you")
+        sender = self.farmers[offer.sender]
+        want_item, want_qty = offer.want
+        if farmer.has(want_item) < want_qty:
+            return ActionResult(
+                False,
+                f"you have only {farmer.has(want_item):g} {want_item} of the {want_qty:g} asked",
+            )
+        farmer.add(want_item, -want_qty)
+        offer.status = "accepted"
+        delay = self._latency(farmer, sender)
+        self.economy.ship(farmer.id, offer.give[0], offer.give[1], self.day + delay, sender.id)
+        self.economy.ship(sender.id, want_item, want_qty, self.day + delay, farmer.id)
+        self._trade_event(
+            "trade", sender.id, farmer.id, {offer.give[0]: offer.give[1]}, {want_item: want_qty}
+        )
+        return ActionResult(True, f"accepted {offer_id}; goods change hands in {delay} day(s)")
+
+    def _trade_event(self, kind: str, a: str, b: str, give: dict, get: dict) -> None:
+        self.events.append(
+            {"type": kind, "day": self.day, "from": a, "to": b, "give": give, "get": get}
+        )
 
     def _do_save_seed(self, farmer: Farmer, item: str, kg: float = 1e9) -> ActionResult:
         seed = "rice_seed" if item == "paddy_dry" else "wheat_seed"
@@ -501,10 +648,17 @@ class FarmWorld:
             self._plot_day(plot, weather)
         for farmer in self.farmers.values():
             self._household_day(farmer)
+        self._market_day()
         self.events.append(self.snapshot())
         self.day += 1
         self.weather = self.climate.weather(self.day)
         self.well_used.clear()
+
+    def _market_day(self) -> None:
+        for shipment in self.economy.arrivals(self.day + 1):
+            self.farmers[shipment.to].add(shipment.item, shipment.qty)
+        for offer in self.economy.expired(self.day + 1):
+            self.farmers[offer.sender].add(*offer.give)
 
     def _river_head(self, weather: Weather) -> float:
         return RIVER_DATUM_MM + weather.river_mm - 600.0
@@ -598,7 +752,9 @@ class FarmWorld:
             plot.nitrogen = max(0.0, plot.nitrogen)
 
     def _household_day(self, farmer: Farmer) -> None:
+        stored = self.economy.has(farmer.community, "granary")
         for item, rate in crops.GRAIN_SPOIL.items():
+            rate = rate * 0.2 if stored and item in ("rice", "paddy_dry") else rate
             if farmer.has(item):
                 farmer.inventory[item] = round(farmer.inventory[item] * (1 - rate), 3)
         need = HOUSEHOLD_KG_PER_DAY * farmer.household / 4
@@ -638,6 +794,10 @@ class FarmWorld:
                 c.id: {"open": c.gate_open, "flow": c.last_flow, "silt": round(c.silt, 2)}
                 for c in self.channels.values()
             },
+            "structures": [
+                {"id": s.id, "kind": s.kind, "x": s.x, "y": s.y, "owner": s.owner}
+                for s in self.economy.structures
+            ],
             "farmers": {
                 f.id: {
                     "at": list(f.at),
@@ -692,6 +852,11 @@ class FarmWorld:
                 for f in self.farmers.values()
                 if f.community == farmer.community and f.id != farmer.id
             ),
+            "buildings": [
+                {"kind": s.kind, "owner": s.owner, "community": s.community}
+                for s in self.economy.structures
+            ],
+            **self.economy.view_for(farmer.id, self.day),
         }
 
     def _plot_view(self, plot: Plot, viewer: Farmer) -> dict[str, Any]:

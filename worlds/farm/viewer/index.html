@@ -70,7 +70,7 @@
 </main>
 <aside id="panel">
   <h2>Farmer</h2><div id="farmer">Click a farmer in the view.</div>
-  <h2>Messages so far</h2><div id="messages"></div>
+  <h2>Messages and trades so far</h2><div id="messages"></div>
 </aside>
 <footer>
   <button id="play" aria-label="Play or pause">Play</button>
@@ -191,6 +191,8 @@ function drawTile(x, y, code, snap, t, o) {
     const h = 4 + (n < 0 ? 0 : n) * (plot.crop === "rice" ? 2.4 : 3);
     for (const [dx, dy] of [[-8, 0], [8, 0], [0, -4], [0, 5]]) tuft(cx + dx, cy + dy + 3, h, color);
   }
+  const built = (snap.structures || []).find(b => b.x === x && b.y === y);
+  if (built) drawStructure(built.kind, cx, cy);
   if (kind === "house") {
     ctx.fillStyle = "#e8d9b0"; ctx.fillRect(cx - 9, cy - 16, 18, 12);
     ctx.fillStyle = "#a8402f"; ctx.beginPath(); ctx.moveTo(cx - 12, cy - 16); ctx.lineTo(cx, cy - 26); ctx.lineTo(cx + 12, cy - 16); ctx.fill();
@@ -198,6 +200,22 @@ function drawTile(x, y, code, snap, t, o) {
   if (kind === "well") {
     ctx.fillStyle = "#6e7d82"; ctx.beginPath(); ctx.ellipse(cx, cy - 2, 9, 5, 0, 0, 6.3); ctx.fill();
     ctx.fillStyle = "#2f5e87"; ctx.beginPath(); ctx.ellipse(cx, cy - 3, 6, 3, 0, 0, 6.3); ctx.fill();
+  }
+}
+
+function drawStructure(kind, cx, cy) {
+  if (kind === "granary") {
+    ctx.fillStyle = "#b07a44"; ctx.fillRect(cx - 9, cy - 18, 18, 14);
+    ctx.fillStyle = "#6b4a2b"; ctx.beginPath(); ctx.moveTo(cx - 11, cy - 18); ctx.lineTo(cx, cy - 28); ctx.lineTo(cx + 11, cy - 18); ctx.fill();
+    ctx.fillStyle = "#3b2a18"; ctx.fillRect(cx - 3, cy - 12, 6, 8);
+  } else if (kind === "threshing_floor") {
+    ctx.fillStyle = "#d9c08a"; ctx.beginPath(); ctx.ellipse(cx, cy - 2, 14, 7, 0, 0, 6.3); ctx.fill();
+    ctx.strokeStyle = "#8c7444"; ctx.lineWidth = 1.5; ctx.stroke();
+  } else if (kind === "mill") {
+    ctx.fillStyle = "#cfc7b4"; ctx.fillRect(cx - 9, cy - 22, 18, 18);
+    ctx.fillStyle = "#7a2f2a"; ctx.beginPath(); ctx.moveTo(cx - 11, cy - 22); ctx.lineTo(cx, cy - 32); ctx.lineTo(cx + 11, cy - 22); ctx.fill();
+    ctx.strokeStyle = "#5b4636"; ctx.lineWidth = 2;
+    for (const [dx, dy] of [[-12, -10], [12, -10]]) { ctx.beginPath(); ctx.moveTo(cx, cy - 14); ctx.lineTo(cx + dx, cy + dy - 6); ctx.stroke(); }
   }
 }
 
@@ -243,7 +261,8 @@ function drawFarmer(id, x, y, day, o) {
   if (selected === id) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx, cy - 12, 15, 0, 6.3); ctx.stroke(); }
   ctx.font = "600 13px system-ui"; ctx.textAlign = "center";
   ctx.fillStyle = "#000a"; ctx.fillText(NAMES[id] || id, sx + 1, cy + 14); ctx.fillStyle = "#fff"; ctx.fillText(NAMES[id] || id, sx, cy + 13);
-  const bubble = spoke ? "💬" : act && act !== "rest" ? ICON[act] || "•" : act === "rest" ? "" : "";
+  const swapped = day.events.find(e => (e.type === "trade" || e.type === "gift") && (e.from === id || e.to === id));
+  const bubble = swapped ? (swapped.type === "gift" ? "🎁" : "🤝") : spoke ? "💬" : act && act !== "rest" ? ICON[act] || "•" : act === "rest" ? "" : "";
   if (bubble) {
     ctx.fillStyle = "#fffd"; ctx.beginPath(); ctx.roundRect(sx - 12, cy - 50, 24, 20, 8); ctx.fill();
     ctx.font = "13px system-ui"; ctx.fillStyle = "#000"; ctx.fillText(bubble, sx, cy - 35);
@@ -299,12 +318,17 @@ function buildMessages() {
   const i = Math.min(days.length - 1, Math.floor(pos)), out = [];
   for (let n = i; n >= 0 && out.length < 40; n--) {
     for (const e of [...days[n].events].reverse()) {
+      if (e.type === "trade" || e.type === "gift") {
+        const goods = o => Object.entries(o).map(([k, v]) => `${v} ${k.replace("_", " ")}`).join(", ");
+        out.push(`<div class="msg"><small>${dateName(days[n].day)} · ${e.type === "gift" ? "🎁 gift" : "🤝 trade"}</small>${NAMES[e.from]} to ${NAMES[e.to]}: ${esc(goods(e.give))}${e.type === "trade" ? ` for ${esc(goods(e.get))}` : ""}</div>`);
+        continue;
+      }
       if (e.type !== "message_sent") continue;
       const to = e.to, from = e.agent;
       out.push(`<div class="msg"><small>${dateName(days[n].day)} · <span class="chip ${layout.farmers[from].community === "riverbend" ? "rice" : "wheat"}">${NAMES[from]}</span> to ${NAMES[to] || to}</small>${esc(e.text)}</div>`);
     }
   }
-  $("messages").innerHTML = out.join("") || "<small>No messages yet.</small>";
+  $("messages").innerHTML = out.join("") || "<small>Nothing yet.</small>";
 }
 
 function buildFarmer() {
