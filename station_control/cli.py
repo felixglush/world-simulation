@@ -197,6 +197,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     commands.add_parser("scenarios", help="List legacy and YAML scenario definitions.")
 
+    from .society.cli import add_parser as add_society_parser
+
+    add_society_parser(commands)
+
     trade_parser = commands.add_parser("trade", help="Run a trade, economy, or deception story.")
     trade_parser.add_argument("--turns", type=_bounded_integer(1, MAX_MISSION_TURNS), default=20)
     trade_parser.add_argument(
@@ -645,6 +649,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             print(json.dumps(summary, sort_keys=True))
             return 0
+        if arguments.command == "society":
+            from .society.cli import run as run_society_command
+
+            return run_society_command(arguments)
         if arguments.command == "replay":
             print(render_run_log(read_run_log(arguments.log)))
             return 0
