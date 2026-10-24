@@ -9,6 +9,8 @@ Update this file in the same change whenever setup, dependencies, entry points, 
 For testing and test-first implementation, use the $tdd skill at .agents/skills/tdd/SKILL.md.
 For architecture design or review, use $clean-architecture at .agents/skills/clean-architecture/SKILL.md.
 
+Claude Code loads the pstack plugin (poteto-mode) from `.claude/settings.json`. Trust the folder when prompted, or run `/plugin install pstack@pstack-claude`. The repository's own skills and these instructions take precedence over pstack's routing.
+
 Use fake providers for routine tests. Live model experiments require explicit budgets and recorded model/configuration metadata.
 
 ## Environment commands
