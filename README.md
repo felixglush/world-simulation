@@ -37,6 +37,10 @@ claims consistent, and speaks through fronts it is given, never as a real agent.
 that become traceable reports and never change the world. The summary reports deception separately
 from damage. See `AGENTS.md` for commands, models, budgets, and verification.
 
+## A second world: farming
+
+`worlds/farm/` is a farming world. Two communities, Riverbend (rice) and Highfield (wheat), each have three independent farmer agents who start with seed, food, manure and a plot. Nobody assigns roles or a leader, so water sharing and any organization has to emerge from what the farmers say and do. Python owns the agronomy: paddy puddling, standing water, bunds, gravity-fed canals and gates on terraces, the monsoon river, wheat vernalization, waterlogging, pests, and post-harvest drying, threshing and milling. See [AGENTS.md](AGENTS.md#farm-world) to run it.
+
 ## Purpose and current product
 
 Station Control tests how an AI crew keeps a space station operational when equipment fails or reports are misleading. Crew survival is the primary objective. Resource use, incident handling, and decision cost show how well the crew performs.

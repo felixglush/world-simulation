@@ -1,7 +1,7 @@
 import json
 from dataclasses import replace
 
-from policies import diligent, run
+from policies import diligent
 
 from farm_world import crops
 from farm_world.crops import CropState
@@ -176,12 +176,122 @@ def test_view_hides_ground_truth():
 
 def test_a_diligent_year_feeds_both_communities():
     world = default_world(1)
-    run(world, 480, diligent)
+    worst = 0
+    for _ in range(480):
+        diligent(world)
+        world.end_day()
+        worst = max(worst, *(f.hunger_days for f in world.farmers.values()))
     harvests = [e for e in world.events if e["type"] == "action" and "harvested" in e["message"]]
     assert len([e for e in harvests if e["farmer"].startswith("rice")]) >= 3
     assert len([e for e in harvests if e["farmer"].startswith("wheat")]) >= 3
-    area = 0.6
     for e in harvests:
-        kg_per_ha = float(e["message"].split()[1]) / area
+        kg_per_ha = float(e["message"].split()[1]) / 0.6
         assert 2000 < kg_per_ha < 7000, e
-    assert all(f.hunger_days == 0 for f in world.farmers.values())
+    assert worst == 0, f"a household went hungry for {worst} days"
+
+
+def test_parameters_are_checked_so_seed_cannot_be_conjured():
+    world = default_world(1)
+    farmer = world.farmers["wheat_1"]
+    world.act("wheat_1", "till")
+    before = farmer.has("wheat_seed")
+    for bad in (-1000, 0, float("nan"), float("inf"), True, "70"):
+        assert not world.act("wheat_1", "sow", kg=bad).ok
+    assert not world.act("wheat_1", "sow", kg=49).ok
+    assert farmer.has("wheat_seed") == before
+    assert not world.act("rice_1", "set_gate", channel="intake", open="false").ok
+    assert not world.act("rice_1", "weed", channel="intake").ok
+    assert not world.act("wheat_1", "pump", mm=float("nan")).ok
+    assert "missing a parameter" in world.act("rice_1", "set_gate", channel="intake").message
+
+
+def test_a_thin_seed_rate_thins_the_crop():
+    world = default_world(1)
+    world.act("wheat_1", "till")
+    world.act("wheat_2", "till")
+    world.act("wheat_1", "sow", kg=70)
+    world.act("wheat_2", "sow", kg=50)
+    for _ in range(40):
+        world.end_day()
+    full, thin = world.plots["field_1"].crop, world.plots["field_2"].crop
+    assert thin.biomass < full.biomass
+
+
+def test_grain_can_be_kept_as_seed_and_wheat_can_be_milled_beside_rice():
+    world = default_world(1)
+    farmer = world.farmers["rice_1"]
+    farmer.add("paddy_dry", 400)
+    farmer.add("wheat_grain", 100)
+    assert world.act("rice_1", "mill", item="wheat_grain").ok
+    assert farmer.has("flour") > 0 and farmer.has("paddy_dry") == 400
+    seed = farmer.has("rice_seed")
+    assert world.act("rice_1", "save_seed", item="paddy_dry", kg=200).ok
+    assert farmer.has("rice_seed") == seed + 200
+
+
+def test_canal_water_does_not_keep_forever_or_beat_the_low_winter_river():
+    world = default_world(1, start_day=200)
+    world.act("rice_1", "set_gate", channel="intake", open=True)
+    for _ in range(20):
+        world.end_day()
+    stored = world.canal_nodes["canal_1"].water_mm
+    assert 0 < stored <= 60
+    world.act("rice_1", "set_gate", channel="intake", open=False)
+    for _ in range(30):
+        world.end_day()
+    assert world.canal_nodes["canal_1"].water_mm < 1
+
+
+def test_seedlings_drown_in_a_paddy_the_bunds_allow_to_flood():
+    world = default_world(1, start_day=200)
+    plot = world.plots["paddy_1"]
+    plot.crop = CropState("rice", 200)
+    plot.water_mm = 119.0
+    plot.bund_mm = 120.0
+    for _ in range(5):
+        plot.water_mm = 119.0
+        world.end_day()
+    assert plot.crop.health < 0.8
+
+
+def test_rice_pests_need_warm_humid_weather_and_fade_when_it_is_dry():
+    world = default_world(1, start_day=200)
+    plot = world.plots["paddy_1"]
+    plot.crop = CropState("rice", 200)
+    plot.pest = 0.5
+    plot.since_rain = 99
+    dry = Weather(200, 27.0, 22.0, 32.0, 0.0, 900.0, 0.2)
+    world.climate = type("Dry", (), {"weather": lambda self, day: dry})()
+    world.weather = dry
+    for _ in range(10):
+        world.end_day()
+    assert plot.pest < 0.5
+
+
+def test_standing_water_costs_grain_at_harvest():
+    def harvest(depth):
+        world = default_world(1, start_day=200)
+        plot = world.plots["paddy_1"]
+        plot.crop = CropState("rice", 0)
+        plot.crop.stage, plot.crop.biomass = "mature", 9000.0
+        plot.water_mm = depth
+        world.farmers["rice_1"].labor = 100.0
+        world.act("rice_1", "harvest")
+        return world.farmers["rice_1"].has("paddy_wet")
+
+    assert harvest(60.0) < harvest(0.0)
+
+
+def test_farmers_see_the_calendar_date_not_a_run_counter():
+    seen = default_world(1).view("rice_1")
+    assert seen["date"] == "May 21"
+    assert "day" not in seen
+
+
+def test_each_community_draws_on_its_own_well():
+    world = default_world(1)
+    assert world.act("rice_1", "pump", mm=100).ok
+    assert "0 mm left" in world.act("rice_2", "pump", mm=10).message
+    assert world.act("wheat_1", "pump", mm=150).ok
+    world.end_day()
+    assert world.act("rice_2", "pump", mm=10).ok

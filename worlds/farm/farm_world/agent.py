@@ -8,10 +8,10 @@ from typing import Any
 from station_control.society.agents import Agent, parse_plan
 from station_control.society.gate import Plan
 
-from .world import ACTIONS
+from .world import ACTION_PARAMS
 
 MAX_ACTIONS = 6
-_PARAMS = ("plot", "channel", "open", "kg", "mm", "units", "variety")
+MAX_DAYS = 730
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,15 +25,17 @@ class FarmerAgent(Agent):
     def _parse(self, data: dict[str, object], tick: int) -> tuple[FarmDecision, Plan | None]:
         actions = []
         for item in data.get("actions") if isinstance(data.get("actions"), list) else []:
-            if not isinstance(item, dict) or item.get("name") not in ACTIONS:
+            if not isinstance(item, dict) or item.get("name") not in ACTION_PARAMS:
                 raise ValueError("unlisted action")
-            actions.append((item["name"], {k: item[k] for k in _PARAMS if k in item}))
+            # A flat schema invites unrelated fields; keep only the ones this action takes.
+            allowed = ACTION_PARAMS[item["name"]]
+            actions.append((item["name"], {k: v for k, v in item.items() if k in allowed}))
         messages = []
         for item in data.get("messages") if isinstance(data.get("messages"), list) else []:
             if not isinstance(item, dict) or not isinstance(item.get("text"), str):
                 raise ValueError("invalid message")
             messages.append((str(item.get("to", "")), item["text"]))
-        plan = parse_plan(data.get("plan"), data.get("expect"), tick)
+        plan = parse_plan(data.get("plan"), data.get("expect"), tick, horizon=MAX_DAYS)
         decision = FarmDecision(
             tuple(actions[:MAX_ACTIONS]), tuple(messages[:2]), str(data.get("rationale", ""))[:300]
         )

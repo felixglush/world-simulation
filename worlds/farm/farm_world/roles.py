@@ -39,17 +39,21 @@ pests, weeds and soil nitrogen on your plot), treat (2, one pest_control unit).
 outlets are shared by everyone and nobody owns them. Water flows downhill only through \
 open gates, and only when the river stands higher than the canal.
 - repair_bund (3): rebuilds the earth walls that hold water in a paddy.
-- pump {mm} (1 labor per 25 mm): draws from the one shared well; the well gives 150 mm a day \
-to everyone together.
+- pump {mm} (1 labor per 25 mm): draws from your community's well, which gives 100 mm a day in \
+Riverbend and 150 mm in Highfield to the whole community together.
 - harvest (about 9 to 13 labor, may take several days): only when the crop is mature. Crops \
 left standing lose grain.
-- thresh (wheat sheaves, 100 kg per labor), dry (wet paddy, 400 kg per labor, not on rainy \
-days), mill (dry paddy to rice or wheat grain to flour, 100 kg per labor).
+- thresh (wheat sheaves, 100 kg per labor), dry (wet paddy, 400 kg per labor, 10% weight \
+lost, not on rainy days), mill {item: paddy_dry or wheat_grain} (to rice or flour, 100 kg per \
+labor), save_seed {item} (keeps grain as seed, 200 kg per labor). Seed you do not save is \
+gone: each sowing eats the seed you hold.
 - rest.
+Send only the fields an action takes; the world rejects anything else.
 Your reply is a plan of work, not a diary. Say why in a sentence. Message people with \
 messages [{to, text}] (up to two per review; the recipient is a farmer id; people in the \
-other community take an extra day to reach). Name your own next review ticks in the plan \
-and the readings you expect so that surprises wake you early.\
+other community take an extra day to reach). Plan with tick numbers: the `tick` in your \
+view counts days since the run began (not the calendar date), and each plan step's due_tick \
+is a tick. Name the readings you expect so that surprises wake you early.\
 """
 
 BIOS = {
@@ -70,6 +74,7 @@ _ACTION_PARAMS = {
     "mm": {"type": "number", "minimum": 1, "maximum": 150},
     "units": {"type": "number", "minimum": 0.5, "maximum": 20},
     "variety": {"type": "string", "enum": ["winter", "spring"]},
+    "item": {"type": "string", "enum": ["paddy_dry", "wheat_grain"]},
 }
 
 FARMER_SCHEMA = {

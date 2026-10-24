@@ -49,7 +49,7 @@ def default_world(seed: int = 1, start_day: int = START_DAY) -> FarmWorld:
                 plot_id=f"paddy_{i}",
                 home=(x + 13, y + 2),
                 inventory={
-                    "rice": 430.0,
+                    "rice": 650.0,
                     "rice_seed": 60.0,
                     "manure": 6.0,
                     "pest_control": 2.0,
@@ -87,7 +87,7 @@ def default_world(seed: int = 1, start_day: int = START_DAY) -> FarmWorld:
                 plot_id=f"field_{i}",
                 home=(33, y + 2),
                 inventory={
-                    "flour": 520.0,
+                    "flour": 900.0,
                     "wheat_seed": 90.0,
                     "manure": 8.0,
                     "pest_control": 2.0,
@@ -100,6 +100,7 @@ def default_world(seed: int = 1, start_day: int = START_DAY) -> FarmWorld:
                 tiles[y + dy][26 + dx] = "field"
         tiles[y + 2][33] = "house"
     tiles[10][23] = "well"
+    tiles[11][19] = "well"
 
     canals = [
         CanalNode("canal_1", 4450.0),

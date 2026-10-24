@@ -490,7 +490,7 @@ def _attestations(value: object) -> list[Attestation]:
     return out
 
 
-def parse_plan(steps: object, expect: object, tick: int) -> Plan | None:
+def parse_plan(steps: object, expect: object, tick: int, horizon: int = 336) -> Plan | None:
     if not isinstance(steps, list) or not steps:
         return None
     parsed = []
@@ -499,7 +499,7 @@ def parse_plan(steps: object, expect: object, tick: int) -> Plan | None:
             raise ValueError("invalid plan step")
         parsed.append(
             (
-                max(tick + MIN_PLAN_LEAD, min(336, item["due_tick"])),
+                max(tick + MIN_PLAN_LEAD, min(horizon, item["due_tick"])),
                 str(item.get("intent", ""))[:160],
             )
         )

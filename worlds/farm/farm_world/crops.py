@@ -95,6 +95,7 @@ class CropState:
     dry_days: int = 0
     days_mature: int = 0
     seedling_age: int = 0  # rice: days in the nursery before transplanting
+    density: float = 1.0  # share of the recommended seed rate that was sown
     stage: str = ""
     history: list[str] = field(default_factory=list)
 
@@ -181,6 +182,7 @@ def grow(
         * (1 - 0.6 * weeds)
         * (1 - 0.5 * pest)
         * crop.health
+        * crop.density
     )
     crop.biomass += growth
 
@@ -195,7 +197,7 @@ def grow(
         crop.sterility += 0.06
     crop.sterility = min(0.7, crop.sterility)
 
-    if crop.crop == "rice" and crop.gdd < 150 and water_mm > 150:
+    if crop.crop == "rice" and crop.gdd < 150 and water_mm > 90:
         crop.health -= 0.05  # seedlings drowned under deep water
     if crop.crop == "wheat":
         if water_mm > FIELD_CAPACITY + WATERLOG_MARGIN:
@@ -219,15 +221,13 @@ def grow(
 def grain_yield(crop: CropState) -> float:
     """Kilograms of grain per hectare if harvested now."""
     spec = SPECS[crop.crop]
-    if crop.stage not in ("grain_fill", "mature"):
+    if crop.stage != "mature":
         return 0.0
-    ripeness = 1.0 if crop.stage == "mature" else 0.55
     shatter = min(0.6, max(0, crop.days_mature - 10) * 0.015)
     spring_penalty = 0.8 if crop.crop == "wheat" and crop.variety == "spring" else 1.0
     return (
         crop.biomass
         * spec.harvest_index
-        * ripeness
         * (1 - crop.sterility)
         * (0.75 if crop.lodged else 1.0)
         * (1 - shatter)

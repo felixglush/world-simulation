@@ -17,6 +17,17 @@ Use fake providers for routine tests. Live model experiments require explicit bu
 
 Each world lives under `worlds/`. The space station is `worlds/station/` (the `station_control` package, its `tests/` and `scenarios/`). Run its commands from that folder, or set `PYTHONPATH=worlds/station`, for example `cd worlds/station && uv run --frozen python -m station_control trade --turns 20`. `uv run --frozen pytest` from the repository root runs every world's tests. Scripts, the architecture explorer, and docs stay at the root.
 
+## Farm world
+
+`worlds/farm/` holds the `farm_world` package: rice paddies and wheat fields run by six independent farmer agents (two communities, three farmers each) on the real physics in `crops.py`, `world.py` and `weather.py`. The farmers reuse the `station_control.society` machinery (hybrid gate, memory stream, reflection, plans), so both packages must be on the path:
+
+```bash
+PYTHONPATH=worlds/station:worlds/farm uv run --frozen python -m farm_world \
+  --days 30 --max-calls 150 --output runs/farm-live.jsonl
+```
+
+The farm command is live only and always needs a finite `--max-calls` (about 5 calls per farmer per active day; 30 days is about 150 calls). It uses the same OpenRouter models and keyless cloud proxy as `society`: `--react-model` and `--score-model` default to Luna, `--farmer-model` and `--reflect-model` to Terra. The world has no scripted policy. Tests drive it with fixed fixture policies in `worlds/farm/tests/policies.py` and fake chat models, never live calls: `uv run --frozen pytest worlds/farm`.
+
 ## Environment commands
 
 - Install: bash scripts/setup-cloud.sh

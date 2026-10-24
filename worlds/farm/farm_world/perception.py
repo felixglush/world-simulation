@@ -18,18 +18,12 @@ class Perception:
         self._river = ""
         self._river_streak = 0
 
-    def view(
-        self,
-        tick: int,
-        seen: dict[str, Any],
-        inbox: tuple[Message, ...],
-        water_mm: float,
-        health: float | None,
-    ) -> AgentView:
+    def view(self, tick: int, seen: dict[str, Any], inbox: tuple[Message, ...]) -> AgentView:
         me = seen["me"]["id"]
+        mine = next(p for p in seen["plots"].values() if p["owner"] == me)
         signals = {
-            "water_mm": int(water_mm),
-            "health_pct": 100 if health is None else int(health * 100),
+            "water_mm": _water_signal(mine),
+            "health_pct": _LEAVES.get(mine.get("leaves", "healthy"), 100),
             "food_days": int(seen["me"]["food_days_left"]),
             "temp_c": int(seen["weather"]["temp_c"]),
             "rain_mm": int(seen["weather"]["rain_mm"]),
@@ -110,6 +104,17 @@ class Perception:
         if now["nursery"] is not None and last["nursery"] is None:
             out.append(Observation("nursery", "Your nursery bed is sown.", turn=tick))
         return out
+
+
+_LEAVES = {"healthy": 100, "yellowing": 60, "dying": 20}
+_SOIL = {"dry": 10, "moist": 50, "wet": 90}
+
+
+def _water_signal(plot: dict[str, Any]) -> int:
+    """What the farmer can read off the plot: a depth gauge in a paddy, how the soil feels."""
+    if "water_depth_cm" in plot:
+        return int(plot["water_depth_cm"] * 10)
+    return _SOIL[plot["soil"]]
 
 
 def _snapshot(me: str, seen: dict[str, Any]) -> dict[str, Any]:

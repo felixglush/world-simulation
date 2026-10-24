@@ -166,3 +166,56 @@ def test_the_cli_refuses_to_run_without_a_finite_budget():
     with pytest.raises(SystemExit) as exit_info:
         main(["--days", "2"])
     assert exit_info.value.code == 2
+
+
+def test_prompts_carry_only_what_the_farmer_can_read_off_the_plot():
+    _, chat = run(days=3)
+    for request in chat.requests:
+        if request.purpose in ("react_check", "decide"):
+            context = json.loads(request.user)
+            for line in context["trends"]:
+                if line.startswith("health_pct"):
+                    assert any(f"{word}" in line for word in ("100", "60", "20"))
+                if line.startswith("water_mm"):
+                    me = context["world"]["me"]["id"]
+                    assert not me.startswith("wheat") or any(v in line for v in ("10", "50", "90"))
+
+
+def test_stray_fields_are_dropped_and_wrong_types_are_rejected_by_the_world():
+    def decide(context, request):
+        if context["world"]["me"]["id"] != "rice_1":
+            return {"actions": [{"name": "rest"}], "rationale": "wait"}
+        flat = {"plot": "paddy_1", "channel": "intake", "kg": 30, "mm": 5, "open": True}
+        return {
+            "actions": [
+                {"name": "sow_nursery", **flat},
+                {"name": "set_gate", **flat, "open": "no"},
+            ],
+            "rationale": "fill every field",
+        }
+
+    result, _ = run(decide, days=1)
+    outcomes = {e["name"]: e for e in result.events if e["type"] == "action"}
+    assert outcomes["sow_nursery"]["ok"]
+    assert not outcomes["set_gate"]["ok"] and "true or false" in outcomes["set_gate"]["message"]
+    assert result.world.farmers["rice_1"].nursery is not None
+
+
+def test_a_plan_may_reach_past_the_old_station_horizon():
+    def decide(context, request):
+        return {
+            "actions": [{"name": "rest"}],
+            "plan": [{"due_tick": 400, "intent": "harvest wheat"}],
+            "rationale": "long game",
+        }
+
+    result, _ = run(decide, days=1)
+    plans = [e for e in result.events if e["type"] == "plan"]
+    assert plans and plans[0]["steps"][0][0] == 400
+
+
+def test_the_first_mover_rotates_each_day():
+    from farm_world.loop import _order
+
+    agents = {name: None for name in ("a", "b", "c")}
+    assert [_order(agents, t)[0] for t in range(4)] == ["a", "b", "c", "a"]

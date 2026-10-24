@@ -9,7 +9,7 @@ from station_control.society.agents import Recorder
 from station_control.society.llm import ChatModel
 from station_control.society.roles import new_stream
 
-from .agent import FarmDecision, FarmerAgent
+from .agent import MAX_DAYS, FarmDecision, FarmerAgent
 from .perception import Perception
 from .roles import FARMER_GATE, farmer_spec
 from .router import FarmRouter
@@ -49,8 +49,8 @@ def run_farm(
     days: int,
     reflection_threshold: int = REFLECTION_THRESHOLD,
 ) -> FarmResult:
-    if type(days) is not int or not 1 <= days <= 336:
-        raise ValueError("A farm run lasts between 1 and 336 days")
+    if type(days) is not int or not 1 <= days <= MAX_DAYS:
+        raise ValueError(f"A farm run lasts between 1 and {MAX_DAYS} days")
     rec = Recorder(chat)
     agents = make_agents(world, reflection_threshold)
     router = FarmRouter({f.id: f.community for f in world.farmers.values()})
@@ -68,20 +68,14 @@ def run_farm(
                 to=message.recipient,
             )
         proposals: list[tuple[str, FarmDecision | None]] = []
-        for farmer_id, agent in agents.items():
+        for farmer_id in _order(agents, tick):
+            agent = agents[farmer_id]
             seen = world.view(farmer_id)
-            plot = world.plots[world.farmers[farmer_id].plot_id]
-            view = perception[farmer_id].view(
-                tick,
-                seen,
-                tuple(inboxes.get(farmer_id, ())),
-                plot.water_mm,
-                plot.crop.health if plot.crop else None,
-            )
+            view = perception[farmer_id].view(tick, seen, tuple(inboxes.get(farmer_id, ())))
             seen["directory"] = router.directory(farmer_id)
             seen["tick"] = tick
             proposals.append((farmer_id, agent.step(view, seen, rec)))
-        for farmer_id, decision in proposals:
+        for farmer_id, decision in proposals:  # already in today's rotated order
             if decision is not None:
                 _apply(world, router, agents[farmer_id], farmer_id, decision, tick, rec)
         world.end_day()
@@ -91,6 +85,13 @@ def run_farm(
         tuple(rec.calls),
         router.sent,
     )
+
+
+def _order(agents: dict[str, FarmerAgent], tick: int) -> list[str]:
+    """Rotate who goes first each day so no farmer always wins a same-day conflict."""
+    ids = sorted(agents)
+    shift = tick % len(ids)
+    return ids[shift:] + ids[:shift]
 
 
 def _apply(

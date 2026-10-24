@@ -20,7 +20,7 @@ DAILY_LABOR = 10.0
 HOUSEHOLD_KG_PER_DAY = 2.4
 PLOT_AREA_HA = 0.6
 MANURE_NITROGEN = 25.0
-WELL_MM_PER_DAY = 150.0
+WELL_MM_PER_DAY = {"riverbend": 100.0, "highfield": 150.0}
 RIVER_DATUM_MM = 4500.0  # river surface elevation when the river stands at 600 mm
 
 
@@ -47,6 +47,7 @@ class Plot:
     crop: CropState | None = None
     wet_days: int = 0
     harvest_work: float = 0.0
+    since_rain: int = 99
 
     @property
     def holds(self) -> float:
@@ -64,6 +65,10 @@ class Channel:
     last_flow: float = 0.0
     last_changed_by: str = ""
     path: tuple[tuple[int, int], ...] = ()
+
+
+CANAL_STORAGE_MM = 60.0
+CANAL_SEEPAGE = 0.15
 
 
 @dataclass(slots=True)
@@ -102,26 +107,52 @@ class ActionResult:
     details: dict[str, Any] = field(default_factory=dict)
 
 
-ACTIONS = (
-    "rest",
-    "sow_nursery",
-    "puddle",
-    "transplant",
-    "till",
-    "sow",
-    "weed",
-    "fertilize",
-    "scout",
-    "treat",
-    "set_gate",
-    "clear_canal",
-    "repair_bund",
-    "pump",
-    "harvest",
-    "thresh",
-    "dry",
-    "mill",
-)
+ACTION_PARAMS: dict[str, dict[str, str]] = {
+    "rest": {},
+    "sow_nursery": {"kg": "num:20:500"},
+    "puddle": {"plot": "str"},
+    "transplant": {"plot": "str"},
+    "till": {"plot": "str"},
+    "sow": {"plot": "str", "variety": "variety", "kg": "num:50:500"},
+    "weed": {"plot": "str"},
+    "fertilize": {"plot": "str", "units": "num:0.5:20"},
+    "scout": {"plot": "str"},
+    "treat": {"plot": "str"},
+    "set_gate": {"channel": "str", "open": "bool"},
+    "clear_canal": {"channel": "str"},
+    "repair_bund": {"plot": "str"},
+    "pump": {"plot": "str", "mm": "num:1:150"},
+    "harvest": {"plot": "str"},
+    "thresh": {"kg": "num:1:100000"},
+    "dry": {"kg": "num:1:100000"},
+    "mill": {"item": "item", "kg": "num:1:100000"},
+    "save_seed": {"item": "item", "kg": "num:1:100000"},
+}
+ACTIONS = tuple(ACTION_PARAMS)
+MILLABLE = ("paddy_dry", "wheat_grain")
+
+
+def check_params(name: str, params: dict[str, Any]) -> str | None:
+    """The authoritative parameter check: right names, right types, finite and in range."""
+    allowed = ACTION_PARAMS[name]
+    for key, value in params.items():
+        kind = allowed.get(key)
+        if kind is None:
+            return f"{name} takes {sorted(allowed) or 'no parameters'}, not {key}"
+        if kind == "str" and not (isinstance(value, str) and 0 < len(value) <= 64):
+            return f"{key} must be a short string"
+        if kind == "bool" and type(value) is not bool:
+            return f"{key} must be true or false"
+        if kind == "variety" and value not in ("winter", "spring"):
+            return "variety must be winter or spring"
+        if kind == "item" and value not in MILLABLE:
+            return f"{key} must be one of {MILLABLE}"
+        if kind.startswith("num"):
+            _, low, high = kind.split(":")
+            number = isinstance(value, (int, float)) and type(value) is not bool
+            if not number or not math.isfinite(value) or not float(low) <= value <= float(high):
+                return f"{key} must be a number from {low} to {high}"
+    return None
 
 
 class FarmWorld:
@@ -142,7 +173,7 @@ class FarmWorld:
         self.canal_nodes = {c.id: c for c in canals}
         self.channels = {c.id: c for c in channels}
         self.tiles = tiles
-        self.well_used = 0.0
+        self.well_used: dict[str, float] = defaultdict(float)
         self.weather: Weather = self.climate.weather(start_day)
         self.events: list[dict[str, Any]] = []
         self._rng_seed = seed
@@ -157,11 +188,17 @@ class FarmWorld:
             return ActionResult(False, f"unknown farmer {farmer_id}")
         if name not in ACTIONS:
             return ActionResult(False, f"unknown action {name}")
-        handler = getattr(self, f"_do_{name}")
+        error = check_params(name, params)
         try:
-            result = handler(farmer, **params)
+            result = (
+                ActionResult(False, error)
+                if error
+                else getattr(self, f"_do_{name}")(farmer, **params)
+            )
         except TypeError:
-            result = ActionResult(False, f"bad parameters for {name}: {sorted(params)}")
+            result = ActionResult(
+                False, f"{name} is missing a parameter: {sorted(ACTION_PARAMS[name])}"
+            )
         self.events.append(
             {
                 "type": "action" if result.ok else "rejected",
@@ -243,7 +280,7 @@ class FarmWorld:
             return ActionResult(False, f"seedlings are {age} days old; wait until about 18-35")
         if error := self._spend(farmer, 8):
             return ActionResult(False, error)
-        state = CropState("rice", self.day)
+        state = CropState("rice", self.day, density=min(1.0, farmer.nursery["kg"] / 30.0))
         state.seedling_age = age
         state.health = 1.0 if age <= 35 else 0.85 if age <= 45 else 0.7
         found.crop = state
@@ -279,7 +316,7 @@ class FarmWorld:
         if error := self._spend(farmer, 3):
             return ActionResult(False, error)
         farmer.add("wheat_seed", -kg)
-        found.crop = CropState("wheat", self.day, variety=variety)
+        found.crop = CropState("wheat", self.day, variety=variety, density=min(1.0, kg / 70.0))
         return ActionResult(True, f"sowed {variety} wheat")
 
     def _do_weed(self, farmer: Farmer, plot: str | None = None) -> ActionResult:
@@ -371,13 +408,15 @@ class FarmWorld:
         found = self._own_plot(farmer, plot)
         if isinstance(found, str):
             return ActionResult(False, found)
-        if mm <= 0 or self.well_used + mm > WELL_MM_PER_DAY:
-            return ActionResult(False, "the shared well cannot supply that much today")
+        used = self.well_used[farmer.community]
+        if mm <= 0 or used + mm > WELL_MM_PER_DAY[farmer.community]:
+            left = WELL_MM_PER_DAY[farmer.community] - used
+            return ActionResult(False, f"your community's well has {left:g} mm left today")
         if error := self._spend(farmer, math.ceil(mm / 25)):
             return ActionResult(False, error)
-        self.well_used += mm
+        self.well_used[farmer.community] += mm
         found.water_mm = min(found.water_mm + mm, found.holds)
-        return ActionResult(True, f"pumped {mm:g} mm from the shared well")
+        return ActionResult(True, f"pumped {mm:g} mm from your community well")
 
     def _do_harvest(self, farmer: Farmer, plot: str | None = None) -> ActionResult:
         found = self._own_plot(farmer, plot)
@@ -400,7 +439,8 @@ class FarmWorld:
                 True, f"cut part of the crop ({share:.0%} done)", {"progress": share}
             )
         found.harvest_work = 0.0
-        kg = round(crops.grain_yield(crop) * PLOT_AREA_HA, 1)
+        wet_loss = 0.92 if found.crop_kind == "rice" and found.water_mm > 30 else 1.0
+        kg = round(crops.grain_yield(crop) * PLOT_AREA_HA * wet_loss, 1)
         item = "paddy_wet" if found.crop_kind == "rice" else "wheat_sheaves"
         farmer.add(item, kg)
         found.crop = None
@@ -440,12 +480,17 @@ class FarmWorld:
         return self._process(farmer, "wheat_sheaves", "wheat_grain", 100, 0.95, kg)
 
     def _do_dry(self, farmer: Farmer, kg: float = 1e9) -> ActionResult:
-        return self._process(farmer, "paddy_wet", "paddy_dry", 400, 0.98, kg, rainy_blocks=True)
+        return self._process(farmer, "paddy_wet", "paddy_dry", 400, 0.9, kg, rainy_blocks=True)
 
-    def _do_mill(self, farmer: Farmer, kg: float = 1e9) -> ActionResult:
-        if farmer.has("paddy_dry") > 0:
+    def _do_mill(self, farmer: Farmer, item: str | None = None, kg: float = 1e9) -> ActionResult:
+        item = item or ("paddy_dry" if farmer.has("paddy_dry") > 0 else "wheat_grain")
+        if item == "paddy_dry":
             return self._process(farmer, "paddy_dry", "rice", 100, 0.65, kg)
         return self._process(farmer, "wheat_grain", "flour", 100, 0.75, kg)
+
+    def _do_save_seed(self, farmer: Farmer, item: str, kg: float = 1e9) -> ActionResult:
+        seed = "rice_seed" if item == "paddy_dry" else "wheat_seed"
+        return self._process(farmer, item, seed, 200, 1.0, kg)
 
     # ---- the day step --------------------------------------------------------------------
 
@@ -459,7 +504,7 @@ class FarmWorld:
         self.events.append(self.snapshot())
         self.day += 1
         self.weather = self.climate.weather(self.day)
-        self.well_used = 0.0
+        self.well_used.clear()
 
     def _river_head(self, weather: Weather) -> float:
         return RIVER_DATUM_MM + weather.river_mm - 600.0
@@ -479,6 +524,7 @@ class FarmWorld:
         for plot in self.plots.values():
             plot.water_mm += weather.rain_mm
             plot.wet_days = plot.wet_days + 1 if weather.rain_mm >= 2 else 0
+            plot.since_rain = 0 if weather.rain_mm >= 2 else plot.since_rain + 1
         for channel in self.channels.values():
             channel.last_flow = 0.0
             if not channel.gate_open:
@@ -506,6 +552,8 @@ class FarmWorld:
             channel.last_flow = round(flow, 1)
             if channel.src == "river":
                 channel.silt = min(0.9, channel.silt + (0.004 if weather.river_mm > 900 else 0.001))
+        for canal in self.canal_nodes.values():
+            canal.water_mm = min(CANAL_STORAGE_MM, canal.water_mm) * (1 - CANAL_SEEPAGE)
         for plot in self.plots.values():
             self._overflow(plot)
 
@@ -536,8 +584,10 @@ class FarmWorld:
         weed_rate = 0.004 if plot.crop_kind == "rice" and plot.water_mm > 50 else 0.012
         plot.weeds = min(1.0, plot.weeds + weed_rate * (1 if weather.temp_mean > 8 else 0.2))
         if plot.crop_kind == "rice":
+            humid = plot.crop is not None and plot.since_rain <= 2
             warm = 22 <= weather.temp_mean <= 32
-            plot.pest = min(1.0, plot.pest + (0.012 if warm and plot.crop else 0.0))
+            grows = warm and humid
+            plot.pest = min(1.0, max(0.0, plot.pest + (0.015 if grows else -0.006)))
         else:
             cool_wet = wet and 10 <= weather.temp_mean <= 22 and plot.wet_days >= 2
             plot.pest = min(1.0, max(0.0, plot.pest + (0.04 if cool_wet and plot.crop else -0.01)))
@@ -601,8 +651,7 @@ class FarmWorld:
         plots = {p.id: self._plot_view(p, farmer) for p in self.plots.values()}
         food = farmer.has("rice") + farmer.has("flour")
         return {
-            "day": self.day,
-            "day_of_year": self.day % 365,
+            "date": _date(self.day),
             "weather": {
                 "temp_c": weather.temp_mean,
                 "low_c": weather.temp_min,
@@ -631,7 +680,8 @@ class FarmWorld:
                 }
                 for c in self.channels.values()
             },
-            "well_water_left_mm": WELL_MM_PER_DAY - self.well_used,
+            "well_water_left_mm": WELL_MM_PER_DAY[farmer.community]
+            - self.well_used[farmer.community],
             "neighbors": sorted(
                 f.id
                 for f in self.farmers.values()
@@ -670,6 +720,19 @@ class FarmWorld:
             if plot.id in viewer.scouted:
                 seen["last_scout"] = viewer.scouted[plot.id]
         return seen
+
+
+_MONTHS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+_MONTH_NAMES = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+
+
+def _date(day: int) -> str:
+    left = day % 365
+    for name, length in zip(_MONTH_NAMES, _MONTHS, strict=True):
+        if left < length:
+            return f"{name} {left + 1}"
+        left -= length
+    return "Dec 31"
 
 
 def _level(value: float) -> str:
