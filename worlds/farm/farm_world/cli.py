@@ -107,7 +107,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         arguments.output.parent.mkdir(parents=True, exist_ok=True)
         with arguments.output.open("x", encoding="utf-8") as handle:
             handle.write(
-                json.dumps({"type": "run", "summary": summary, "start_day": arguments.start_day})
+                json.dumps(
+                    {
+                        "type": "run",
+                        "summary": summary,
+                        "start_day": arguments.start_day,
+                        "seed": arguments.seed,
+                        "reflection_threshold": arguments.reflection_threshold,
+                    }
+                )
                 + "\n"
             )
             for event in merged_log(result, arguments.start_day):
