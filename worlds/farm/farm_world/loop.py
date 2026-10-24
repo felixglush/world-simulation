@@ -103,6 +103,7 @@ def _apply(
     tick: int,
     rec: Recorder,
 ) -> None:
+    rec.emit(tick, farmer_id, "decision", rationale=decision.rationale)
     for name, params in decision.actions:
         result = world.act(farmer_id, name, **params)
         rec.emit(

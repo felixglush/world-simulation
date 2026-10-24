@@ -119,3 +119,46 @@ def default_world(seed: int = 1, start_day: int = START_DAY) -> FarmWorld:
         Channel("outlet_3", "paddy_3", "drain", 40.0, path=((15, 16), (16, 16))),
     ]
     return FarmWorld(seed, start_day, plots, farmers, canals, channels, tiles)
+
+
+def layout_dict(world: FarmWorld) -> dict[str, object]:
+    """Static map data for the viewer: tiles, terrain heights, plots, canals and homes."""
+    height = {"river": 0.0, "grass": 1.0, "upland": 3.0, "field": 3.0, "hill": 4.5, "house": 3.0}
+    z = [[height.get(kind, 1.0) for kind in row] for row in world.tiles]
+    plots = {}
+    for plot in world.plots.values():
+        level = 1.0 + (plot.elevation_mm - 4000.0) / 400.0 if plot.crop_kind == "rice" else 3.0
+        plots[plot.id] = {
+            "kind": plot.crop_kind,
+            "owner": plot.owner,
+            "community": plot.community,
+            "rect": [plot.x, plot.y, plot.w, plot.h],
+        }
+        for dy in range(plot.h):
+            for dx in range(plot.w):
+                z[plot.y + dy][plot.x + dx] = level
+    return {
+        "width": WIDTH,
+        "height": HEIGHT,
+        "tiles": ["".join(_TILE_CODE[kind] for kind in row) for row in world.tiles],
+        "tile_codes": {code: kind for kind, code in _TILE_CODE.items()},
+        "z": z,
+        "plots": plots,
+        "channels": {c.id: [list(p) for p in c.path] for c in world.channels.values()},
+        "farmers": {
+            f.id: {"home": list(f.home), "community": f.community, "plot": f.plot_id}
+            for f in world.farmers.values()
+        },
+    }
+
+
+_TILE_CODE = {
+    "grass": "g",
+    "river": "r",
+    "paddy": "p",
+    "field": "f",
+    "upland": "u",
+    "hill": "h",
+    "house": "H",
+    "well": "w",
+}

@@ -639,7 +639,12 @@ class FarmWorld:
                 for c in self.channels.values()
             },
             "farmers": {
-                f.id: {"at": list(f.at), "activity": f.activity, "labor": f.labor}
+                f.id: {
+                    "at": list(f.at),
+                    "activity": f.activity,
+                    "labor": f.labor,
+                    "inventory": {k: round(v) for k, v in sorted(f.inventory.items()) if v},
+                }
                 for f in self.farmers.values()
             },
         }

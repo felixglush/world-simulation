@@ -11,7 +11,7 @@ from typing import Sequence
 from station_control.provider_support import CallBudget
 from station_control.society.llm import LUNA, TERRA, OpenRouterChat
 
-from .layout import START_DAY, default_world
+from .layout import START_DAY, default_world, layout_dict
 from .loop import FarmResult, merged_log, run_farm
 
 DEFAULT_MODELS = {"react": LUNA, "score": LUNA, "farmer": TERRA, "reflect": TERRA}
@@ -107,7 +107,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         arguments.output.parent.mkdir(parents=True, exist_ok=True)
         with arguments.output.open("x", encoding="utf-8") as handle:
             handle.write(
-                json.dumps({"type": "run", "summary": summary, "start_day": arguments.start_day})
+                json.dumps(
+                    {
+                        "type": "run",
+                        "summary": summary,
+                        "start_day": arguments.start_day,
+                        "layout": layout_dict(result.world),
+                    }
+                )
                 + "\n"
             )
             for event in merged_log(result, arguments.start_day):
