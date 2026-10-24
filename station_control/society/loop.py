@@ -305,7 +305,7 @@ def _crew_world(view: PublicWorldView, router: MessageRouter) -> dict[str, objec
             }
             for e in view.evidence[-10:]
         ],
-        "directory": sorted(router.recipients() - {view.world_id}),
+        "directory": router.directory_for(view.world_id),
     }
 
 

@@ -542,3 +542,21 @@ def test_attestation_for_an_unsold_batch_is_rejected_in_the_run():
     outcome = run_story(FakeChat(handler), SocietyConfig("supply_chain", 4, adversary=False))
     assert any(e["type"] == "attestation_rejected" for e in outcome["result"].log)
     assert not outcome["result"].messages
+
+
+def test_directory_hides_unlisted_identities_until_they_speak():
+    state = create_deception_simulation("benign").state
+    state = replace(state, station=replace(state.station, turn=2))
+    router = MessageRouter(
+        {"captain": "station", "supplier": "industrial"},
+        {
+            "captain": frozenset({"station.captain"}),
+            "adversary": frozenset({"contact.anon", "industrial.qa-desk", "port.dispatch"}),
+        },
+        {"adversary": frozenset({"contact.anon", "industrial.qa-desk", "port.dispatch"})},
+        frozenset({"port.dispatch"}),
+    )
+    assert router.directory_for("station") == ["industrial", "port.dispatch"]
+    router.send(state, "adversary", "industrial.qa-desk", "station", "Batch A is fine.", "deceive")
+    assert router.directory_for("station") == ["industrial", "industrial.qa-desk", "port.dispatch"]
+    assert "contact.anon" not in router.directory_for("station")

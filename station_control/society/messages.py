@@ -56,6 +56,15 @@ class MessageRouter:
     def recipients(self) -> set[str]:
         return {*self._worlds.values(), *(r for ids in self._mailboxes.values() for r in ids)}
 
+    def directory_for(self, world_id: str) -> list[str]:
+        """Recipients a world can see: other worlds, registered parties, and anyone who has
+        already written to it. Unlisted mailbox identities stay hidden until they speak."""
+        spoken = {m.identity for m in self._sent if m.recipient == world_id}
+        mailbox_ids = {r for ids in self._mailboxes.values() for r in ids}
+        visible = {*self._worlds.values()} - {world_id}
+        visible |= {r for r in mailbox_ids if r in self.registry or r in spoken}
+        return sorted(visible)
+
     def owner_of(self, recipient: str) -> str | None:
         """The agent that reads messages addressed to this recipient, if any."""
         for agent, world in self._worlds.items():
