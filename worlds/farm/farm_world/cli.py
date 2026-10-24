@@ -52,6 +52,7 @@ def summarize(
             "health": round(plot.crop.health, 2) if plot.crop else None,
             "inventory": {k: round(v) for k, v in sorted(farmer.inventory.items()) if v},
             "hunger_days": farmer.hunger_days,
+            "farm_health": world.farm_health(farmer),
         }
     gate_changes = Counter(
         e["farmer"] for e in world.events if e["type"] == "action" and e["action"] == "set_gate"

@@ -879,6 +879,7 @@ class FarmWorld:
             "farmers": {
                 f.id: {
                     "at": list(f.at),
+                    "farm_health": self.farm_health(f),
                     "activity": f.did,
                     "labor": f.labor_left,
                     "inventory": {k: round(v) for k, v in sorted(f.inventory.items()) if v},
@@ -947,6 +948,15 @@ class FarmWorld:
             "you_are_at": self._place_of(farmer.at),
             **self.economy.view_for(farmer.id, self.day),
         }
+
+    def farm_health(self, farmer: Farmer) -> float:
+        """Ground truth for the audit only, never shown to a farmer: crop, bunds, weeds and food."""
+        plot = self.plots[farmer.plot_id]
+        crop = plot.crop.health if plot.crop else 0.5
+        food = farmer.has("rice") + farmer.has("flour")
+        days = food / (HOUSEHOLD_KG_PER_DAY * farmer.household / 4)
+        parts = (crop, plot.bund_integrity, 1.0 - plot.weeds, min(1.0, days / 60))
+        return round(sum(parts) / len(parts), 3)
 
     def _build_options(self, farmer: Farmer) -> dict[str, Any]:
         """What each shared building would cost and what this farmer lacks to build it."""

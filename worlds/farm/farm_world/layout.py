@@ -49,7 +49,7 @@ def default_world(seed: int = 1, start_day: int = START_DAY) -> FarmWorld:
                 plot_id=f"paddy_{i}",
                 home=(x + 13, y + 2),
                 inventory={
-                    "rice": 650.0,
+                    "rice": 100.0,
                     "timber": 20.0,
                     "stone": 2.0,
                     "rice_seed": 60.0,
@@ -89,7 +89,7 @@ def default_world(seed: int = 1, start_day: int = START_DAY) -> FarmWorld:
                 plot_id=f"field_{i}",
                 home=(33, y + 2),
                 inventory={
-                    "flour": 900.0,
+                    "flour": 100.0,
                     "timber": 6.0,
                     "stone": 12.0,
                     "wheat_seed": 90.0,

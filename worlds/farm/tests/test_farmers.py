@@ -359,3 +359,21 @@ def test_a_chatty_channel_cannot_wake_a_farmer_more_than_four_times_a_day():
             per_farmer[me] = per_farmer.get(me, 0) + 1
     assert per_farmer and max(per_farmer.values()) <= 4 * 2
     assert not [r for r in chat.requests if r.purpose == "score_importance"]
+
+
+def test_farmers_are_told_to_keep_their_farm_healthy_and_see_what_they_just_tried():
+    first = {}
+
+    def decide(context, request):
+        me = context["world"]["me"]["id"]
+        first.setdefault(me, []).append(context.get("your_recent_results"))
+        return {"actions": [{"name": "scout"}], "rationale": "look"}
+
+    _, chat = run(decide, days=2)
+    assert all("keep your farm healthy" in r.system for r in chat.requests if r.purpose == "decide")
+    assert any(results for runs in first.values() for results in runs if results)
+    assert all(
+        "keep your farm healthy" in r.system
+        for r in chat.requests
+        if r.purpose in ("decide", "react_check")
+    )

@@ -322,7 +322,9 @@ class Agent:
             + ([s[1] for s in self.plan.steps] if self.plan else [])
         )
         retrieved = self.memory.retrieve(query, view.tick)
-        reflections = [r for r in self.memory.records if r.kind == "reflection"][-3:]
+        reflections = [r for r in self.memory.records if r.kind == "reflection"][
+            -(5 if self._conversation else 3) :
+        ]
         return {
             "tick": view.tick,
             "world": world,
@@ -345,8 +347,14 @@ class Agent:
                 else None
             ),
             "your_recent_messages": self._sent[-5:],
+            **({"your_recent_results": self._recent_results()} if self._conversation else {}),
             "speak_as": list(self.identities),
         }
+
+    def _recent_results(self) -> list[str]:
+        """What happened to the last few things this agent tried, so failures stay in view."""
+        done = [r for r in self.memory.records if r.kind == "action"][-6:]
+        return [f"t{r.tick}: {r.text}" for r in done]
 
     def _react_request(self, context: dict[str, object]) -> ChatRequest:
         if self._conversation:

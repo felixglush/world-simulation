@@ -30,7 +30,7 @@ def test_a_community_builds_each_structure_once_and_everyone_in_it_benefits():
         world.farmers[who].add("paddy_dry", 3000)
         world.farmers[who].labor = 10
     assert world.act("wheat_2", "mill", item="paddy_dry").ok
-    assert world.farmers["rice_1"].has("rice") == 650  # nothing milled yet
+    assert world.farmers["rice_1"].has("rice") == 100  # nothing milled yet
     assert world.act("rice_1", "mill", item="paddy_dry").ok
     # Highfield's mill does 3000 kg for 10 labor; Riverbend, without one, does 1000 kg.
     assert world.farmers["wheat_2"].has("paddy_dry") == 0
@@ -47,7 +47,7 @@ def test_a_mill_triples_what_a_days_labor_can_mill():
         farmer.add("wheat_grain", 5000)
         farmer.labor = 10
         world.act("wheat_2", "mill", item="wheat_grain")
-        return farmer.has("flour") - 900
+        return farmer.has("flour") - 100
 
     assert milled(True) == 3 * milled(False)
 
