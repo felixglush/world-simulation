@@ -938,6 +938,7 @@ class FarmWorld:
                 for s in self.economy.structures
             ],
             "map": self._map_view(),
+            "could_build": self._build_options(farmer),
             "people_nearby": {
                 f.id: {"at": self._place_of(f.at), "doing": f.activity}
                 for f in self.farmers.values()
@@ -945,6 +946,21 @@ class FarmWorld:
             },
             "you_are_at": self._place_of(farmer.at),
             **self.economy.view_for(farmer.id, self.day),
+        }
+
+    def _build_options(self, farmer: Farmer) -> dict[str, Any]:
+        """What each shared building would cost and what this farmer lacks to build it."""
+        return {
+            kind: {
+                "cost": dict(cost),
+                "you_lack": {
+                    m: round(n - farmer.has(m), 1)
+                    for m, n in cost.items()
+                    if m != "labor" and farmer.has(m) < n
+                },
+            }
+            for kind, cost in BUILDINGS.items()
+            if not self.economy.has(farmer.community, kind)
         }
 
     def _map_view(self) -> dict[str, Any]:

@@ -313,3 +313,13 @@ def test_a_channel_is_not_silenced_by_a_per_pair_cap():
     router = FarmRouter({"a": "x", "b": "x", "c": "x"})
     for day in range(40):
         assert router.send("a", "#x", f"post {day}", day)[1] is None
+
+
+def test_farmers_see_what_each_shared_building_costs_and_what_they_lack():
+    world = default_world()
+    rice = world.view("rice_1")["could_build"]
+    assert rice["mill"]["you_lack"] == {"stone": 6.0}
+    assert rice["granary"]["you_lack"] == {}
+    wheat = world.view("wheat_1")["could_build"]
+    assert wheat["mill"]["you_lack"] == {}
+    assert wheat["granary"]["you_lack"] == {}

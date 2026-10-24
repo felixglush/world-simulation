@@ -56,6 +56,8 @@ A farmer proposes up to six actions each time they think, plus up to two message
 
 Any other name is also allowed: `build` {kind: "drying rack", timber, stone, labor}. The farmer chooses what to put in (up to 20 timber, 20 stone, 20 labor; labor defaults to 4). It is placed on the map and visible to everyone, and has no mechanical effect, so what it means is for the farmers to agree. Open kinds are not limited to one per community.
 
+Each farmer's view lists the shared buildings their community lacks, with the cost and what that farmer is short of (`could_build`).
+
 The building goes on the nearest free ground to the builder's home. Riverbend starts with 20 timber and 2 stone per farmer, Highfield with 6 timber and 12 stone, so the valley cannot build a mill without stone from the uplands.
 
 ## Trade and gifts
