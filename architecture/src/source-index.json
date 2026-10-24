@@ -2,8 +2,8 @@
   "revision": "11d88590b5d99305a58cd6721c13ec07e6b9d0f1",
   "simulatorVersion": "0.3.2",
   "sources": {
-    "station_control/cli.py:main": {
-      "path": "station_control/cli.py",
+    "worlds/station/station_control/cli.py:main": {
+      "path": "worlds/station/station_control/cli.py",
       "symbol": "main",
       "startLine": 523,
       "endLine": 538,
@@ -11,8 +11,8 @@
       "fields": [],
       "fileHash": "dd965164aa7743605188b9eb5b003392907f4e5930aa1ca298fff417fd7464b8"
     },
-    "station_control/cli.py:_read_live_settings": {
-      "path": "station_control/cli.py",
+    "worlds/station/station_control/cli.py:_read_live_settings": {
+      "path": "worlds/station/station_control/cli.py",
       "symbol": "_read_live_settings",
       "startLine": 211,
       "endLine": 267,
@@ -20,8 +20,8 @@
       "fields": [],
       "fileHash": "dd965164aa7743605188b9eb5b003392907f4e5930aa1ca298fff417fd7464b8"
     },
-    "station_control/cli.py:_make_providers": {
-      "path": "station_control/cli.py",
+    "worlds/station/station_control/cli.py:_make_providers": {
+      "path": "worlds/station/station_control/cli.py",
       "symbol": "_make_providers",
       "startLine": 270,
       "endLine": 298,
@@ -29,8 +29,8 @@
       "fields": [],
       "fileHash": "dd965164aa7743605188b9eb5b003392907f4e5930aa1ca298fff417fd7464b8"
     },
-    "station_control/scenarios.py:ScenarioDefinition": {
-      "path": "station_control/scenarios.py",
+    "worlds/station/station_control/scenarios.py:ScenarioDefinition": {
+      "path": "worlds/station/station_control/scenarios.py",
       "symbol": "ScenarioDefinition",
       "startLine": 32,
       "endLine": 51,
@@ -59,8 +59,8 @@
       ],
       "fileHash": "0a91cdb15b781d0324f31887defe617f529b99c8eb018d1282641a674c4d9d7e"
     },
-    "station_control/scenarios.py:create_configured_world": {
-      "path": "station_control/scenarios.py",
+    "worlds/station/station_control/scenarios.py:create_configured_world": {
+      "path": "worlds/station/station_control/scenarios.py",
       "symbol": "create_configured_world",
       "startLine": 321,
       "endLine": 341,
@@ -68,8 +68,8 @@
       "fields": [],
       "fileHash": "0a91cdb15b781d0324f31887defe617f529b99c8eb018d1282641a674c4d9d7e"
     },
-    "station_control/scenarios.py:create_world": {
-      "path": "station_control/scenarios.py",
+    "worlds/station/station_control/scenarios.py:create_world": {
+      "path": "worlds/station/station_control/scenarios.py",
       "symbol": "create_world",
       "startLine": 91,
       "endLine": 164,
@@ -82,8 +82,8 @@
       ],
       "fileHash": "0a91cdb15b781d0324f31887defe617f529b99c8eb018d1282641a674c4d9d7e"
     },
-    "station_control/persistence.py:read_run_log": {
-      "path": "station_control/persistence.py",
+    "worlds/station/station_control/persistence.py:read_run_log": {
+      "path": "worlds/station/station_control/persistence.py",
       "symbol": "read_run_log",
       "startLine": 222,
       "endLine": 277,
@@ -91,8 +91,8 @@
       "fields": [],
       "fileHash": "d89fa323d2b728d0ebd47b1225eca9bcf9610ef50f3fa6563767fede65db6bc1"
     },
-    "station_control/persistence.py:render_run_log": {
-      "path": "station_control/persistence.py",
+    "worlds/station/station_control/persistence.py:render_run_log": {
+      "path": "worlds/station/station_control/persistence.py",
       "symbol": "render_run_log",
       "startLine": 280,
       "endLine": 314,
@@ -100,8 +100,8 @@
       "fields": [],
       "fileHash": "d89fa323d2b728d0ebd47b1225eca9bcf9610ef50f3fa6563767fede65db6bc1"
     },
-    "station_control/cli.py:_rerun": {
-      "path": "station_control/cli.py",
+    "worlds/station/station_control/cli.py:_rerun": {
+      "path": "worlds/station/station_control/cli.py",
       "symbol": "_rerun",
       "startLine": 508,
       "endLine": 520,
@@ -109,8 +109,8 @@
       "fields": [],
       "fileHash": "dd965164aa7743605188b9eb5b003392907f4e5930aa1ca298fff417fd7464b8"
     },
-    "station_control/adversary.py:apply_adversary_action": {
-      "path": "station_control/adversary.py",
+    "worlds/station/station_control/adversary.py:apply_adversary_action": {
+      "path": "worlds/station/station_control/adversary.py",
       "symbol": "apply_adversary_action",
       "startLine": 180,
       "endLine": 255,
@@ -118,8 +118,8 @@
       "fields": [],
       "fileHash": "4703c01db4e7cc67abc087763c1ad47f0dd51d1272fcab1689651075a1af2e78"
     },
-    "station_control/adversary.py:eligible_adversary_actions": {
-      "path": "station_control/adversary.py",
+    "worlds/station/station_control/adversary.py:eligible_adversary_actions": {
+      "path": "worlds/station/station_control/adversary.py",
       "symbol": "eligible_adversary_actions",
       "startLine": 153,
       "endLine": 177,
@@ -127,8 +127,8 @@
       "fields": [],
       "fileHash": "4703c01db4e7cc67abc087763c1ad47f0dd51d1272fcab1689651075a1af2e78"
     },
-    "station_control/domain.py:StationState": {
-      "path": "station_control/domain.py",
+    "worlds/station/station_control/domain.py:StationState": {
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "StationState",
       "startLine": 123,
       "endLine": 156,
@@ -257,8 +257,8 @@
       ],
       "fileHash": "dae7c3657fccfe990394c766e707ba7d8a7a38626992f24183ebfc576c2530bf"
     },
-    "station_control/domain.py:advance_turn": {
-      "path": "station_control/domain.py",
+    "worlds/station/station_control/domain.py:advance_turn": {
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "advance_turn",
       "startLine": 203,
       "endLine": 229,
@@ -275,8 +275,8 @@
       ],
       "fileHash": "dae7c3657fccfe990394c766e707ba7d8a7a38626992f24183ebfc576c2530bf"
     },
-    "station_control/domain.py:apply_action": {
-      "path": "station_control/domain.py",
+    "worlds/station/station_control/domain.py:apply_action": {
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "apply_action",
       "startLine": 172,
       "endLine": 200,
@@ -284,8 +284,8 @@
       "fields": [],
       "fileHash": "dae7c3657fccfe990394c766e707ba7d8a7a38626992f24183ebfc576c2530bf"
     },
-    "station_control/application.py:run_mission": {
-      "path": "station_control/application.py",
+    "worlds/station/station_control/application.py:run_mission": {
+      "path": "worlds/station/station_control/application.py",
       "symbol": "run_mission",
       "startLine": 216,
       "endLine": 479,
@@ -310,8 +310,8 @@
       ],
       "fileHash": "55d62eb25e2b42549674ba8929c90cc70cf27f12b704c8c6176c5672a9cea792"
     },
-    "station_control/application.py:MissionResult": {
-      "path": "station_control/application.py",
+    "worlds/station/station_control/application.py:MissionResult": {
+      "path": "worlds/station/station_control/application.py",
       "symbol": "MissionResult",
       "startLine": 177,
       "endLine": 184,
@@ -344,8 +344,8 @@
       ],
       "fileHash": "55d62eb25e2b42549674ba8929c90cc70cf27f12b704c8c6176c5672a9cea792"
     },
-    "station_control/application.py:_public_event": {
-      "path": "station_control/application.py",
+    "worlds/station/station_control/application.py:_public_event": {
+      "path": "worlds/station/station_control/application.py",
       "symbol": "_public_event",
       "startLine": 678,
       "endLine": 704,
@@ -353,8 +353,8 @@
       "fields": [],
       "fileHash": "55d62eb25e2b42549674ba8929c90cc70cf27f12b704c8c6176c5672a9cea792"
     },
-    "station_control/application.py:_screen_events": {
-      "path": "station_control/application.py",
+    "worlds/station/station_control/application.py:_screen_events": {
+      "path": "worlds/station/station_control/application.py",
       "symbol": "_screen_events",
       "startLine": 707,
       "endLine": 781,
@@ -362,8 +362,8 @@
       "fields": [],
       "fileHash": "55d62eb25e2b42549674ba8929c90cc70cf27f12b704c8c6176c5672a9cea792"
     },
-    "station_control/controllers.py:PublicEvent": {
-      "path": "station_control/controllers.py",
+    "worlds/station/station_control/controllers.py:PublicEvent": {
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "PublicEvent",
       "startLine": 118,
       "endLine": 125,
@@ -388,8 +388,8 @@
       ],
       "fileHash": "497d089e3f388a15ce889d6f59d62cbf1b8c5fbabe59351b38e40a6a5780890f"
     },
-    "station_control/application.py:_route_event_assessment": {
-      "path": "station_control/application.py",
+    "worlds/station/station_control/application.py:_route_event_assessment": {
+      "path": "worlds/station/station_control/application.py",
       "symbol": "_route_event_assessment",
       "startLine": 805,
       "endLine": 848,
@@ -397,8 +397,8 @@
       "fields": [],
       "fileHash": "55d62eb25e2b42549674ba8929c90cc70cf27f12b704c8c6176c5672a9cea792"
     },
-    "station_control/application.py:_register_evidence": {
-      "path": "station_control/application.py",
+    "worlds/station/station_control/application.py:_register_evidence": {
+      "path": "worlds/station/station_control/application.py",
       "symbol": "_register_evidence",
       "startLine": 885,
       "endLine": 936,
@@ -406,8 +406,8 @@
       "fields": [],
       "fileHash": "55d62eb25e2b42549674ba8929c90cc70cf27f12b704c8c6176c5672a9cea792"
     },
-    "station_control/application.py:_Incident": {
-      "path": "station_control/application.py",
+    "worlds/station/station_control/application.py:_Incident": {
+      "path": "worlds/station/station_control/application.py",
       "symbol": "_Incident",
       "startLine": 586,
       "endLine": 595,
@@ -448,8 +448,8 @@
       ],
       "fileHash": "55d62eb25e2b42549674ba8929c90cc70cf27f12b704c8c6176c5672a9cea792"
     },
-    "station_control/application.py:_set_follow_up": {
-      "path": "station_control/application.py",
+    "worlds/station/station_control/application.py:_set_follow_up": {
+      "path": "worlds/station/station_control/application.py",
       "symbol": "_set_follow_up",
       "startLine": 1121,
       "endLine": 1136,
@@ -457,8 +457,8 @@
       "fields": [],
       "fileHash": "55d62eb25e2b42549674ba8929c90cc70cf27f12b704c8c6176c5672a9cea792"
     },
-    "station_control/application.py:_schedule_follow_up": {
-      "path": "station_control/application.py",
+    "worlds/station/station_control/application.py:_schedule_follow_up": {
+      "path": "worlds/station/station_control/application.py",
       "symbol": "_schedule_follow_up",
       "startLine": 1090,
       "endLine": 1100,
@@ -466,8 +466,8 @@
       "fields": [],
       "fileHash": "55d62eb25e2b42549674ba8929c90cc70cf27f12b704c8c6176c5672a9cea792"
     },
-    "station_control/application.py:_next_turn": {
-      "path": "station_control/application.py",
+    "worlds/station/station_control/application.py:_next_turn": {
+      "path": "worlds/station/station_control/application.py",
       "symbol": "_next_turn",
       "startLine": 1186,
       "endLine": 1188,
@@ -475,8 +475,8 @@
       "fields": [],
       "fileHash": "55d62eb25e2b42549674ba8929c90cc70cf27f12b704c8c6176c5672a9cea792"
     },
-    "station_control/application.py:_perform_action": {
-      "path": "station_control/application.py",
+    "worlds/station/station_control/application.py:_perform_action": {
+      "path": "worlds/station/station_control/application.py",
       "symbol": "_perform_action",
       "startLine": 939,
       "endLine": 1087,
@@ -484,8 +484,8 @@
       "fields": [],
       "fileHash": "55d62eb25e2b42549674ba8929c90cc70cf27f12b704c8c6176c5672a9cea792"
     },
-    "station_control/application.py:_resolves_latest_evidence": {
-      "path": "station_control/application.py",
+    "worlds/station/station_control/application.py:_resolves_latest_evidence": {
+      "path": "worlds/station/station_control/application.py",
       "symbol": "_resolves_latest_evidence",
       "startLine": 1103,
       "endLine": 1118,
@@ -493,8 +493,8 @@
       "fields": [],
       "fileHash": "55d62eb25e2b42549674ba8929c90cc70cf27f12b704c8c6176c5672a9cea792"
     },
-    "station_control/adversary_provider.py:OpenRouterAdversaryProvider": {
-      "path": "station_control/adversary_provider.py",
+    "worlds/station/station_control/adversary_provider.py:OpenRouterAdversaryProvider": {
+      "path": "worlds/station/station_control/adversary_provider.py",
       "symbol": "OpenRouterAdversaryProvider",
       "startLine": 60,
       "endLine": 149,
@@ -502,8 +502,8 @@
       "fields": [],
       "fileHash": "2f016d9ae39f127c37ff189c6052ac22c7f004f6e141464053ba86bc5e82fa7f"
     },
-    "station_control/adversary.py:adversary_context": {
-      "path": "station_control/adversary.py",
+    "worlds/station/station_control/adversary.py:adversary_context": {
+      "path": "worlds/station/station_control/adversary.py",
       "symbol": "adversary_context",
       "startLine": 125,
       "endLine": 150,
@@ -511,8 +511,8 @@
       "fields": [],
       "fileHash": "4703c01db4e7cc67abc087763c1ad47f0dd51d1272fcab1689651075a1af2e78"
     },
-    "station_control/providers.py:JevDispatchProvider": {
-      "path": "station_control/providers.py",
+    "worlds/station/station_control/providers.py:JevDispatchProvider": {
+      "path": "worlds/station/station_control/providers.py",
       "symbol": "JevDispatchProvider",
       "startLine": 93,
       "endLine": 249,
@@ -520,8 +520,8 @@
       "fields": [],
       "fileHash": "5042af9754a4f6bb1b28b730e6df056aadf7bfc30f64ae6cccac9b9d30e387e2"
     },
-    "station_control/controllers.py:DispatchProvider": {
-      "path": "station_control/controllers.py",
+    "worlds/station/station_control/controllers.py:DispatchProvider": {
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "DispatchProvider",
       "startLine": 176,
       "endLine": 177,
@@ -529,8 +529,8 @@
       "fields": [],
       "fileHash": "497d089e3f388a15ce889d6f59d62cbf1b8c5fbabe59351b38e40a6a5780890f"
     },
-    "station_control/controllers.py:DispatchContext": {
-      "path": "station_control/controllers.py",
+    "worlds/station/station_control/controllers.py:DispatchContext": {
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "DispatchContext",
       "startLine": 128,
       "endLine": 135,
@@ -563,8 +563,8 @@
       ],
       "fileHash": "497d089e3f388a15ce889d6f59d62cbf1b8c5fbabe59351b38e40a6a5780890f"
     },
-    "station_control/controllers.py:DispatchJudgment": {
-      "path": "station_control/controllers.py",
+    "worlds/station/station_control/controllers.py:DispatchJudgment": {
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "DispatchJudgment",
       "startLine": 138,
       "endLine": 145,
@@ -597,8 +597,8 @@
       ],
       "fileHash": "497d089e3f388a15ce889d6f59d62cbf1b8c5fbabe59351b38e40a6a5780890f"
     },
-    "station_control/providers.py:OpenRouterCaptainProvider": {
-      "path": "station_control/providers.py",
+    "worlds/station/station_control/providers.py:OpenRouterCaptainProvider": {
+      "path": "worlds/station/station_control/providers.py",
       "symbol": "OpenRouterCaptainProvider",
       "startLine": 252,
       "endLine": 361,
@@ -606,8 +606,8 @@
       "fields": [],
       "fileHash": "5042af9754a4f6bb1b28b730e6df056aadf7bfc30f64ae6cccac9b9d30e387e2"
     },
-    "station_control/controllers.py:CaptainProvider": {
-      "path": "station_control/controllers.py",
+    "worlds/station/station_control/controllers.py:CaptainProvider": {
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "CaptainProvider",
       "startLine": 180,
       "endLine": 181,
@@ -615,8 +615,8 @@
       "fields": [],
       "fileHash": "497d089e3f388a15ce889d6f59d62cbf1b8c5fbabe59351b38e40a6a5780890f"
     },
-    "station_control/controllers.py:CaptainContext": {
-      "path": "station_control/controllers.py",
+    "worlds/station/station_control/controllers.py:CaptainContext": {
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "CaptainContext",
       "startLine": 158,
       "endLine": 166,
@@ -653,8 +653,8 @@
       ],
       "fileHash": "497d089e3f388a15ce889d6f59d62cbf1b8c5fbabe59351b38e40a6a5780890f"
     },
-    "station_control/controllers.py:CaptainDecision": {
-      "path": "station_control/controllers.py",
+    "worlds/station/station_control/controllers.py:CaptainDecision": {
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "CaptainDecision",
       "startLine": 169,
       "endLine": 173,
@@ -675,8 +675,8 @@
       ],
       "fileHash": "497d089e3f388a15ce889d6f59d62cbf1b8c5fbabe59351b38e40a6a5780890f"
     },
-    "station_control/rules.py:RulesCaptain": {
-      "path": "station_control/rules.py",
+    "worlds/station/station_control/rules.py:RulesCaptain": {
+      "path": "worlds/station/station_control/rules.py",
       "symbol": "RulesCaptain",
       "startLine": 14,
       "endLine": 26,
@@ -684,8 +684,8 @@
       "fields": [],
       "fileHash": "f8067685a1820927cdf39c9144cc3e32ad84b91006f7a8fcbc77cc0550d35b37"
     },
-    "station_control/provider_support.py:CallBudget": {
-      "path": "station_control/provider_support.py",
+    "worlds/station/station_control/provider_support.py:CallBudget": {
+      "path": "worlds/station/station_control/provider_support.py",
       "symbol": "CallBudget",
       "startLine": 21,
       "endLine": 40,
@@ -706,8 +706,8 @@
       ],
       "fileHash": "fdbcc06b11bfb3d9924acea9a793c48b5032452072e1da34d7d7b5e39d3349bd"
     },
-    "station_control/provider_support.py:ensure_bounded": {
-      "path": "station_control/provider_support.py",
+    "worlds/station/station_control/provider_support.py:ensure_bounded": {
+      "path": "worlds/station/station_control/provider_support.py",
       "symbol": "ensure_bounded",
       "startLine": 61,
       "endLine": 67,
@@ -715,8 +715,8 @@
       "fields": [],
       "fileHash": "fdbcc06b11bfb3d9924acea9a793c48b5032452072e1da34d7d7b5e39d3349bd"
     },
-    "station_control/persistence.py:RunLogWriter": {
-      "path": "station_control/persistence.py",
+    "worlds/station/station_control/persistence.py:RunLogWriter": {
+      "path": "worlds/station/station_control/persistence.py",
       "symbol": "RunLogWriter",
       "startLine": 94,
       "endLine": 206,
@@ -724,8 +724,8 @@
       "fields": [],
       "fileHash": "d89fa323d2b728d0ebd47b1225eca9bcf9610ef50f3fa6563767fede65db6bc1"
     },
-    "station_control/application.py:_json_value": {
-      "path": "station_control/application.py",
+    "worlds/station/station_control/application.py:_json_value": {
+      "path": "worlds/station/station_control/application.py",
       "symbol": "_json_value",
       "startLine": 1234,
       "endLine": 1245,
@@ -733,8 +733,8 @@
       "fields": [],
       "fileHash": "55d62eb25e2b42549674ba8929c90cc70cf27f12b704c8c6176c5672a9cea792"
     },
-    "station_control/evaluation.py:evaluate_mission": {
-      "path": "station_control/evaluation.py",
+    "worlds/station/station_control/evaluation.py:evaluate_mission": {
+      "path": "worlds/station/station_control/evaluation.py",
       "symbol": "evaluate_mission",
       "startLine": 22,
       "endLine": 196,
@@ -767,8 +767,8 @@
       ],
       "fileHash": "4a9c3f7bf75b26928b2e7e847ecd9f70a63ed39cf74c5daaaf9488be63d9509a"
     },
-    "station_control/evaluation.py:MissionEvaluation": {
-      "path": "station_control/evaluation.py",
+    "worlds/station/station_control/evaluation.py:MissionEvaluation": {
+      "path": "worlds/station/station_control/evaluation.py",
       "symbol": "MissionEvaluation",
       "startLine": 16,
       "endLine": 19,
@@ -785,8 +785,8 @@
       ],
       "fileHash": "4a9c3f7bf75b26928b2e7e847ecd9f70a63ed39cf74c5daaaf9488be63d9509a"
     },
-    "station_control/application.py:MissionConfig": {
-      "path": "station_control/application.py",
+    "worlds/station/station_control/application.py:MissionConfig": {
+      "path": "worlds/station/station_control/application.py",
       "symbol": "MissionConfig",
       "startLine": 99,
       "endLine": 161,
@@ -851,8 +851,8 @@
       ],
       "fileHash": "55d62eb25e2b42549674ba8929c90cc70cf27f12b704c8c6176c5672a9cea792"
     },
-    "station_control/domain.py:ScheduledEvent": {
-      "path": "station_control/domain.py",
+    "worlds/station/station_control/domain.py:ScheduledEvent": {
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "ScheduledEvent",
       "startLine": 106,
       "endLine": 112,
@@ -881,8 +881,8 @@
       ],
       "fileHash": "dae7c3657fccfe990394c766e707ba7d8a7a38626992f24183ebfc576c2530bf"
     },
-    "station_control/domain.py:TurnResult": {
-      "path": "station_control/domain.py",
+    "worlds/station/station_control/domain.py:TurnResult": {
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "TurnResult",
       "startLine": 73,
       "endLine": 77,
@@ -903,8 +903,8 @@
       ],
       "fileHash": "dae7c3657fccfe990394c766e707ba7d8a7a38626992f24183ebfc576c2530bf"
     },
-    "station_control/domain.py:Evidence": {
-      "path": "station_control/domain.py",
+    "worlds/station/station_control/domain.py:Evidence": {
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "Evidence",
       "startLine": 30,
       "endLine": 36,
@@ -933,8 +933,8 @@
       ],
       "fileHash": "dae7c3657fccfe990394c766e707ba7d8a7a38626992f24183ebfc576c2530bf"
     },
-    "station_control/domain.py:WorldTransition": {
-      "path": "station_control/domain.py",
+    "worlds/station/station_control/domain.py:WorldTransition": {
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "WorldTransition",
       "startLine": 80,
       "endLine": 86,
@@ -955,8 +955,8 @@
       ],
       "fileHash": "dae7c3657fccfe990394c766e707ba7d8a7a38626992f24183ebfc576c2530bf"
     },
-    "station_control/domain.py:Action": {
-      "path": "station_control/domain.py",
+    "worlds/station/station_control/domain.py:Action": {
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "Action",
       "startLine": 58,
       "endLine": 62,
@@ -977,8 +977,8 @@
       ],
       "fileHash": "dae7c3657fccfe990394c766e707ba7d8a7a38626992f24183ebfc576c2530bf"
     },
-    "station_control/domain.py:ActionResult": {
-      "path": "station_control/domain.py",
+    "worlds/station/station_control/domain.py:ActionResult": {
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "ActionResult",
       "startLine": 65,
       "endLine": 70,
@@ -1003,8 +1003,8 @@
       ],
       "fileHash": "dae7c3657fccfe990394c766e707ba7d8a7a38626992f24183ebfc576c2530bf"
     },
-    "station_control/controllers.py:StationView": {
-      "path": "station_control/controllers.py",
+    "worlds/station/station_control/controllers.py:StationView": {
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "StationView",
       "startLine": 81,
       "endLine": 90,
@@ -1037,8 +1037,8 @@
       ],
       "fileHash": "497d089e3f388a15ce889d6f59d62cbf1b8c5fbabe59351b38e40a6a5780890f"
     },
-    "station_control/controllers.py:ActionRequest": {
-      "path": "station_control/controllers.py",
+    "worlds/station/station_control/controllers.py:ActionRequest": {
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "ActionRequest",
       "startLine": 148,
       "endLine": 155,
@@ -1071,8 +1071,8 @@
       ],
       "fileHash": "497d089e3f388a15ce889d6f59d62cbf1b8c5fbabe59351b38e40a6a5780890f"
     },
-    "station_control/adversary.py:AdversaryContext": {
-      "path": "station_control/adversary.py",
+    "worlds/station/station_control/adversary.py:AdversaryContext": {
+      "path": "worlds/station/station_control/adversary.py",
       "symbol": "AdversaryContext",
       "startLine": 81,
       "endLine": 103,
@@ -1157,8 +1157,8 @@
       ],
       "fileHash": "4703c01db4e7cc67abc087763c1ad47f0dd51d1272fcab1689651075a1af2e78"
     },
-    "station_control/adversary.py:AdversaryDecision": {
-      "path": "station_control/adversary.py",
+    "worlds/station/station_control/adversary.py:AdversaryDecision": {
+      "path": "worlds/station/station_control/adversary.py",
       "symbol": "AdversaryDecision",
       "startLine": 106,
       "endLine": 110,
@@ -1179,8 +1179,8 @@
       ],
       "fileHash": "4703c01db4e7cc67abc087763c1ad47f0dd51d1272fcab1689651075a1af2e78"
     },
-    "station_control/adversary.py:AdversaryActionResult": {
-      "path": "station_control/adversary.py",
+    "worlds/station/station_control/adversary.py:AdversaryActionResult": {
+      "path": "worlds/station/station_control/adversary.py",
       "symbol": "AdversaryActionResult",
       "startLine": 117,
       "endLine": 122,

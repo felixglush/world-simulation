@@ -12,15 +12,15 @@
       ],
       "sources": [
         {
-          "path": "station_control/cli.py",
+          "path": "worlds/station/station_control/cli.py",
           "symbol": "main"
         },
         {
-          "path": "station_control/cli.py",
+          "path": "worlds/station/station_control/cli.py",
           "symbol": "_read_live_settings"
         },
         {
-          "path": "station_control/cli.py",
+          "path": "worlds/station/station_control/cli.py",
           "symbol": "_make_providers"
         }
       ],
@@ -39,15 +39,15 @@
       ],
       "sources": [
         {
-          "path": "station_control/scenarios.py",
+          "path": "worlds/station/station_control/scenarios.py",
           "symbol": "ScenarioDefinition"
         },
         {
-          "path": "station_control/scenarios.py",
+          "path": "worlds/station/station_control/scenarios.py",
           "symbol": "create_configured_world"
         },
         {
-          "path": "station_control/scenarios.py",
+          "path": "worlds/station/station_control/scenarios.py",
           "symbol": "create_world"
         }
       ],
@@ -66,15 +66,15 @@
       ],
       "sources": [
         {
-          "path": "station_control/persistence.py",
+          "path": "worlds/station/station_control/persistence.py",
           "symbol": "read_run_log"
         },
         {
-          "path": "station_control/persistence.py",
+          "path": "worlds/station/station_control/persistence.py",
           "symbol": "render_run_log"
         },
         {
-          "path": "station_control/cli.py",
+          "path": "worlds/station/station_control/cli.py",
           "symbol": "_rerun"
         }
       ],
@@ -93,11 +93,11 @@
       ],
       "sources": [
         {
-          "path": "station_control/adversary.py",
+          "path": "worlds/station/station_control/adversary.py",
           "symbol": "apply_adversary_action"
         },
         {
-          "path": "station_control/adversary.py",
+          "path": "worlds/station/station_control/adversary.py",
           "symbol": "eligible_adversary_actions"
         }
       ],
@@ -117,15 +117,15 @@
       ],
       "sources": [
         {
-          "path": "station_control/domain.py",
+          "path": "worlds/station/station_control/domain.py",
           "symbol": "StationState"
         },
         {
-          "path": "station_control/domain.py",
+          "path": "worlds/station/station_control/domain.py",
           "symbol": "advance_turn"
         },
         {
-          "path": "station_control/domain.py",
+          "path": "worlds/station/station_control/domain.py",
           "symbol": "apply_action"
         }
       ],
@@ -144,11 +144,11 @@
       ],
       "sources": [
         {
-          "path": "station_control/application.py",
+          "path": "worlds/station/station_control/application.py",
           "symbol": "run_mission"
         },
         {
-          "path": "station_control/application.py",
+          "path": "worlds/station/station_control/application.py",
           "symbol": "MissionResult"
         }
       ],
@@ -168,15 +168,15 @@
       ],
       "sources": [
         {
-          "path": "station_control/application.py",
+          "path": "worlds/station/station_control/application.py",
           "symbol": "_public_event"
         },
         {
-          "path": "station_control/application.py",
+          "path": "worlds/station/station_control/application.py",
           "symbol": "_screen_events"
         },
         {
-          "path": "station_control/controllers.py",
+          "path": "worlds/station/station_control/controllers.py",
           "symbol": "PublicEvent"
         }
       ],
@@ -196,15 +196,15 @@
       ],
       "sources": [
         {
-          "path": "station_control/application.py",
+          "path": "worlds/station/station_control/application.py",
           "symbol": "_route_event_assessment"
         },
         {
-          "path": "station_control/application.py",
+          "path": "worlds/station/station_control/application.py",
           "symbol": "_register_evidence"
         },
         {
-          "path": "station_control/application.py",
+          "path": "worlds/station/station_control/application.py",
           "symbol": "_Incident"
         }
       ],
@@ -224,15 +224,15 @@
       ],
       "sources": [
         {
-          "path": "station_control/application.py",
+          "path": "worlds/station/station_control/application.py",
           "symbol": "_set_follow_up"
         },
         {
-          "path": "station_control/application.py",
+          "path": "worlds/station/station_control/application.py",
           "symbol": "_schedule_follow_up"
         },
         {
-          "path": "station_control/application.py",
+          "path": "worlds/station/station_control/application.py",
           "symbol": "_next_turn"
         }
       ],
@@ -252,11 +252,11 @@
       ],
       "sources": [
         {
-          "path": "station_control/application.py",
+          "path": "worlds/station/station_control/application.py",
           "symbol": "_perform_action"
         },
         {
-          "path": "station_control/application.py",
+          "path": "worlds/station/station_control/application.py",
           "symbol": "_resolves_latest_evidence"
         }
       ],
@@ -276,11 +276,11 @@
       ],
       "sources": [
         {
-          "path": "station_control/adversary_provider.py",
+          "path": "worlds/station/station_control/adversary_provider.py",
           "symbol": "OpenRouterAdversaryProvider"
         },
         {
-          "path": "station_control/adversary.py",
+          "path": "worlds/station/station_control/adversary.py",
           "symbol": "adversary_context"
         }
       ],
@@ -300,19 +300,19 @@
       ],
       "sources": [
         {
-          "path": "station_control/providers.py",
+          "path": "worlds/station/station_control/providers.py",
           "symbol": "JevDispatchProvider"
         },
         {
-          "path": "station_control/controllers.py",
+          "path": "worlds/station/station_control/controllers.py",
           "symbol": "DispatchProvider"
         },
         {
-          "path": "station_control/controllers.py",
+          "path": "worlds/station/station_control/controllers.py",
           "symbol": "DispatchContext"
         },
         {
-          "path": "station_control/controllers.py",
+          "path": "worlds/station/station_control/controllers.py",
           "symbol": "DispatchJudgment"
         }
       ],
@@ -332,19 +332,19 @@
       ],
       "sources": [
         {
-          "path": "station_control/providers.py",
+          "path": "worlds/station/station_control/providers.py",
           "symbol": "OpenRouterCaptainProvider"
         },
         {
-          "path": "station_control/controllers.py",
+          "path": "worlds/station/station_control/controllers.py",
           "symbol": "CaptainProvider"
         },
         {
-          "path": "station_control/controllers.py",
+          "path": "worlds/station/station_control/controllers.py",
           "symbol": "CaptainContext"
         },
         {
-          "path": "station_control/controllers.py",
+          "path": "worlds/station/station_control/controllers.py",
           "symbol": "CaptainDecision"
         }
       ],
@@ -363,7 +363,7 @@
       ],
       "sources": [
         {
-          "path": "station_control/rules.py",
+          "path": "worlds/station/station_control/rules.py",
           "symbol": "RulesCaptain"
         }
       ],
@@ -382,11 +382,11 @@
       ],
       "sources": [
         {
-          "path": "station_control/provider_support.py",
+          "path": "worlds/station/station_control/provider_support.py",
           "symbol": "CallBudget"
         },
         {
-          "path": "station_control/provider_support.py",
+          "path": "worlds/station/station_control/provider_support.py",
           "symbol": "ensure_bounded"
         }
       ],
@@ -406,11 +406,11 @@
       ],
       "sources": [
         {
-          "path": "station_control/persistence.py",
+          "path": "worlds/station/station_control/persistence.py",
           "symbol": "RunLogWriter"
         },
         {
-          "path": "station_control/application.py",
+          "path": "worlds/station/station_control/application.py",
           "symbol": "_json_value"
         }
       ],
@@ -429,11 +429,11 @@
       ],
       "sources": [
         {
-          "path": "station_control/evaluation.py",
+          "path": "worlds/station/station_control/evaluation.py",
           "symbol": "evaluate_mission"
         },
         {
-          "path": "station_control/evaluation.py",
+          "path": "worlds/station/station_control/evaluation.py",
           "symbol": "MissionEvaluation"
         }
       ],
@@ -452,15 +452,15 @@
       ],
       "sources": [
         {
-          "path": "station_control/providers.py",
+          "path": "worlds/station/station_control/providers.py",
           "symbol": "JevDispatchProvider"
         },
         {
-          "path": "station_control/providers.py",
+          "path": "worlds/station/station_control/providers.py",
           "symbol": "OpenRouterCaptainProvider"
         },
         {
-          "path": "station_control/adversary_provider.py",
+          "path": "worlds/station/station_control/adversary_provider.py",
           "symbol": "OpenRouterAdversaryProvider"
         }
       ],
@@ -1081,95 +1081,95 @@
   ],
   "contracts": {
     "MissionConfig": {
-      "path": "station_control/application.py",
+      "path": "worlds/station/station_control/application.py",
       "symbol": "MissionConfig"
     },
     "MissionResult": {
-      "path": "station_control/application.py",
+      "path": "worlds/station/station_control/application.py",
       "symbol": "MissionResult"
     },
     "_Incident": {
-      "path": "station_control/application.py",
+      "path": "worlds/station/station_control/application.py",
       "symbol": "_Incident"
     },
     "StationState": {
-      "path": "station_control/domain.py",
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "StationState"
     },
     "ScheduledEvent": {
-      "path": "station_control/domain.py",
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "ScheduledEvent"
     },
     "TurnResult": {
-      "path": "station_control/domain.py",
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "TurnResult"
     },
     "Evidence": {
-      "path": "station_control/domain.py",
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "Evidence"
     },
     "WorldTransition": {
-      "path": "station_control/domain.py",
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "WorldTransition"
     },
     "Action": {
-      "path": "station_control/domain.py",
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "Action"
     },
     "ActionResult": {
-      "path": "station_control/domain.py",
+      "path": "worlds/station/station_control/domain.py",
       "symbol": "ActionResult"
     },
     "PublicEvent": {
-      "path": "station_control/controllers.py",
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "PublicEvent"
     },
     "StationView": {
-      "path": "station_control/controllers.py",
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "StationView"
     },
     "DispatchContext": {
-      "path": "station_control/controllers.py",
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "DispatchContext"
     },
     "DispatchJudgment": {
-      "path": "station_control/controllers.py",
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "DispatchJudgment"
     },
     "CaptainContext": {
-      "path": "station_control/controllers.py",
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "CaptainContext"
     },
     "CaptainDecision": {
-      "path": "station_control/controllers.py",
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "CaptainDecision"
     },
     "ActionRequest": {
-      "path": "station_control/controllers.py",
+      "path": "worlds/station/station_control/controllers.py",
       "symbol": "ActionRequest"
     },
     "AdversaryContext": {
-      "path": "station_control/adversary.py",
+      "path": "worlds/station/station_control/adversary.py",
       "symbol": "AdversaryContext"
     },
     "AdversaryDecision": {
-      "path": "station_control/adversary.py",
+      "path": "worlds/station/station_control/adversary.py",
       "symbol": "AdversaryDecision"
     },
     "AdversaryActionResult": {
-      "path": "station_control/adversary.py",
+      "path": "worlds/station/station_control/adversary.py",
       "symbol": "AdversaryActionResult"
     },
     "ScenarioDefinition": {
-      "path": "station_control/scenarios.py",
+      "path": "worlds/station/station_control/scenarios.py",
       "symbol": "ScenarioDefinition"
     },
     "CallBudget": {
-      "path": "station_control/provider_support.py",
+      "path": "worlds/station/station_control/provider_support.py",
       "symbol": "CallBudget"
     },
     "MissionEvaluation": {
-      "path": "station_control/evaluation.py",
+      "path": "worlds/station/station_control/evaluation.py",
       "symbol": "MissionEvaluation"
     }
   },

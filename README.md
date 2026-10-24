@@ -71,9 +71,9 @@ An investigation governor tests equipment under relevant loads, calibrates senso
 | `benign` | Sound supplies and repairs without false accusations. |
 
 ```bash
-uv run --frozen python -m station_control trade --economy --turns 20
-uv run --frozen python -m station_control trade --deception supply_chain --turns 40
-uv run --frozen python -m station_control trade --deception resource_diversion --policy trust --turns 40
+PYTHONPATH=worlds/station uv run --frozen python -m station_control trade --economy --turns 20
+PYTHONPATH=worlds/station uv run --frozen python -m station_control trade --deception supply_chain --turns 40
+PYTHONPATH=worlds/station uv run --frozen python -m station_control trade --deception resource_diversion --policy trust --turns 40
 ```
 
 Deception stories use the `investigate` policy by default. Use `--policy trust` to compare against a deliberately unsafe purchase-and-repair sequence. Run for 40 turns to include investigation, replacement, and later recurrence checks. The `trade` command prints a JSON summary with public evidence, decisions, and ledger-based measures. Saved mission logs, replay, and rerun use the `run`, `replay`, and `rerun` commands described below.
@@ -84,7 +84,7 @@ Run from the repository root:
 
 ```bash
 export OPENROUTER_API_KEY=...
-uv run --frozen python -m station_control trade --deception supply_chain \
+PYTHONPATH=worlds/station uv run --frozen python -m station_control trade --deception supply_chain \
   --controller jev+llm --captain-model "<captain-model-id>" \
   --jev-model typesafe/jev-1.13 --max-calls 120 \
   --max-output-tokens-per-call 512 --turns 40
