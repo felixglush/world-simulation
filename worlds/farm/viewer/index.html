@@ -74,7 +74,7 @@
 </aside>
 <footer>
   <button id="play" aria-label="Play or pause">Play</button>
-  <input type="range" id="scrub" min="0" max="0" value="0" step="1" aria-label="Day">
+  <input type="range" id="scrub" min="0" max="0" value="0" step="1" aria-label="Hour">
   <span id="day-label" class="stat">day 0</span>
   <label>Speed <select id="speed"><option value="1">1x</option><option value="2" selected>2x</option><option value="4">4x</option><option value="8">8x</option></select></label>
 </footer>
@@ -88,7 +88,7 @@ const ICON = {sow_nursery: "🌱", puddle: "💧", transplant: "🌾", till: "�
 const RICE = {tillering: "#7bc96f", panicle_init: "#58b368", flowering: "#a6d96a", grain_fill: "#d6c24b", mature: "#e3b43a"};
 const WHEAT = {emergence: "#9ccc65", tillering: "#7cb342", stem_elongation: "#689f38", heading: "#aed581", grain_fill: "#e6d36a", mature: "#e8b84a"};
 const MONTHS = [["Jan", 31], ["Feb", 28], ["Mar", 31], ["Apr", 30], ["May", 31], ["Jun", 30], ["Jul", 31], ["Aug", 31], ["Sep", 30], ["Oct", 31], ["Nov", 30], ["Dec", 31]];
-const TW = 48, TH = 24, ZH = 12;
+const TW = 48, TH = 24, ZH = 12, HOURS = 10, START_HOUR = 7;
 
 const $ = id => document.getElementById(id);
 const canvas = $("c"), ctx = canvas.getContext("2d");
@@ -117,7 +117,7 @@ async function loadText(text) {
   if (!days.length) { $("empty").firstElementChild.textContent = "That file has no day snapshots."; return; }
   first = days[0].day;
   $("empty").style.display = "none";
-  const scrub = $("scrub"); scrub.max = days.length - 1; scrub.value = 0;
+  const scrub = $("scrub"); scrub.max = frameCount() - 1; scrub.value = 0;
   pos = 0; playing = false; $("play").textContent = "Play";
   buildMessages(); show();
 }
@@ -247,25 +247,51 @@ function drawChannels(snap, t, o) {
 
 function lerp(a, b, k) { return a + (b - a) * k; }
 
-function farmerPose(id, a, b, k) {
-  const p = a.snap.farmers[id], q = (b || a).snap.farmers[id];
-  const e = k * k * (3 - 2 * k);
-  return [lerp(p.at[0], q.at[0], e), lerp(p.at[1], q.at[1], e)];
+// The timeline is in hours: frame = day index * HOURS + hour. Terrain and crops come from the
+// day's end-of-day snapshot; farmers and speech come from the hourly events.
+const frameCount = () => days.length * HOURS;
+function cur() {
+  const f = Math.max(0, Math.min(frameCount() - 1, pos)), frame = Math.floor(f);
+  return {frame, i: Math.floor(frame / HOURS), h: frame % HOURS, k: f - frame};
+}
+const hourOf = e => e.hour ?? 0;
+const clock = h => `${String(START_HOUR + h).padStart(2, "0")}:00`;
+
+// Where a farmer is at the start of an hour: the last place an action put them, else where
+// they ended the day before (their home on day one).
+function placeAt(id, i, h) {
+  for (let n = i; n >= 0; n--) {
+    const acts = days[n].events.filter(e => e.source !== "agent" && e.type === "action" && e.farmer === id && e.at && (n < i || hourOf(e) <= h));
+    if (acts.length) return acts[acts.length - 1].at;
+    if (n < i) return days[n].snap.farmers[id].at;
+  }
+  return layout.farmers[id].home;
+}
+function farmerPose(id, c) {
+  const frame = Math.min(frameCount() - 1, c.frame + 1);
+  const p = placeAt(id, c.i, c.h), q = placeAt(id, Math.floor(frame / HOURS), frame % HOURS);
+  const e = c.k * c.k * (3 - 2 * c.k);
+  return [lerp(p[0], q[0], e), lerp(p[1], q[1], e)];
+}
+// What a farmer is doing this hour, from the world's action events (the last one within two hours).
+function doingAt(id, day, h) {
+  const acts = day.events.filter(e => e.source !== "agent" && e.type === "action" && e.farmer === id && hourOf(e) <= h && h - hourOf(e) <= 2);
+  return acts.length ? acts[acts.length - 1].action : null;
 }
 
-function drawFarmer(id, x, y, day, o) {
+function drawFarmer(id, x, y, day, c, o) {
   const f = layout.farmers[id], z = (layout.z[Math.round(y)] || [])[Math.round(x)] || 1;
   const [sx, sy] = iso(x, y, z, o), cy = sy + TH / 2;
-  const act = day.snap.farmers[id].activity;
-  const spoke = day.events.some(e => e.type === "message_sent" && e.agent === id);
+  const act = doingAt(id, day, c.h);
+  const spoke = day.events.some(e => e.type === "message_sent" && e.agent === id && c.h - hourOf(e) >= 0 && c.h - hourOf(e) <= 1);
   ctx.fillStyle = "#0004"; ctx.beginPath(); ctx.ellipse(sx, cy, 7, 3, 0, 0, 6.3); ctx.fill();
   ctx.fillStyle = COLORS[f.community]; ctx.beginPath(); ctx.roundRect(sx - 5, cy - 16, 10, 14, 4); ctx.fill();
   ctx.fillStyle = "#f1d3b0"; ctx.beginPath(); ctx.arc(sx, cy - 20, 5, 0, 6.3); ctx.fill();
   if (selected === id) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx, cy - 12, 15, 0, 6.3); ctx.stroke(); }
   ctx.font = "600 13px system-ui"; ctx.textAlign = "center";
   ctx.fillStyle = "#000a"; ctx.fillText(NAMES[id] || id, sx + 1, cy + 14); ctx.fillStyle = "#fff"; ctx.fillText(NAMES[id] || id, sx, cy + 13);
-  const swapped = day.events.find(e => (e.type === "trade" || e.type === "gift") && (e.from === id || e.to === id));
-  const bubble = swapped ? (swapped.type === "gift" ? "🎁" : "🤝") : spoke ? "💬" : act && act !== "rest" ? ICON[act] || "•" : act === "rest" ? "" : "";
+  const swapped = day.events.find(e => (e.type === "trade" || e.type === "gift") && (e.from === id || e.to === id) && c.h - hourOf(e) >= 0 && c.h - hourOf(e) <= 1);
+  const bubble = swapped ? (swapped.type === "gift" ? "🎁" : "🤝") : spoke ? "💬" : act && act !== "rest" ? ICON[act] || "•" : "";
   if (bubble) {
     ctx.fillStyle = "#fffd"; ctx.beginPath(); ctx.roundRect(sx - 12, cy - 50, 24, 20, 8); ctx.fill();
     ctx.font = "13px system-ui"; ctx.fillStyle = "#000"; ctx.fillText(bubble, sx, cy - 35);
@@ -276,8 +302,8 @@ function drawFarmer(id, x, y, day, o) {
 function render(time) {
   const dt = (time - last) / 1000; last = time;
   if (playing && days.length) {
-    pos += dt * (+$("speed").value) * 2;
-    if (pos >= days.length - 1) { pos = days.length - 1; playing = false; $("play").textContent = "Play"; }
+    pos += dt * (+$("speed").value) * 4;
+    if (pos >= frameCount() - 1) { pos = frameCount() - 1; playing = false; $("play").textContent = "Play"; }
     $("scrub").value = Math.floor(pos); show(true);
   }
   const dpr = devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
@@ -285,11 +311,11 @@ function render(time) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = "#cfe8d0"; ctx.fillRect(0, 0, w, h);
   if (!layout || !days.length) { requestAnimationFrame(render); return; }
   const o = origin(); ctx.setTransform(dpr * o.scale, 0, 0, dpr * o.scale, 0, 0);
-  const i = Math.min(days.length - 1, Math.floor(pos)), a = days[i], b = days[Math.min(i + 1, days.length - 1)], k = pos - i;
+  const c = cur(), a = days[c.i];
   const snap = a.snap, t = time / 1000;
   ctx.fillStyle = snap.weather.rain > 2 ? "#b9cdcf" : "#cfe8d0"; ctx.fillRect(-2000, -2000, 6000, 6000);
   hits = [];
-  const fpos = Object.keys(layout.farmers).map(id => [id, ...farmerPose(id, a, b, k)]);
+  const fpos = Object.keys(layout.farmers).map(id => [id, ...farmerPose(id, c)]);
   for (let s = 0; s < layout.width + layout.height; s++) {
     for (let x = 0; x < layout.width; x++) {
       const y = s - x; if (y < 0 || y >= layout.height) continue;
@@ -297,7 +323,7 @@ function render(time) {
     }
   }
   drawChannels(snap, t, o);
-  for (const [id, fx, fy] of fpos.sort((p, q) => p[1] + p[2] - q[1] - q[2])) drawFarmer(id, fx, fy, a, o);
+  for (const [id, fx, fy] of fpos.sort((p, q) => p[1] + p[2] - q[1] - q[2])) drawFarmer(id, fx, fy, a, c, o);
   if (snap.weather.rain > 2) {
     ctx.strokeStyle = "#ffffff88"; ctx.lineWidth = 1;
     for (let n = 0; n < 90; n++) { const rx = (n * 97 + t * 160) % (canvas.clientWidth / o.scale), ry = (n * 53 + t * 420) % (canvas.clientHeight / o.scale); ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx - 3, ry + 10); ctx.stroke(); }
@@ -307,28 +333,29 @@ function render(time) {
 
 function show(fromPlay) {
   if (!days.length) return;
-  const i = Math.min(days.length - 1, Math.floor(pos)), d = days[i];
-  $("date").textContent = dateName(d.day);
+  const c = cur(), i = c.i, d = days[i];
+  $("date").textContent = `${dateName(d.day)} ${clock(c.h)}`;
   const w = d.snap.weather;
   $("weather").innerHTML = `${w.rain > 2 ? "🌧️" : "☀️"} <b>${w.temp.toFixed(0)}°C</b>${w.rain > 2 ? `, ${w.rain.toFixed(0)} mm` : ""}`;
   $("river").textContent = w.river < 500 ? "low" : w.river < 900 ? "normal" : w.river < 1300 ? "high" : "flooding";
-  $("day-label").textContent = `day ${d.day - first + 1} of ${days.length}`;
-  if (!fromPlay) $("scrub").value = i;
+  $("day-label").textContent = `day ${d.day - first + 1} of ${days.length}, ${clock(c.h)}`;
+  if (!fromPlay) $("scrub").value = c.frame;
   buildMessages(); buildFarmer();
 }
 
 function buildMessages() {
-  const i = Math.min(days.length - 1, Math.floor(pos)), out = [];
+  const c = cur(), i = c.i, out = [];
   for (let n = i; n >= 0 && out.length < 40; n--) {
     for (const e of [...days[n].events].reverse()) {
+      if (n === i && hourOf(e) > c.h) continue;
       if (e.type === "trade" || e.type === "gift") {
         const goods = o => Object.entries(o).map(([k, v]) => `${v} ${k.replace("_", " ")}`).join(", ");
-        out.push(`<div class="msg"><small>${dateName(days[n].day)} · ${e.type === "gift" ? "🎁 gift" : "🤝 trade"}</small>${NAMES[e.from]} to ${NAMES[e.to] || e.to}: ${esc(goods(e.give))}${e.type === "trade" ? ` for ${esc(goods(e.get))}` : ""}</div>`);
+        out.push(`<div class="msg"><small>${dateName(days[n].day)} ${clock(hourOf(e))} · ${e.type === "gift" ? "🎁 gift" : "🤝 trade"}</small>${NAMES[e.from]} to ${NAMES[e.to] || e.to}: ${esc(goods(e.give))}${e.type === "trade" ? ` for ${esc(goods(e.get))}` : ""}</div>`);
         continue;
       }
       if (e.type !== "message_sent") continue;
       const to = e.to, from = e.agent;
-      out.push(`<div class="msg"><small>${dateName(days[n].day)} · <span class="chip ${layout.farmers[from].community === "riverbend" ? "rice" : "wheat"}">${NAMES[from]}</span> to ${NAMES[to] || to}</small>${esc(e.text)}</div>`);
+      out.push(`<div class="msg"><small>${dateName(days[n].day)} ${clock(hourOf(e))} · <span class="chip ${layout.farmers[from].community === "riverbend" ? "rice" : "wheat"}">${NAMES[from]}</span> to ${NAMES[to] || to}</small>${esc(e.text)}</div>`);
     }
   }
   $("messages").innerHTML = out.join("") || "<small>Nothing yet.</small>";
@@ -337,7 +364,8 @@ function buildMessages() {
 function buildFarmer() {
   const box = $("farmer");
   if (!selected) { box.textContent = "Click a farmer in the view."; return; }
-  const i = Math.min(days.length - 1, Math.floor(pos)), d = days[i], f = d.snap.farmers[selected];
+  const c = cur(), i = c.i, d = days[i], f = d.snap.farmers[selected];
+  const doing = doingAt(selected, d, c.h) || "resting";
   const plotId = layout.farmers[selected].plot, p = d.snap.plots[plotId];
   let plan = null, why = null, reflection = null;
   for (let n = i; n >= 0 && (!plan || !why || !reflection); n--) for (const e of [...days[n].events].reverse()) {
@@ -348,8 +376,8 @@ function buildFarmer() {
   }
   const inv = Object.entries(f.inventory || {}).map(([k, v]) => `${k.replace("_", " ")} ${v}`).join(", ") || "nothing";
   box.innerHTML = `<p><b>${NAMES[selected]}</b> <span class="chip ${layout.farmers[selected].community === "riverbend" ? "rice" : "wheat"}">${layout.farmers[selected].community}</span></p>
-    <div class="kv"><span>Doing</span><span>${f.activity}</span><span>Plot</span><span>${plotId}: ${p.stage}${p.crop ? `, water ${p.water} mm, health ${p.health}` : `, water ${p.water} mm`}</span>
-    <span>Labor</span><span>${f.labor}</span><span>Barn</span><span>${esc(inv)}</span></div>
+    <div class="kv"><span>Doing</span><span>${doing} (${clock(c.h)})</span><span>Plot</span><span>${plotId}: ${p.stage}${p.crop ? `, water ${p.water} mm, health ${p.health}` : `, water ${p.water} mm`}</span>
+    <span>Labor left at day end</span><span>${f.labor}</span><span>Barn</span><span>${esc(inv)}</span></div>
     ${why ? `<h2>Last reasoning (${dateName(why.day)})</h2><div>${esc(why.rationale)}</div>` : ""}
     ${plan ? `<h2>Plan (${dateName(plan.day)})</h2><ul>${plan.steps.map(s => `<li>tick ${s[0]}: ${esc(s[1])}</li>`).join("")}</ul>` : ""}
     ${reflection && reflection.stored.length ? `<h2>Reflection</h2><div>Stored ${reflection.stored.length} insight(s) citing ${Object.values(reflection.cites).flat().length} memories.</div>` : ""}`;
@@ -368,20 +396,20 @@ canvas.addEventListener("mousemove", ev => {
   const mx = (ev.clientX - r.left) / o.scale, my = (ev.clientY - r.top) / o.scale;
   const hit = hits.find(h => Math.hypot(h.x - mx, h.y - my) < h.r);
   if (!hit || !days.length) { tip.style.display = "none"; return; }
-  const d = days[Math.min(days.length - 1, Math.floor(pos))];
-  const said = d.events.filter(e => e.type === "message_sent" && e.agent === hit.id).map(e => `“${esc(e.text)}” to ${NAMES[e.to] || e.to}`);
-  tip.innerHTML = `<b>${NAMES[hit.id]}</b>: ${d.snap.farmers[hit.id].activity}${said.length ? "<br>" + said.join("<br>") : ""}`;
+  const c = cur(), d = days[c.i];
+  const said = d.events.filter(e => e.type === "message_sent" && e.agent === hit.id && hourOf(e) <= c.h && c.h - hourOf(e) <= 1).map(e => `“${esc(e.text)}” to ${NAMES[e.to] || e.to}`);
+  tip.innerHTML = `<b>${NAMES[hit.id]}</b>: ${doingAt(hit.id, d, c.h) || "resting"}${said.length ? "<br>" + said.join("<br>") : ""}`;
   tip.style.display = "block"; tip.style.left = Math.min(ev.clientX - r.left + 12, r.width - 290) + "px"; tip.style.top = (ev.clientY - r.top + 12) + "px";
 });
 canvas.addEventListener("mouseleave", () => $("tip").style.display = "none");
 
-$("play").onclick = () => { if (!days.length) return; if (pos >= days.length - 1) pos = 0; playing = !playing; $("play").textContent = playing ? "Pause" : "Play"; };
+$("play").onclick = () => { if (!days.length) return; if (pos >= frameCount() - 1) pos = 0; playing = !playing; $("play").textContent = playing ? "Pause" : "Play"; };
 $("scrub").oninput = ev => { pos = +ev.target.value; playing = false; $("play").textContent = "Play"; show(); };
 document.addEventListener("keydown", ev => {
   if (ev.target.tagName === "INPUT" || ev.target.tagName === "SELECT") return;
   if (ev.key === " ") { ev.preventDefault(); $("play").click(); }
-  if (ev.key === "ArrowRight") { pos = Math.min(days.length - 1, Math.floor(pos) + 1); show(); }
-  if (ev.key === "ArrowLeft") { pos = Math.max(0, Math.floor(pos) - 1); show(); }
+  if (ev.key === "ArrowRight") { pos = Math.min(frameCount() - 1, (ev.shiftKey ? (cur().i + 1) * HOURS : Math.floor(pos) + 1)); show(); }
+  if (ev.key === "ArrowLeft") { pos = Math.max(0, ev.shiftKey ? Math.max(0, cur().i - 1) * HOURS : Math.floor(pos) - 1); show(); }
 });
 $("file").onchange = async ev => { const f = ev.target.files[0]; if (f) await loadText(await f.text()); };
 const stage = $("stage");

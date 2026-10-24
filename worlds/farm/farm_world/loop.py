@@ -70,7 +70,7 @@ def run_farm(
         tick = world.day - start
         rested: set[str] = set()  # asked and had nothing to do: not asked again today
         for hour in range(HOURS):
-            world.hour = hour
+            world.hour = rec.hour = hour
             inboxes = router.deliver_due(tick)
             for message in sum(inboxes.values(), []):
                 rec.emit(
@@ -103,6 +103,7 @@ def run_farm(
                         continue
                 busy[farmer_id] = _work(world, agents[farmer_id], farmer_id, queue, tick, rec)
         busy = {f: 0 for f in agents}
+        rec.hour = None
         world.end_day()
     return FarmResult(
         world,
@@ -201,9 +202,10 @@ def merged_log(result: FarmResult, start_day: int) -> list[dict[str, Any]]:
     rows = [{**e, "day": start_day + e["tick"], "source": "agent"} for e in result.events]
     rows += [{**e, "source": "world"} for e in result.world.events]
 
-    def phase(event: dict[str, Any]) -> int:
-        if event["source"] == "agent":
-            return 0
-        return 2 if event["type"] == "day" else 1
+    def when(event: dict[str, Any]) -> tuple[int, int, int]:
+        if event["type"] == "day":
+            return event["day"], HOURS, 0
+        hour = event.get("hour", 0)
+        return event["day"], hour, 0 if event["source"] == "agent" else 1
 
-    return sorted(rows, key=lambda e: (e["day"], phase(e)))
+    return sorted(rows, key=when)

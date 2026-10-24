@@ -241,6 +241,7 @@ class FarmWorld:
                 "type": "action" if result.ok else "rejected",
                 "day": self.day,
                 "hour": self.hour,
+                "at": list(farmer.at),
                 "farmer": farmer_id,
                 "action": name,
                 "params": params,
@@ -699,7 +700,15 @@ class FarmWorld:
 
     def _trade_event(self, kind: str, a: str, b: str, give: dict, get: dict) -> None:
         self.events.append(
-            {"type": kind, "day": self.day, "from": a, "to": b, "give": give, "get": get}
+            {
+                "type": kind,
+                "day": self.day,
+                "hour": self.hour,
+                "from": a,
+                "to": b,
+                "give": give,
+                "get": get,
+            }
         )
 
     def _do_save_seed(self, farmer: Farmer, item: str, kg: float = 1e9) -> ActionResult:

@@ -25,7 +25,7 @@ const server = http
     page.on("pageerror", (e) => errors.push(String(e)));
     await page.goto(`http://localhost:${server.address().port}/?log=/log.jsonl`);
     await page.waitForFunction(() => days.length > 0);
-    const total = await page.evaluate(() => days.length);
+    const total = await page.evaluate(() => frameCount());
     await page.fill("#scrub", String(Math.floor(total / 2)));
     await page.dispatchEvent("#scrub", "input");
     await page.waitForTimeout(500);
@@ -42,5 +42,5 @@ const server = http
       console.error(JSON.stringify({ errors, selected }));
       process.exit(1);
     }
-    console.log(`ok: ${total} days, selected ${selected}`);
+    console.log(`ok: ${total} hourly frames, selected ${selected}`);
   });

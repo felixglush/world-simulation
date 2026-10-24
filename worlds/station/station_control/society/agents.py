@@ -75,9 +75,11 @@ class Recorder:
     events: list[dict[str, object]] = field(default_factory=list)
     calls: list[dict[str, object]] = field(default_factory=list)
     exhausted: bool = False
+    hour: int | None = None  # set by worlds that run inside a day; stamped on every event
 
     def emit(self, tick: int, agent: str, event: str, **data: object) -> None:
-        self.events.append({"tick": tick, "agent": agent, "type": event, **data})
+        stamp = {} if self.hour is None else {"hour": self.hour}
+        self.events.append({"tick": tick, "agent": agent, "type": event, **stamp, **data})
 
     def ask(self, tick: int, agent: str, request: ChatRequest) -> ChatReply | None:
         if self.exhausted:
