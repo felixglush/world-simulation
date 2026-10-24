@@ -37,6 +37,10 @@ claims consistent, and speaks through fronts it is given, never as a real agent.
 that become traceable reports and never change the world. The summary reports deception separately
 from damage. See `AGENTS.md` for commands, models, budgets, and verification.
 
+## A second world: farming
+
+`worlds/farm/` is a farming world. Two communities, Riverbend (rice) and Highfield (wheat), each have three independent farmer agents who start with seed, food, manure and a plot. Nobody assigns roles or a leader, so water sharing and any organization has to emerge from what the farmers say and do. Python owns the agronomy: paddy puddling, standing water, bunds, gravity-fed canals and gates on terraces, the monsoon river, wheat vernalization, waterlogging, pests, and post-harvest drying, threshing and milling. See [AGENTS.md](AGENTS.md#farm-world) to run it.
+
 ## Purpose and current product
 
 Station Control tests how an AI crew keeps a space station operational when equipment fails or reports are misleading. Crew survival is the primary objective. Resource use, incident handling, and decision cost show how well the crew performs.
@@ -71,9 +75,9 @@ An investigation governor tests equipment under relevant loads, calibrates senso
 | `benign` | Sound supplies and repairs without false accusations. |
 
 ```bash
-uv run --frozen python -m station_control trade --economy --turns 20
-uv run --frozen python -m station_control trade --deception supply_chain --turns 40
-uv run --frozen python -m station_control trade --deception resource_diversion --policy trust --turns 40
+PYTHONPATH=worlds/station uv run --frozen python -m station_control trade --economy --turns 20
+PYTHONPATH=worlds/station uv run --frozen python -m station_control trade --deception supply_chain --turns 40
+PYTHONPATH=worlds/station uv run --frozen python -m station_control trade --deception resource_diversion --policy trust --turns 40
 ```
 
 Deception stories use the `investigate` policy by default. Use `--policy trust` to compare against a deliberately unsafe purchase-and-repair sequence. Run for 40 turns to include investigation, replacement, and later recurrence checks. The `trade` command prints a JSON summary with public evidence, decisions, and ledger-based measures. Saved mission logs, replay, and rerun use the `run`, `replay`, and `rerun` commands described below.
@@ -84,7 +88,7 @@ Run from the repository root:
 
 ```bash
 export OPENROUTER_API_KEY=...
-uv run --frozen python -m station_control trade --deception supply_chain \
+PYTHONPATH=worlds/station uv run --frozen python -m station_control trade --deception supply_chain \
   --controller jev+llm --captain-model "<captain-model-id>" \
   --jev-model typesafe/jev-1.13 --max-calls 120 \
   --max-output-tokens-per-call 512 --turns 40

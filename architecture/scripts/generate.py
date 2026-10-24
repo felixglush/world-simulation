@@ -13,7 +13,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
+STATION_ROOT = ROOT / "worlds" / "station"
+sys.path.insert(0, str(STATION_ROOT))
 
 from station_control.adversary import (  # noqa: E402
     AdversaryAction,

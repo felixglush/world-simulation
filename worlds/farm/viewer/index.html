@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Farm world viewer</title>
+<style>
+  :root {
+    --bg: #1d2b2a; --panel: #f6f1e4; --ink: #2b2a26; --muted: #6d6a5e; --line: #d9d2bd;
+    --rice: #1f8a8a; --wheat: #c9772b; --accent: #3b7a57;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --panel: #26302e; --ink: #ece7d8; --muted: #a2a898; --line: #3b4745; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif;
+    display: grid; grid-template-columns: 1fr 340px; grid-template-rows: auto 1fr auto; height: 100vh; }
+  header { grid-column: 1 / 3; display: flex; gap: 16px; align-items: center; padding: 8px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; }
+  header #live.on { color: #e5484d; font-weight: 700; }
+  .stat { color: var(--muted); }
+  #live.on { color: #e5484d; font-weight: 700; }
+  header .stat b { color: var(--ink); font-weight: 600; }
+  header .spacer { flex: 1; }
+  main { position: relative; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #tip { position: absolute; pointer-events: none; background: var(--panel); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; max-width: 280px;
+    font-size: 12px; display: none; box-shadow: 0 2px 8px #0004; }
+  aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 12px 16px; }
+  aside h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+    margin: 16px 0 6px; }
+  aside h2:first-child { margin-top: 0; }
+  .msg { padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .msg small { color: var(--muted); display: block; }
+  .chip { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 11px; color: #fff; }
+  .rice { background: var(--rice); } .wheat { background: var(--wheat); }
+  footer { grid-column: 1 / 3; display: flex; gap: 12px; align-items: center; padding: 8px 16px;
+    background: var(--panel); border-top: 1px solid var(--line); }
+  footer input[type=range] { flex: 1; min-width: 120px; }
+  button, select { font: inherit; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--panel); color: var(--ink); cursor: pointer; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #drop { position: absolute; inset: 0; display: none; place-items: center; background: #000a;
+    color: #fff; font-size: 18px; }
+  #empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+    color: #cfd8d3; padding: 24px; }
+  ul { margin: 0; padding-left: 18px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; }
+  .kv span:nth-child(odd) { color: var(--muted); }
+  @media (max-width: 760px) {
+    body { grid-template-columns: 1fr; grid-template-rows: auto 55vh auto auto; height: auto; min-height: 100vh; }
+    header, footer { grid-column: 1; } aside { border-left: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Farm world</h1>
+  <span class="stat">Date <b id="date">-</b></span>
+  <span class="stat" id="weather">-</span>
+  <span class="stat">River <b id="river">-</b></span>
+  <span class="stat" id="live" style="display:none"></span>
+  <label class="stat" id="followbox" style="display:none"><input type="checkbox" id="follow" checked> Follow live</label>
+  <span class="spacer"></span>
+  <label class="stat">Open a run log <input type="file" id="file" accept=".jsonl,.json,.txt"></label>
+</header>
+<main id="stage">
+  <canvas id="c" aria-label="Isometric view of the farms"></canvas>
+  <div id="tip"></div>
+  <div id="empty"><div><p><b>No run loaded.</b></p><p>Drop a farm run log (.jsonl) here, or open one above.</p></div></div>
+  <div id="drop">Drop to load</div>
+</main>
+<aside id="panel">
+  <h2>Farmer</h2><div id="farmer">Click a farmer in the view.</div>
+  <h2>Messages and trades so far</h2><div id="messages"></div>
+</aside>
+<footer>
+  <button id="play" aria-label="Play or pause">Play</button>
+  <input type="range" id="scrub" min="0" max="0" value="0" step="1" aria-label="Hour">
+  <span id="day-label" class="stat">day 0</span>
+  <label>Speed <select id="speed"><option value="1">1x</option><option value="2" selected>2x</option><option value="4">4x</option><option value="8">8x</option></select></label>
+</footer>
+<script>
+"use strict";
+const NAMES = {rice_1: "Maren", rice_2: "Dev", rice_3: "Ines", wheat_1: "Tomas", wheat_2: "Priya", wheat_3: "Oskar"};
+const COLORS = {riverbend: "#1f8a8a", highfield: "#c9772b"};
+const ICON = {sow_nursery: "🌱", puddle: "💧", transplant: "🌾", till: "⛏️", sow: "🌾", weed: "🪴",
+  fertilize: "🧺", scout: "🔍", treat: "🧪", set_gate: "🚪", clear_canal: "🛠️", repair_bund: "🧱",
+  pump: "🚰", harvest: "🌾", thresh: "🥁", dry: "☀️", mill: "⚙️", save_seed: "🫘"};
+const RICE = {tillering: "#7bc96f", panicle_init: "#58b368", flowering: "#a6d96a", grain_fill: "#d6c24b", mature: "#e3b43a"};
+const WHEAT = {emergence: "#9ccc65", tillering: "#7cb342", stem_elongation: "#689f38", heading: "#aed581", grain_fill: "#e6d36a", mature: "#e8b84a"};
+const MONTHS = [["Jan", 31], ["Feb", 28], ["Mar", 31], ["Apr", 30], ["May", 31], ["Jun", 30], ["Jul", 31], ["Aug", 31], ["Sep", 30], ["Oct", 31], ["Nov", 30], ["Dec", 31]];
+const TW = 48, TH = 24, ZH = 12, HOURS = 10, START_HOUR = 7;
+
+const $ = id => document.getElementById(id);
+const canvas = $("c"), ctx = canvas.getContext("2d");
+let layout = null, header = null, days = [], first = 0, pos = 0, playing = false, selected = null;
+let tileOf = {}, hits = [], last = 0;
+
+function dateName(day) {
+  let left = day % 365;
+  for (const [name, n] of MONTHS) { if (left < n) return `${name} ${left + 1}`; left -= n; }
+  return "Dec 31";
+}
+
+// A run log is a header row, then rows as they happen. While a run is going the file keeps
+// growing; `follow` re-reads the tail and the newest hours appear on a provisional day that
+// borrows the last snapshot's terrain until the day ends.
+let rows = [], offset = 0, finished = false, startSnap = null;
+
+async function loadText(text, more, keep) {
+  const added = text.split("\n").filter(Boolean).map(l => JSON.parse(l));
+  rows = more ? rows.concat(added) : added;
+  header = rows[0] && rows[0].type === "run" ? rows[0] : null;
+  const body = rows.filter(e => e.type !== "run");
+  finished = body.some(e => e.type === "summary");
+  startSnap = body.find(e => e.type === "start") || null;
+  layout = (header && header.layout) || layout || await (await fetch("layout.json")).json();
+  indexTiles();
+  const byDay = new Map();
+  for (const e of body) {
+    if (e.type === "summary" || e.type === "start" || e.day === undefined) continue;
+    if (!byDay.has(e.day)) byDay.set(e.day, {day: e.day, snap: null, events: []});
+    const d = byDay.get(e.day);
+    if (e.type === "day") d.snap = e; else d.events.push(e);
+  }
+  const all = [...byDay.values()].sort((a, b) => a.day - b.day);
+  days = all.filter(d => d.snap);
+  const open = all.find(d => !d.snap);
+  const base = days.length ? days[days.length - 1].snap : startSnap;
+  if (open && base) {
+    open.snap = {...base, day: open.day};
+    open.live = Math.min(HOURS, Math.max(1, ...open.events.map(e => hourOf(e) + 1)));
+    days.push(open);
+  } else if (!open && !days.length && startSnap) {
+    days.push({day: startSnap.day, snap: startSnap, events: [], live: 1});
+  }
+  if (!days.length) { $("empty").firstElementChild.textContent = "That file has no day snapshots."; return; }
+  first = days[0].day;
+  $("empty").style.display = "none";
+  const scrub = $("scrub"); scrub.max = frameCount() - 1;
+  if (!more && !keep) { scrub.value = 0; pos = 0; playing = false; $("play").textContent = "Play"; }
+  else if ($("follow").checked) { pos = frameCount() - 1; scrub.value = pos; }
+  $("live").textContent = finished ? "finished" : "● live";
+  $("live").className = "stat" + (finished ? "" : " on");
+  buildMessages(); show();
+}
+
+// Follow a growing log. The server (serve.py) returns only the bytes after `from`; a plain
+// static host ignores it and sends the whole file, which is detected by the missing header.
+async function follow(url) {
+  $("live").style.display = ""; $("followbox").style.display = "";
+  const poll = async () => {
+    if (finished) return;
+    try {
+      const res = await fetch(url + (url.includes("?") ? "&" : "?") + "from=" + offset, {cache: "no-store"});
+      if (res.ok) {
+        const partial = res.headers.get("X-Log-Offset") !== null;
+        const bytes = await res.arrayBuffer();
+        let text = new TextDecoder().decode(bytes);
+        if (!partial) text = text.slice(0, text.lastIndexOf("\n") + 1);   // whole file: drop a half-written line
+        if (partial) offset += bytes.byteLength;
+        if (text) await loadText(text, partial && rows.length > 0, !partial);
+      }
+    } catch (e) { /* the run has not started or the server is restarting: try again */ }
+    setTimeout(poll, 1500);
+  };
+  poll();
+}
+
+function indexTiles() {
+  tileOf = {};
+  for (const [id, p] of Object.entries(layout.plots)) {
+    const [x, y, w, h] = p.rect;
+    for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) tileOf[`${x + dx},${y + dy}`] = id;
+  }
+}
+
+const iso = (x, y, z, o) => [(x - y) * TW / 2 + o.x, (x + y) * TH / 2 - z * ZH + o.y];
+function origin() {
+  const W = layout.width, H = layout.height;
+  const spanX = (W + H) * TW / 2, spanY = (W + H) * TH / 2 + 7 * ZH;
+  const scale = Math.min(canvas.clientWidth / (spanX + 40), canvas.clientHeight / (spanY + 80));
+  return {scale, x: canvas.clientWidth / 2 / scale + (H - W) * TW / 4 - 0, y: 70 / scale};
+}
+
+function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = k => Math.max(0, Math.min(255, Math.round(((n >> k) & 255) * f)));
+  return `rgb(${c(16)},${c(8)},${c(0)})`;
+}
+
+function prism(x, y, z, top, o) {
+  const [sx, sy] = iso(x, y, z, o);
+  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + TW / 2, sy + TH / 2); ctx.lineTo(sx, sy + TH);
+  ctx.lineTo(sx - TW / 2, sy + TH / 2); ctx.closePath(); ctx.fillStyle = top; ctx.fill();
+  const drop = Math.max(0, z) * ZH;
+  if (drop > 0) {
+    ctx.fillStyle = shade("#6b5a43", 1); ctx.beginPath(); ctx.moveTo(sx - TW / 2, sy + TH / 2);
+    ctx.lineTo(sx, sy + TH); ctx.lineTo(sx, sy + TH + drop); ctx.lineTo(sx - TW / 2, sy + TH / 2 + drop); ctx.fill();
+    ctx.fillStyle = shade("#6b5a43", .78); ctx.beginPath(); ctx.moveTo(sx + TW / 2, sy + TH / 2);
+    ctx.lineTo(sx, sy + TH); ctx.lineTo(sx, sy + TH + drop); ctx.lineTo(sx + TW / 2, sy + TH / 2 + drop); ctx.fill();
+  }
+}
+
+function tuft(sx, sy, h, color) {
+  ctx.strokeStyle = color; ctx.lineWidth = 2;
+  for (const dx of [-3, 0, 3]) { ctx.beginPath(); ctx.moveTo(sx + dx, sy); ctx.lineTo(sx + dx + (dx ? dx / 3 : 0), sy - h); ctx.stroke(); }
+}
+
+function drawTile(x, y, code, snap, t, o) {
+  const kind = layout.tile_codes[code];
+  const z = layout.z[y][x];
+  const id = tileOf[`${x},${y}`];
+  const plot = id ? snap.plots[id] : null;
+  const info = id ? layout.plots[id] : null;
+  let top = {grass: "#7fb069", river: "#4a90c2", upland: "#cbb783", hill: "#8c8f7a", house: "#b9a98a", well: "#8aa0a8"}[kind] || "#7fb069";
+  if (kind === "paddy") top = "#8b6b4a";
+  if (kind === "field") top = plot && plot.tilled ? "#a67c4e" : "#b89a62";
+  prism(x, y, kind === "river" ? 0 : z, top, o);
+  const [sx, sy] = iso(x, y, kind === "river" ? 0 : z, o);
+  const cx = sx, cy = sy + TH / 2;
+  if (kind === "river") {
+    ctx.strokeStyle = "#ffffff55"; ctx.lineWidth = 1; ctx.beginPath();
+    const w = Math.sin(t * 2 + x * 0.9 + y * 0.4) * 3; ctx.moveTo(cx - 10, cy + w); ctx.lineTo(cx + 10, cy - w); ctx.stroke();
+  }
+  if (kind === "paddy" && plot) {
+    const depth = Math.min(1, plot.water / 100);
+    if (depth > 0.02) { ctx.globalAlpha = 0.25 + 0.55 * depth; prism(x, y, z, "#5aa9e6", o); ctx.globalAlpha = 1; }
+    if (plot.bund < 0.5) { ctx.fillStyle = "#c0392b"; ctx.fillRect(cx - 3, cy - 2, 6, 4); }
+  }
+  if (plot && plot.crop) {
+    const palette = plot.crop === "rice" ? RICE : WHEAT;
+    const stages = Object.keys(palette), n = stages.indexOf(plot.stage);
+    const base = palette[plot.stage] || "#7bc96f";
+    const color = plot.health < 0.6 ? shade("#8a7a40", 1) : base;
+    const h = 4 + (n < 0 ? 0 : n) * (plot.crop === "rice" ? 2.4 : 3);
+    for (const [dx, dy] of [[-8, 0], [8, 0], [0, -4], [0, 5]]) tuft(cx + dx, cy + dy + 3, h, color);
+  }
+  const built = (snap.structures || []).find(b => b.x === x && b.y === y);
+  if (built) drawStructure(built.kind, cx, cy);
+  if (kind === "house") {
+    ctx.fillStyle = "#e8d9b0"; ctx.fillRect(cx - 9, cy - 16, 18, 12);
+    ctx.fillStyle = "#a8402f"; ctx.beginPath(); ctx.moveTo(cx - 12, cy - 16); ctx.lineTo(cx, cy - 26); ctx.lineTo(cx + 12, cy - 16); ctx.fill();
+  }
+  if (kind === "well") {
+    ctx.fillStyle = "#6e7d82"; ctx.beginPath(); ctx.ellipse(cx, cy - 2, 9, 5, 0, 0, 6.3); ctx.fill();
+    ctx.fillStyle = "#2f5e87"; ctx.beginPath(); ctx.ellipse(cx, cy - 3, 6, 3, 0, 0, 6.3); ctx.fill();
+  }
+}
+
+function drawStructure(kind, cx, cy) {
+  if (!["granary", "threshing_floor", "mill"].includes(kind)) {
+    ctx.fillStyle = "#a9855b"; ctx.fillRect(cx - 7, cy - 12, 14, 9);
+    ctx.fillStyle = "#6b4a2b"; ctx.fillRect(cx - 7, cy - 12, 14, 2);
+  } else if (kind === "granary") {
+    ctx.fillStyle = "#b07a44"; ctx.fillRect(cx - 9, cy - 18, 18, 14);
+    ctx.fillStyle = "#6b4a2b"; ctx.beginPath(); ctx.moveTo(cx - 11, cy - 18); ctx.lineTo(cx, cy - 28); ctx.lineTo(cx + 11, cy - 18); ctx.fill();
+    ctx.fillStyle = "#3b2a18"; ctx.fillRect(cx - 3, cy - 12, 6, 8);
+  } else if (kind === "threshing_floor") {
+    ctx.fillStyle = "#d9c08a"; ctx.beginPath(); ctx.ellipse(cx, cy - 2, 14, 7, 0, 0, 6.3); ctx.fill();
+    ctx.strokeStyle = "#8c7444"; ctx.lineWidth = 1.5; ctx.stroke();
+  } else if (kind === "mill") {
+    ctx.fillStyle = "#cfc7b4"; ctx.fillRect(cx - 9, cy - 22, 18, 18);
+    ctx.fillStyle = "#7a2f2a"; ctx.beginPath(); ctx.moveTo(cx - 11, cy - 22); ctx.lineTo(cx, cy - 32); ctx.lineTo(cx + 11, cy - 22); ctx.fill();
+    ctx.strokeStyle = "#5b4636"; ctx.lineWidth = 2;
+    for (const [dx, dy] of [[-12, -10], [12, -10]]) { ctx.beginPath(); ctx.moveTo(cx, cy - 14); ctx.lineTo(cx + dx, cy + dy - 6); ctx.stroke(); }
+  }
+}
+
+function drawChannels(snap, t, o) {
+  for (const [id, c] of Object.entries(snap.channels)) {
+    const pts = layout.channels[id] || c.path; if (!pts) continue;
+    const path = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [x0, y0] = pts[i], [x1, y1] = pts[i + 1], n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+      for (let k = 0; k < n; k++) path.push([x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n]);
+    }
+    path.push(pts[pts.length - 1]);
+    const zOf = ([x, y]) => (layout.z[Math.round(y)] || [])[Math.round(x)] || 1;
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.strokeStyle = c.flow > 0 ? "#2f8ee0" : c.open ? "#8fc3ee" : "#8d6e63";
+    ctx.lineWidth = c.silt > 0.4 ? 3 : 5; ctx.beginPath();
+    path.forEach((p, i) => { const [sx, sy] = iso(p[0], p[1], zOf(p) + 0.05, o); i ? ctx.lineTo(sx, sy + TH / 2) : ctx.moveTo(sx, sy + TH / 2); });
+    ctx.stroke();
+    if (c.flow > 0) {
+      ctx.strokeStyle = "#ffffffaa"; ctx.lineWidth = 1.5; ctx.setLineDash([4, 8]); ctx.lineDashOffset = -t * 30; ctx.stroke(); ctx.setLineDash([]);
+    }
+    const m = pts[Math.floor(pts.length / 2)], [gx, gy] = iso(m[0], m[1], zOf(m) + 0.05, o);
+    ctx.fillStyle = c.open ? "#2e9d57" : "#c0392b"; ctx.fillRect(gx - 3, gy + TH / 2 - 12, 6, 12);
+  }
+}
+
+function lerp(a, b, k) { return a + (b - a) * k; }
+
+// The timeline is in hours: frame = day index * HOURS + hour. Terrain and crops come from the
+// day's end-of-day snapshot; farmers and speech come from the hourly events.
+const frameCount = () => days.length * HOURS - (days.length && days[days.length - 1].live ? HOURS - days[days.length - 1].live : 0);
+function cur() {
+  const f = Math.max(0, Math.min(frameCount() - 1, pos)), frame = Math.floor(f);
+  return {frame, i: Math.floor(frame / HOURS), h: frame % HOURS, k: f - frame};
+}
+const hourOf = e => e.hour ?? 0;
+const clock = h => `${String(START_HOUR + h).padStart(2, "0")}:00`;
+
+// Where a farmer is at the start of an hour: the last place an action put them, else where
+// they ended the day before (their home on day one).
+function placeAt(id, i, h) {
+  for (let n = i; n >= 0; n--) {
+    const acts = days[n].events.filter(e => e.source !== "agent" && e.type === "action" && e.farmer === id && e.at && (n < i || hourOf(e) <= h));
+    if (acts.length) return acts[acts.length - 1].at;
+    if (n < i) return days[n].snap.farmers[id].at;
+  }
+  return layout.farmers[id].home;
+}
+function farmerPose(id, c) {
+  const frame = Math.min(frameCount() - 1, c.frame + 1);
+  const p = placeAt(id, c.i, c.h), q = placeAt(id, Math.floor(frame / HOURS), frame % HOURS);
+  const e = c.k * c.k * (3 - 2 * c.k);
+  return [lerp(p[0], q[0], e), lerp(p[1], q[1], e)];
+}
+// What a farmer is doing this hour, from the world's action events (the last one within two hours).
+function doingAt(id, day, h) {
+  const acts = day.events.filter(e => e.source !== "agent" && e.type === "action" && e.farmer === id && hourOf(e) <= h && h - hourOf(e) <= 2);
+  return acts.length ? acts[acts.length - 1].action : null;
+}
+
+function drawFarmer(id, x, y, day, c, o) {
+  const f = layout.farmers[id], z = (layout.z[Math.round(y)] || [])[Math.round(x)] || 1;
+  const [sx, sy] = iso(x, y, z, o), cy = sy + TH / 2;
+  const act = doingAt(id, day, c.h);
+  const spoke = day.events.some(e => e.type === "message_sent" && e.agent === id && c.h - hourOf(e) >= 0 && c.h - hourOf(e) <= 1);
+  ctx.fillStyle = "#0004"; ctx.beginPath(); ctx.ellipse(sx, cy, 7, 3, 0, 0, 6.3); ctx.fill();
+  ctx.fillStyle = COLORS[f.community]; ctx.beginPath(); ctx.roundRect(sx - 5, cy - 16, 10, 14, 4); ctx.fill();
+  ctx.fillStyle = "#f1d3b0"; ctx.beginPath(); ctx.arc(sx, cy - 20, 5, 0, 6.3); ctx.fill();
+  if (selected === id) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx, cy - 12, 15, 0, 6.3); ctx.stroke(); }
+  ctx.font = "600 13px system-ui"; ctx.textAlign = "center";
+  ctx.fillStyle = "#000a"; ctx.fillText(NAMES[id] || id, sx + 1, cy + 14); ctx.fillStyle = "#fff"; ctx.fillText(NAMES[id] || id, sx, cy + 13);
+  const swapped = day.events.find(e => (e.type === "trade" || e.type === "gift") && (e.from === id || e.to === id) && c.h - hourOf(e) >= 0 && c.h - hourOf(e) <= 1);
+  const bubble = swapped ? (swapped.type === "gift" ? "🎁" : "🤝") : spoke ? "💬" : act && act !== "rest" ? ICON[act] || "•" : "";
+  if (bubble) {
+    ctx.fillStyle = "#fffd"; ctx.beginPath(); ctx.roundRect(sx - 12, cy - 50, 24, 20, 8); ctx.fill();
+    ctx.font = "13px system-ui"; ctx.fillStyle = "#000"; ctx.fillText(bubble, sx, cy - 35);
+  }
+  hits.push({id, x: sx, y: cy - 14, r: 16});
+}
+
+function render(time) {
+  const dt = (time - last) / 1000; last = time;
+  if (playing && days.length) {
+    pos += dt * (+$("speed").value) * 4;
+    if (pos >= frameCount() - 1) { pos = frameCount() - 1; playing = false; $("play").textContent = "Play"; }
+    $("scrub").value = Math.floor(pos); show(true);
+  }
+  const dpr = devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+  if (canvas.width !== w * dpr || canvas.height !== h * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = "#cfe8d0"; ctx.fillRect(0, 0, w, h);
+  if (!layout || !days.length) { requestAnimationFrame(render); return; }
+  const o = origin(); ctx.setTransform(dpr * o.scale, 0, 0, dpr * o.scale, 0, 0);
+  const c = cur(), a = days[c.i];
+  const snap = a.snap, t = time / 1000;
+  ctx.fillStyle = snap.weather.rain > 2 ? "#b9cdcf" : "#cfe8d0"; ctx.fillRect(-2000, -2000, 6000, 6000);
+  hits = [];
+  const fpos = Object.keys(layout.farmers).map(id => [id, ...farmerPose(id, c)]);
+  for (let s = 0; s < layout.width + layout.height; s++) {
+    for (let x = 0; x < layout.width; x++) {
+      const y = s - x; if (y < 0 || y >= layout.height) continue;
+      drawTile(x, y, layout.tiles[y][x], snap, t, o);
+    }
+  }
+  drawChannels(snap, t, o);
+  for (const [id, fx, fy] of fpos.sort((p, q) => p[1] + p[2] - q[1] - q[2])) drawFarmer(id, fx, fy, a, c, o);
+  if (snap.weather.rain > 2) {
+    ctx.strokeStyle = "#ffffff88"; ctx.lineWidth = 1;
+    for (let n = 0; n < 90; n++) { const rx = (n * 97 + t * 160) % (canvas.clientWidth / o.scale), ry = (n * 53 + t * 420) % (canvas.clientHeight / o.scale); ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx - 3, ry + 10); ctx.stroke(); }
+  }
+  requestAnimationFrame(render);
+}
+
+function show(fromPlay) {
+  if (!days.length) return;
+  const c = cur(), i = c.i, d = days[i];
+  $("date").textContent = `${dateName(d.day)} ${clock(c.h)}`;
+  const w = d.snap.weather;
+  $("weather").innerHTML = `${w.rain > 2 ? "🌧️" : "☀️"} <b>${w.temp.toFixed(0)}°C</b>${w.rain > 2 ? `, ${w.rain.toFixed(0)} mm` : ""}`;
+  $("river").textContent = w.river < 500 ? "low" : w.river < 900 ? "normal" : w.river < 1300 ? "high" : "flooding";
+  $("day-label").textContent = `day ${d.day - first + 1} of ${days.length}, ${clock(c.h)}`;
+  if (!fromPlay) $("scrub").value = c.frame;
+  buildMessages(); buildFarmer();
+}
+
+function buildMessages() {
+  const c = cur(), i = c.i, out = [];
+  for (let n = i; n >= 0 && out.length < 40; n--) {
+    for (const e of [...days[n].events].reverse()) {
+      if (n === i && hourOf(e) > c.h) continue;
+      if (e.type === "trade" || e.type === "gift") {
+        const goods = o => Object.entries(o).map(([k, v]) => `${v} ${k.replace("_", " ")}`).join(", ");
+        out.push(`<div class="msg"><small>${dateName(days[n].day)} ${clock(hourOf(e))} · ${e.type === "gift" ? "🎁 gift" : "🤝 trade"}</small>${NAMES[e.from]} to ${NAMES[e.to] || e.to}: ${esc(goods(e.give))}${e.type === "trade" ? ` for ${esc(goods(e.get))}` : ""}</div>`);
+        continue;
+      }
+      if (e.type !== "message_sent") continue;
+      const to = e.to, from = e.agent;
+      out.push(`<div class="msg"><small>${dateName(days[n].day)} ${clock(hourOf(e))} · <span class="chip ${layout.farmers[from].community === "riverbend" ? "rice" : "wheat"}">${NAMES[from]}</span> to ${NAMES[to] || to}</small>${esc(e.text)}</div>`);
+    }
+  }
+  $("messages").innerHTML = out.join("") || "<small>Nothing yet.</small>";
+}
+
+function buildFarmer() {
+  const box = $("farmer");
+  if (!selected) { box.textContent = "Click a farmer in the view."; return; }
+  const c = cur(), i = c.i, d = days[i], f = d.snap.farmers[selected];
+  const doing = doingAt(selected, d, c.h) || "resting";
+  const plotId = layout.farmers[selected].plot, p = d.snap.plots[plotId];
+  let plan = null, why = null, reflection = null;
+  for (let n = i; n >= 0 && (!plan || !why || !reflection); n--) for (const e of [...days[n].events].reverse()) {
+    if (e.agent !== selected) continue;
+    if (!plan && e.type === "plan") plan = e;
+    if (!why && e.type === "decision" && e.rationale) why = e;
+    if (!reflection && e.type === "reflection") reflection = e;
+  }
+  const inv = Object.entries(f.inventory || {}).map(([k, v]) => `${k.replace("_", " ")} ${v}`).join(", ") || "nothing";
+  box.innerHTML = `<p><b>${NAMES[selected]}</b> <span class="chip ${layout.farmers[selected].community === "riverbend" ? "rice" : "wheat"}">${layout.farmers[selected].community}</span></p>
+    <div class="kv"><span>Doing</span><span>${doing} (${clock(c.h)})</span><span>Plot</span><span>${plotId}: ${p.stage}${p.crop ? `, water ${p.water} mm, health ${p.health}` : `, water ${p.water} mm`}</span>
+    <span>Labor left at day end</span><span>${f.labor}</span><span>Barn</span><span>${esc(inv)}</span></div>
+    ${why ? `<h2>Last reasoning (${dateName(why.day)})</h2><div>${esc(why.rationale)}</div>` : ""}
+    ${plan ? `<h2>Plan (${dateName(plan.day)})</h2><ul>${plan.steps.map(s => `<li>tick ${s[0]}: ${esc(s[1])}</li>`).join("")}</ul>` : ""}
+    ${reflection && reflection.stored.length ? `<h2>Reflection</h2><div>Stored ${reflection.stored.length} insight(s) citing ${Object.values(reflection.cites).flat().length} memories.</div>` : ""}`;
+}
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+canvas.addEventListener("click", ev => {
+  const r = canvas.getBoundingClientRect(), o = origin();
+  const mx = (ev.clientX - r.left) / o.scale, my = (ev.clientY - r.top) / o.scale;
+  const hit = hits.find(h => Math.hypot(h.x - mx, h.y - my) < h.r);
+  selected = hit ? hit.id : null; buildFarmer();
+});
+canvas.addEventListener("mousemove", ev => {
+  const r = canvas.getBoundingClientRect(), o = origin(), tip = $("tip");
+  const mx = (ev.clientX - r.left) / o.scale, my = (ev.clientY - r.top) / o.scale;
+  const hit = hits.find(h => Math.hypot(h.x - mx, h.y - my) < h.r);
+  if (!hit || !days.length) { tip.style.display = "none"; return; }
+  const c = cur(), d = days[c.i];
+  const said = d.events.filter(e => e.type === "message_sent" && e.agent === hit.id && hourOf(e) <= c.h && c.h - hourOf(e) <= 1).map(e => `“${esc(e.text)}” to ${NAMES[e.to] || e.to}`);
+  tip.innerHTML = `<b>${NAMES[hit.id]}</b>: ${doingAt(hit.id, d, c.h) || "resting"}${said.length ? "<br>" + said.join("<br>") : ""}`;
+  tip.style.display = "block"; tip.style.left = Math.min(ev.clientX - r.left + 12, r.width - 290) + "px"; tip.style.top = (ev.clientY - r.top + 12) + "px";
+});
+canvas.addEventListener("mouseleave", () => $("tip").style.display = "none");
+
+$("play").onclick = () => { if (!days.length) return; $("follow").checked = false; if (pos >= frameCount() - 1) pos = 0; playing = !playing; $("play").textContent = playing ? "Pause" : "Play"; };
+$("scrub").oninput = ev => { $("follow").checked = false; pos = +ev.target.value; playing = false; $("play").textContent = "Play"; show(); };
+document.addEventListener("keydown", ev => {
+  if (ev.target.tagName === "INPUT" || ev.target.tagName === "SELECT") return;
+  if (ev.key === " ") { ev.preventDefault(); $("play").click(); }
+  if (ev.key === "ArrowRight") { pos = Math.min(frameCount() - 1, (ev.shiftKey ? (cur().i + 1) * HOURS : Math.floor(pos) + 1)); show(); }
+  if (ev.key === "ArrowLeft") { pos = Math.max(0, ev.shiftKey ? Math.max(0, cur().i - 1) * HOURS : Math.floor(pos) - 1); show(); }
+});
+$("file").onchange = async ev => { const f = ev.target.files[0]; if (f) await loadText(await f.text()); };
+const stage = $("stage");
+stage.addEventListener("dragover", ev => { ev.preventDefault(); $("drop").style.display = "grid"; });
+stage.addEventListener("dragleave", () => $("drop").style.display = "none");
+stage.addEventListener("drop", async ev => { ev.preventDefault(); $("drop").style.display = "none"; const f = ev.dataTransfer.files[0]; if (f) await loadText(await f.text()); });
+
+(async () => {
+  const params = new URLSearchParams(location.search), url = params.get("log");
+  if (url && params.has("live")) follow(url);
+  else if (url) { try { await loadText(await (await fetch(url)).text()); } catch (e) { $("empty").firstElementChild.textContent = "Could not load " + url; } }
+})();
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

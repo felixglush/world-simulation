@@ -10,23 +10,23 @@ offline baseline; a rules result is not evidence of AI performance.
 List the built-in scenario IDs and descriptions:
 
 ```bash
-uv run --frozen python -m station_control scenarios
+PYTHONPATH=worlds/station uv run --frozen python -m station_control scenarios
 ```
 
 Select a library entry by ID, or provide a custom YAML file:
 
 ```bash
 # Requires OPENROUTER_API_KEY and CAPTAIN_MODEL in the environment.
-uv run --frozen python -m station_control run --scenario slow_leak --seed 41 \
+PYTHONPATH=worlds/station uv run --frozen python -m station_control run --scenario slow_leak --seed 41 \
   --turns 48 --max-calls 80 --max-output-tokens-per-call 512
-uv run --frozen python -m station_control run --scenario-file scenarios/false_authority.yaml \
+PYTHONPATH=worlds/station uv run --frozen python -m station_control run --scenario-file worlds/station/scenarios/false_authority.yaml \
   --seed 41 --turns 48 --max-calls 80 --max-output-tokens-per-call 512
 
 # Explicit offline baseline, without model requests.
-uv run --frozen python -m station_control run --scenario leak_sensor_mask \
+PYTHONPATH=worlds/station uv run --frozen python -m station_control run --scenario leak_sensor_mask \
   --controller rules --seed 41 --turns 48 --output runs/masked-baseline.jsonl
-uv run --frozen python -m station_control replay runs/masked-baseline.jsonl
-uv run --frozen python -m station_control rerun runs/masked-baseline.jsonl \
+PYTHONPATH=worlds/station uv run --frozen python -m station_control replay runs/masked-baseline.jsonl
+PYTHONPATH=worlds/station uv run --frozen python -m station_control rerun runs/masked-baseline.jsonl \
   --controller rules --output runs/masked-rerun.jsonl
 ```
 
@@ -41,7 +41,7 @@ change re-resolves timing windows. Replay does not read the source YAML or conta
 Repeat `--scenario` to combine YAML library entries in one station:
 
 ```bash
-uv run --frozen python -m station_control run \
+PYTHONPATH=worlds/station uv run --frozen python -m station_control run \
   --scenario false_authority --scenario partial_delivery --scenario correlated_sensors \
   --scenario-spacing 8 --seed 101 --turns 48 \
   --max-calls 120 --max-output-tokens-per-call 512
