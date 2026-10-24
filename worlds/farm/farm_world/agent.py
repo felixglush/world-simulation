@@ -17,7 +17,7 @@ MAX_DAYS = 730
 @dataclass(frozen=True, slots=True)
 class FarmDecision:
     actions: tuple[tuple[str, dict[str, Any]], ...] = ()
-    messages: tuple[tuple[str, str], ...] = ()
+    messages: tuple[tuple[str, str, tuple[str, ...], bool], ...] = ()
     rationale: str = ""
 
 
@@ -34,7 +34,11 @@ class FarmerAgent(Agent):
         for item in data.get("messages") if isinstance(data.get("messages"), list) else []:
             if not isinstance(item, dict) or not isinstance(item.get("text"), str):
                 raise ValueError("invalid message")
-            messages.append((str(item.get("to", "")), item["text"]))
+            invite = item.get("invite")
+            invited = tuple(str(i) for i in invite[:11]) if isinstance(invite, list) else ()
+            messages.append(
+                (str(item.get("to", "")), item["text"], invited, item.get("leave") is True)
+            )
         plan = parse_plan(data.get("plan"), data.get("expect"), tick, horizon=MAX_DAYS)
         decision = FarmDecision(
             tuple(actions[:MAX_ACTIONS]), tuple(messages[:2]), str(data.get("rationale", ""))[:300]

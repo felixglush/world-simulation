@@ -73,6 +73,7 @@ def run_farm(
             seen = world.view(farmer_id)
             view = perception[farmer_id].view(tick, seen, tuple(inboxes.get(farmer_id, ())))
             seen["directory"] = router.directory(farmer_id)
+            seen["channels"] = router.channels_for(farmer_id)
             seen["tick"] = tick
             proposals.append((farmer_id, agent.step(view, seen, rec)))
         for farmer_id, decision in proposals:  # already in today's rotated order
@@ -117,8 +118,8 @@ def _apply(
         )
         verb = "I did" if result.ok else "I could not do"
         agent.record_result(tick, f"{verb} {name}: {result.message}", 4 if result.ok else 5)
-    for to, text in decision.messages:
-        message, rejection = router.send(farmer_id, to, text, tick)
+    for to, text, invite, leave in decision.messages:
+        message, rejection = router.send(farmer_id, to, text, tick, invite, leave)
         if message is None:
             rec.emit(tick, farmer_id, "message_rejected", reason=rejection, to=to)
             agent.record_result(tick, f"My message to {to} was not delivered: {rejection}.")

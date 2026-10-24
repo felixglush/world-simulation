@@ -229,3 +229,21 @@ def test_the_day_snapshot_records_what_the_farmer_did_before_the_daily_reset():
     seen = world.events[-1]["farmers"][farmer]
     assert seen["activity"] == "scout"
     assert seen["labor"] < 10
+
+
+def test_channels_reach_every_member_and_farmers_can_start_and_grow_them():
+    world = default_world()
+    router = FarmRouter({f.id: f.community for f in world.farmers.values()})
+    assert set(router.channels_for("rice_1")) == {"#riverbend"}
+    message, error = router.send("rice_1", "#riverbend", "water at dawn?", 0)
+    assert error is None and message.text.startswith("[#riverbend]")
+    inbox = router.deliver_due(1)
+    assert set(inbox) == {"rice_2", "rice_3"}
+    assert router.send("wheat_1", "#riverbend", "hi", 0)[1] == "not_a_member"
+    assert router.send("rice_1", "#Bad name", "hi", 0)[1] == "bad_channel_name"
+    router.send("rice_1", "#grain_deal", "mill co-op?", 0, invite=("wheat_2", "nobody"))
+    assert set(router.channels_for("wheat_2")) == {"#highfield", "#grain_deal"}
+    assert router.deliver_due(1) == {} and set(router.deliver_due(2)) == {"wheat_2"}
+    router.send("wheat_2", "#grain_deal", "yes", 3, leave=True)
+    assert "#grain_deal" not in router.channels_for("wheat_2")
+    assert router.send("wheat_2", "#grain_deal", "again", 3)[1] == "not_a_member"

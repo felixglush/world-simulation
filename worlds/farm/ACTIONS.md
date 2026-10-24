@@ -72,7 +72,8 @@ Goods: rice, flour, paddy_dry, wheat_grain, rice_seed, wheat_seed, manure, pest_
 ## Other
 
 - `rest`: do nothing.
-- Messages: up to two per review to any farmer; they take a day to arrive, two across communities. A message is only a claim and changes nothing in the world.
+- Messages: up to two per review, each to one farmer or to a channel (`#name`); they take a day to arrive, two across communities. A message is only a claim and changes nothing in the world.
+- Channels: every community starts with one (`#riverbend`, `#highfield`) holding its farmers. Posting to a new `#name` creates a channel with the poster in it. A member can add `invite` [farmer ids] when posting to bring others in, or `leave: true` to leave after posting. Everyone in a channel gets each post. A farmer sees the channels they are in, and their members, in their view.
 
 ## Happens without being asked
 

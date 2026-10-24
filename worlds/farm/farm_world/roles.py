@@ -71,8 +71,12 @@ pest_control, coin, timber, stone.
 - rest.
 Send only the fields an action takes; the world rejects anything else.
 Your reply is a plan of work, not a diary. Say why in a sentence. Message people with \
-messages [{to, text}] (up to two per review; the recipient is a farmer id; people in the \
-other community take an extra day to reach). Plan with tick numbers: the `tick` in your \
+messages [{to, text}] (up to two per review). `to` is a farmer id, or a channel such as \
+#riverbend: every community has a channel for its own farmers (see `channels` in your view \
+for the ones you are in and who is in them). Post to a new #name to start a channel with you \
+in it; add "invite": [farmer ids] to bring others in and "leave": true to leave after \
+posting. Everyone in a channel gets each post. People in the other community take an extra \
+day to reach. Plan with tick numbers: the `tick` in your \
 view counts days since the run began (not the calendar date), and each plan step's due_tick \
 is a tick. Name the readings you expect so that surprises wake you early.\
 """
@@ -134,6 +138,8 @@ FARMER_SCHEMA = {
                 "properties": {
                     "to": {"type": "string"},
                     "text": {"type": "string", "maxLength": 300},
+                    "invite": {"type": "array", "maxItems": 11, "items": {"type": "string"}},
+                    "leave": {"type": "boolean"},
                 },
                 "required": ["to", "text"],
             },
