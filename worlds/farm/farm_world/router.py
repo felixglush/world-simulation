@@ -8,7 +8,7 @@ from station_control.society.messages import Message
 
 MAX_CHARS = 300
 MAX_PER_DAY = 8
-MAX_PER_PAIR = 30
+MAX_PER_PAIR = 100  # direct messages between one pair; channels are limited per day only
 LATENCY_SAME_COMMUNITY = 0
 LATENCY_OTHER_COMMUNITY = 0
 MAX_MEMBERS = 12
@@ -62,7 +62,7 @@ class FarmRouter:
             return None, "empty_message"
         if self._per_day.get((sender, tick), 0) >= MAX_PER_DAY:
             return None, "rate_limited"
-        if self._per_pair.get((sender, to), 0) >= MAX_PER_PAIR:
+        if not channel and self._per_pair.get((sender, to), 0) >= MAX_PER_PAIR:
             return None, "conversation_cap"
         text = text.strip()[:MAX_CHARS]
         if channel:

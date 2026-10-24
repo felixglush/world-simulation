@@ -1005,6 +1005,8 @@ class FarmWorld:
                 "healthy" if crop.health > 0.85 else "yellowing" if crop.health > 0.5 else "dying"
             )
             seen["days_since_planting"] = int(self.day - crop.planted_day)
+            if crop.crop == "rice" and crop.gdd < 150 and plot.water_mm > 90:
+                seen["seedlings"] = "mostly under water"
         if mine:
             seen["weeds_visible"] = _level(plot.weeds)
             seen["puddled" if plot.crop_kind == "rice" else "tilled"] = (

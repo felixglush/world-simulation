@@ -291,3 +291,25 @@ def test_a_farmer_sees_where_the_land_and_their_neighbors_are():
     assert view["people_nearby"]["rice_2"] == {"at": "on paddy_2", "doing": "weed"}
     assert "wheat_1" not in view["people_nearby"]
     assert view["you_are_at"]
+
+
+def test_young_rice_in_deep_water_looks_drowned_from_the_road():
+    from farm_world.crops import CropState
+
+    world = default_world()
+    plot = world.plots["paddy_1"]
+    plot.crop = CropState("rice", world.day)
+    plot.water_mm = 120
+    assert world.view("rice_2")["plots"]["paddy_1"]["seedlings"] == "mostly under water"
+    plot.water_mm = 60
+    assert "seedlings" not in world.view("rice_2")["plots"]["paddy_1"]
+    plot.water_mm, plot.crop.gdd = 120, 400
+    assert "seedlings" not in world.view("rice_2")["plots"]["paddy_1"]
+
+
+def test_a_channel_is_not_silenced_by_a_per_pair_cap():
+    from farm_world.router import FarmRouter
+
+    router = FarmRouter({"a": "x", "b": "x", "c": "x"})
+    for day in range(40):
+        assert router.send("a", "#x", f"post {day}", day)[1] is None
