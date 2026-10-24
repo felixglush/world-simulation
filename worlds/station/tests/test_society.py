@@ -350,6 +350,40 @@ def test_openrouter_chat_forces_a_tool_call_and_records_usage():
     assert completions.kwargs["max_completion_tokens"] == 300
 
 
+def test_openrouter_chat_sends_earlier_turns_in_order_and_reports_cached_tokens():
+    completions = _Completions('{"react": true, "reason": "x"}')
+    details = SimpleNamespace(cached_tokens=9)
+    original = completions.create
+
+    def create(**kwargs):
+        reply = original(**kwargs)
+        reply.usage.prompt_tokens_details = details
+        return reply
+
+    completions.create = create
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions), close=lambda: None)
+    chat = OpenRouterChat({"react": "m"}, CallBudget(1, 300), client=client)
+    request = ChatRequest(
+        "react",
+        "react_check",
+        "sys",
+        "now",
+        {"type": "object"},
+        history=(("u1", "a1"), ("u2", "a2")),
+    )
+    reply = chat.complete(request)
+    roles = [(m["role"], m["content"]) for m in completions.kwargs["messages"]]
+    assert roles == [
+        ("system", "sys"),
+        ("user", "u1"),
+        ("assistant", "a1"),
+        ("user", "u2"),
+        ("assistant", "a2"),
+        ("user", "now"),
+    ]
+    assert reply.metadata["cached_input_tokens"] == 9
+
+
 def test_openrouter_chat_rejects_malformed_replies_and_spends_budget():
     completions = _Completions("not json")
     client = SimpleNamespace(chat=SimpleNamespace(completions=completions), close=lambda: None)

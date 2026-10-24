@@ -38,6 +38,7 @@ def make_agents(
             FARMER_GATE,
             identities=(farmer_id,),
             score_messages=True,
+            conversation=True,
         )
         for farmer_id in sorted(world.farmers)
     }

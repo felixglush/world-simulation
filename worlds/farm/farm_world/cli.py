@@ -68,6 +68,8 @@ def summarize(
         "budget": budget,
         "calls": len(result.calls),
         "cost": round(cost, 4),
+        "input_tokens": sum(int(c.get("input_tokens") or 0) for c in result.calls),
+        "cached_input_tokens": sum(int(c.get("cached_input_tokens") or 0) for c in result.calls),
         "farmers": farmers,
         "actions": dict(actions),
         "rejected_actions": dict(rejected),

@@ -44,6 +44,9 @@ class ChatRequest:
     user: str
     schema: Mapping[str, object]
     max_tokens: int = 1200
+    # Earlier (user, assistant) turns of this agent's running chat, oldest first. Resending the
+    # same turns lets the provider reuse its cached prefix.
+    history: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +86,7 @@ class OpenRouterChat:
         model = self._models.get(request.role)
         if model is None:
             raise ProviderError(ProviderErrorCode.INVALID_INPUT)
-        ensure_bounded([request.system, request.user, request.schema])
+        ensure_bounded([request.system, request.history, request.user, request.schema])
         limit = self._budget.consume()
         started = time.perf_counter()
         try:
@@ -92,6 +95,11 @@ class OpenRouterChat:
                 max_completion_tokens=min(limit, request.max_tokens),
                 messages=[
                     {"role": "system", "content": request.system},
+                    *(
+                        {"role": role, "content": text}
+                        for user, assistant in request.history
+                        for role, text in (("user", user), ("assistant", assistant))
+                    ),
                     {"role": "user", "content": request.user},
                 ],
                 tools=[
@@ -122,6 +130,10 @@ class OpenRouterChat:
             cost=reported_cost(usage),
             elapsed_ms=elapsed,
         )
+        details = getattr(usage, "prompt_tokens_details", None)
+        cached = getattr(details, "cached_tokens", None)
+        if type(cached) is int:
+            metadata = {**metadata, "cached_input_tokens": cached}
         choice = response.choices[0] if getattr(response, "choices", None) else None
         diagnostic = {
             "finish_reason": getattr(choice, "finish_reason", None),

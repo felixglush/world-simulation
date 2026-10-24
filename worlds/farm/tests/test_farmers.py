@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 
@@ -7,6 +8,32 @@ from farm_world.loop import merged_log, run_farm
 from farm_world.router import FarmRouter
 from station_control.provider_support import CallBudget
 from station_control.society.llm import ChatRequest, FakeChat
+
+
+def context_of(request: ChatRequest) -> dict:
+    """The state a farmer's chat holds at this request: the latest full turn, the world with
+    every later change applied, and the farmer's own id."""
+    turns = [json.loads(u) for u, _ in request.history] + [json.loads(request.user)]
+    world: dict = {}
+    latest: dict = {}
+    for turn in turns:
+        if "world" not in turn:
+            continue
+        latest = turn
+        changes = turn["world"].get("changes_since_last_turn")
+        _merge(world, turn["world"] if changes is None else changes)
+    me = re.search(r"farmer id is (\w+)", request.system).group(1)
+    return {**latest, "world": {**world, "me": {**world.get("me", {}), "id": me}}}
+
+
+def _merge(base: dict, changes: dict) -> None:
+    for key, value in changes.items():
+        if value is None:
+            base.pop(key, None)
+        elif isinstance(value, dict) and isinstance(base.get(key), dict):
+            _merge(base[key], value)
+        else:
+            base[key] = value
 
 
 def handler(decide):
@@ -19,7 +46,7 @@ def handler(decide):
             return {"insights": []}
         if request.purpose == "react_check":
             return {"react": True, "reason": "test"}
-        return decide(json.loads(request.user), request)
+        return decide(context_of(request), request)
 
     return reply
 
@@ -59,7 +86,7 @@ def test_each_farmer_sees_only_their_own_bio_and_view():
     decides = [r for r in chat.requests if r.purpose == "decide"]
     assert len(decides) == 6
     for request in decides:
-        context = json.loads(request.user)
+        context = context_of(request)
         me = context["world"]["me"]["id"]
         others = [n for n in ("Maren", "Dev", "Ines", "Tomas", "Priya", "Oskar")]
         named = [n for n in others if n in request.system]
@@ -126,9 +153,9 @@ def test_a_message_reaches_the_recipients_next_review():
     sent = [e for e in result.events if e["type"] == "message_sent"]
     assert sent and sent[0]["to"] == "rice_2"
     later = [
-        json.loads(r.user)
+        context_of(r)
         for r in chat.requests
-        if r.purpose == "decide" and json.loads(r.user)["world"]["me"]["id"] == "rice_2"
+        if r.purpose == "decide" and context_of(r)["world"]["me"]["id"] == "rice_2"
     ]
     assert any("canal turns" in m["text"] for context in later for m in context["inbox"])
 
@@ -168,7 +195,7 @@ def test_prompts_carry_only_what_the_farmer_can_read_off_the_plot():
     _, chat = run(days=3)
     for request in chat.requests:
         if request.purpose in ("react_check", "decide"):
-            context = json.loads(request.user)
+            context = context_of(request)
             for line in context["trends"]:
                 if line.startswith("health_pct"):
                     assert any(f"{word}" in line for word in ("100", "60", "20"))
@@ -270,11 +297,45 @@ def test_queued_work_runs_hour_by_hour_and_a_message_wakes_a_busy_farmer_the_sam
     ]
     assert [e["hour"] for e in weeds[:1]] == [0]
     woken = [
-        json.loads(r.user)
+        context_of(r)
         for r in chat.requests
-        if r.purpose == "decide" and json.loads(r.user)["world"]["me"]["id"] == "rice_2"
+        if r.purpose == "decide" and context_of(r)["world"]["me"]["id"] == "rice_2"
     ]
     mid_shift = [c for c in woken if c["inbox"]]
     assert mid_shift
     assert any("gate at noon" in m["text"] for c in mid_shift for m in c["inbox"])
     assert mid_shift[0]["world"]["queued_actions"] == ["weed", "weed"]
+
+
+def test_each_farmer_keeps_one_running_chat_whose_earlier_turns_are_never_rewritten():
+    _, chat = run(days=3)
+    mine = [
+        r
+        for r in chat.requests
+        if "farmer id is rice_1" in r.system and r.purpose != "score_importance"
+    ]
+    assert len(mine) >= 3
+    first_full = json.loads(mine[0].user)
+    assert "map" in first_full["world"] and "changes_since_last_turn" not in first_full["world"]
+    grew = 0
+    for before, after in zip(mine, mine[1:], strict=False):
+        if len(after.history) > len(before.history):
+            grew += 1
+            assert after.history[: len(before.history)] == before.history  # prefix: cacheable
+    assert grew >= 2
+    later = [json.loads(r.user) for r in mine if r.history]
+    assert later and all("changes_since_last_turn" in t["world"] for t in later)
+    assert len({r.system for r in mine}) == 1  # one system prompt for every turn
+
+
+def test_a_chat_that_outgrows_its_bound_starts_over_from_the_full_state():
+    from station_control.society import agents
+
+    agents.CHAT_CHAR_LIMIT, old = 600, agents.CHAT_CHAR_LIMIT
+    try:
+        _, chat = run(days=3)
+    finally:
+        agents.CHAT_CHAR_LIMIT = old
+    mine = [r for r in chat.requests if "farmer id is rice_1" in r.system and r.purpose == "decide"]
+    fulls = [r for r in mine if "changes_since_last_turn" not in json.loads(r.user)["world"]]
+    assert len(fulls) >= 2 and not fulls[1].history
