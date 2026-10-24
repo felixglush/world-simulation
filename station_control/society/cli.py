@@ -47,7 +47,7 @@ def add_parser(commands: argparse._SubParsersAction) -> None:
         help="Call OpenRouter models. Needs --max-calls; OPENROUTER_API_KEY is optional.",
     )
     parser.add_argument("--max-calls", type=_positive, help="Finite shared call budget (live).")
-    parser.add_argument("--max-output-tokens-per-call", type=_positive, default=700)
+    parser.add_argument("--max-output-tokens-per-call", type=_positive, default=1200)
     parser.add_argument("--reflection-threshold", type=_positive, default=50)
     parser.add_argument("--output", type=Path, help="Write the event log here as JSONL.")
     for role, model in DEFAULT_MODELS.items():

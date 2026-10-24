@@ -248,7 +248,7 @@ class Agent:
                     "properties": {"importance": {"type": "integer", "minimum": 1, "maximum": 10}},
                     "required": ["importance"],
                 },
-                max_tokens=60,
+                max_tokens=120,
             ),
         )
         value = reply.data.get("importance") if reply else None
@@ -305,7 +305,7 @@ class Agent:
                 },
                 "required": ["react", "reason"],
             },
-            max_tokens=200,
+            max_tokens=300,
         )
 
     def _reflect(self, tick: int, rec: Recorder) -> None:

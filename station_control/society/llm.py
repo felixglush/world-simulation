@@ -43,7 +43,7 @@ class ChatRequest:
     system: str
     user: str
     schema: Mapping[str, object]
-    max_tokens: int = 700
+    max_tokens: int = 1200
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +105,7 @@ class OpenRouterChat:
                     }
                 ],
                 tool_choice={"type": "function", "function": {"name": "respond"}},
+                extra_body={"reasoning": {"effort": "low"}},
             )
         except Exception as error:
             raise ProviderError(
@@ -121,17 +122,32 @@ class OpenRouterChat:
             cost=reported_cost(usage),
             elapsed_ms=elapsed,
         )
+        choice = response.choices[0] if getattr(response, "choices", None) else None
+        diagnostic = {
+            "finish_reason": getattr(choice, "finish_reason", None),
+            "has_tool_call": bool(getattr(getattr(choice, "message", None), "tool_calls", None)),
+            "reply_head": _head(choice),
+        }
         try:
-            message = response.choices[0].message
+            message = choice.message
             raw = (
                 message.tool_calls[0].function.arguments if message.tool_calls else message.content
             )
             data = json.loads(raw)
         except Exception:
-            raise ProviderError(ProviderErrorCode.MALFORMED_RESPONSE, metadata) from None
+            raise ProviderError(
+                ProviderErrorCode.MALFORMED_RESPONSE, {**metadata, **diagnostic}
+            ) from None
         if not isinstance(data, dict):
             raise ProviderError(ProviderErrorCode.MALFORMED_RESPONSE, metadata)
         return ChatReply(data, metadata)
+
+
+def _head(choice: object) -> str:
+    message = getattr(choice, "message", None)
+    calls = getattr(message, "tool_calls", None)
+    raw = calls[0].function.arguments if calls else getattr(message, "content", "")
+    return str(raw)[:160]
 
 
 def _ms(started: float) -> float:
