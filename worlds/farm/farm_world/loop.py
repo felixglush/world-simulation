@@ -37,7 +37,7 @@ def make_agents(
             new_stream(farmer_id, reflection_threshold),
             FARMER_GATE,
             identities=(farmer_id,),
-            score_messages=True,
+            score_messages=False,
             conversation=True,
         )
         for farmer_id in sorted(world.farmers)
@@ -45,6 +45,7 @@ def make_agents(
 
 
 HOURS = 10
+MAX_THINKS_PER_DAY = 4  # model-driven reviews a farmer gets each day; messages wait for the next
 
 
 def run_farm(
@@ -65,10 +66,12 @@ def run_farm(
     perception = {farmer_id: Perception() for farmer_id in agents}
     queue: dict[str, list[tuple[str, dict[str, Any]]]] = {f: [] for f in agents}
     busy = {f: 0 for f in agents}
+    held: dict[str, list[Any]] = {f: [] for f in agents}  # delivered but not yet read
     start = world.day
     for _ in range(days):
         tick = world.day - start
         rested: set[str] = set()  # asked and had nothing to do: not asked again today
+        thinks = {f: 0 for f in agents}
         for hour in range(HOURS):
             world.hour = rec.hour = hour
             inboxes = router.deliver_due(tick)
@@ -81,14 +84,18 @@ def run_farm(
                     to=message.recipient,
                 )
             for farmer_id in _order(agents, tick + hour):
-                inbox = tuple(inboxes.get(farmer_id, ()))
-                woken = bool(inbox)
+                held[farmer_id].extend(inboxes.get(farmer_id, ()))
+                can_think = thinks[farmer_id] < MAX_THINKS_PER_DAY
+                woken = bool(held[farmer_id]) and can_think
+                inbox = tuple(held[farmer_id]) if woken else ()
                 if busy[farmer_id] > 0 and not woken:
                     busy[farmer_id] -= 1
                     continue
-                if woken or (not queue[farmer_id] and farmer_id not in rested):
+                if woken or (can_think and not queue[farmer_id] and farmer_id not in rested):
                     force = None if queue[farmer_id] else "idle"
-                    held = busy[farmer_id]
+                    thinks[farmer_id] += 1
+                    held[farmer_id] = []
+                    pause = busy[farmer_id]
                     decision = _think(
                         world, router, agents, perception, queue, farmer_id, tick, inbox, force, rec
                     )
@@ -98,8 +105,8 @@ def run_farm(
                         busy[farmer_id] = 0
                     if not queue[farmer_id]:
                         rested.add(farmer_id)
-                    elif decision is None and held > 0:
-                        busy[farmer_id] = held - 1
+                    elif decision is None and pause > 0:
+                        busy[farmer_id] = pause - 1
                         continue
                 busy[farmer_id] = _work(world, agents[farmer_id], farmer_id, queue, tick, rec)
         busy = {f: 0 for f in agents}

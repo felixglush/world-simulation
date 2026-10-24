@@ -339,3 +339,23 @@ def test_a_chat_that_outgrows_its_bound_starts_over_from_the_full_state():
     mine = [r for r in chat.requests if "farmer id is rice_1" in r.system and r.purpose == "decide"]
     fulls = [r for r in mine if "changes_since_last_turn" not in json.loads(r.user)["world"]]
     assert len(fulls) >= 2 and not fulls[1].history
+
+
+def test_a_chatty_channel_cannot_wake_a_farmer_more_than_four_times_a_day():
+    def decide(context, request):
+        me = context["world"]["me"]["id"]
+        channel = "#riverbend" if me.startswith("rice") else "#highfield"
+        return {
+            "actions": [{"name": "rest"}],
+            "messages": [{"to": channel, "text": f"{me} here"}],
+            "rationale": "chat",
+        }
+
+    _, chat = run(decide, days=1)
+    per_farmer: dict[str, int] = {}
+    for request in chat.requests:
+        if request.purpose in ("decide", "react_check") and "world" in json.loads(request.user):
+            me = re.search(r"farmer id is (\w+)", request.system).group(1)
+            per_farmer[me] = per_farmer.get(me, 0) + 1
+    assert per_farmer and max(per_farmer.values()) <= 4 * 2
+    assert not [r for r in chat.requests if r.purpose == "score_importance"]
