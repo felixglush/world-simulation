@@ -372,7 +372,7 @@ class Agent:
     def _parse(self, data: dict[str, object], tick: int) -> tuple[Decision, Plan | None]:
         rationale = str(data.get("rationale", ""))[:300]
         messages = tuple(_messages(data.get("messages"), self.identities))
-        plan = _plan(data.get("plan"), data.get("expect"), tick)
+        plan = parse_plan(data.get("plan"), data.get("expect"), tick)
         command = None
         adversary_action = None
         if self.spec.role == "adversary":
@@ -490,7 +490,7 @@ def _attestations(value: object) -> list[Attestation]:
     return out
 
 
-def _plan(steps: object, expect: object, tick: int) -> Plan | None:
+def parse_plan(steps: object, expect: object, tick: int) -> Plan | None:
     if not isinstance(steps, list) or not steps:
         return None
     parsed = []

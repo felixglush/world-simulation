@@ -11,7 +11,7 @@ CAPTAIN_ID = "captain"
 SUPPLIER_ID = "supplier"
 ADVERSARY_ID = "adversary"
 
-_PLAN = {
+PLAN_SCHEMA = {
     "plan": {
         "type": "array",
         "maxItems": MAX_PLAN_STEPS,
@@ -147,7 +147,7 @@ def _crew_schema(kinds: tuple[str, ...], attest: bool = False) -> dict[str, obje
                 "items": {"type": "string"},
                 "description": "IDs of reports or messages you judge unreliable.",
             },
-            **_PLAN,
+            **PLAN_SCHEMA,
         },
         "required": ["command", "rationale"],
     }
@@ -168,7 +168,7 @@ _ADVERSARY_SCHEMA = {
         },
         "messages": _messages(True, echoes=True),
         "lookups": _lookups(("recall",)),
-        **_PLAN,
+        **PLAN_SCHEMA,
     },
     "required": ["action", "rationale"],
 }
