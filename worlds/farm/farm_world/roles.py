@@ -52,8 +52,8 @@ gone: each sowing eats the seed you hold.
 node such as canal_1). It carries 10 mm a day per labor you spend (1 to 10), starts shut, \
 silts, and is shared like every other channel. Water only runs downhill.
 - build {kind}: any name you choose. The known kinds are granary, threshing_floor or mill: \
-costs materials and labor, lands on free ground near your home, and helps your whole community (granary: stored rice spoils a fifth as \
-fast; threshing_floor: threshing 50% faster; mill: milling three times faster). Each community \
+costs materials and labor, lands on free ground near your home, \
+and helps your whole community (granary: stored rice spoils a fifth as fast; threshing_floor: threshing 50% faster; mill: milling three times faster). Each community \
 can have one of each. A granary needs 6 timber and 8 labor, a threshing_floor 4 timber and 6 \
 labor, a mill 6 timber, 8 stone and 10 labor. You start with some timber and stone; \
 Riverbend has more timber, Highfield more stone. Any other kind name (for example "drying \
