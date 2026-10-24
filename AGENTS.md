@@ -13,6 +13,10 @@ Claude Code loads the pstack plugin (poteto-mode) from `.claude/settings.json`. 
 
 Use fake providers for routine tests. Live model experiments require explicit budgets and recorded model/configuration metadata.
 
+## Repository layout
+
+Each world lives under `worlds/`. The space station is `worlds/station/` (the `station_control` package, its `tests/` and `scenarios/`). Run its commands from that folder, or set `PYTHONPATH=worlds/station`, for example `cd worlds/station && uv run --frozen python -m station_control trade --turns 20`. `uv run --frozen pytest` from the repository root runs every world's tests. Scripts, the architecture explorer, and docs stay at the root.
+
 ## Environment commands
 
 - Install: bash scripts/setup-cloud.sh

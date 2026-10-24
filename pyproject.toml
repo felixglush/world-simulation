@@ -18,7 +18,11 @@ line-length = 100
 extend-exclude = [".agents/skills"]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = ["worlds/station", "worlds/farm", "."]
+testpaths = ["worlds/station/tests", "worlds/farm/tests"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["station_control", "farm_world"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
