@@ -240,7 +240,7 @@ def test_the_farmer_tool_schema_can_express_every_action_parameter():
     for good in ("timber", "stone", "coin", "flour"):
         assert good in props["item"]["enum"]
         assert good in props["give_item"]["enum"]
-    assert set(props["kind"]["enum"]) == {"granary", "threshing_floor", "mill"}
+    assert props["kind"]["type"] == "string"
 
 
 def test_malformed_parameter_types_are_rejected_not_raised():
@@ -248,3 +248,36 @@ def test_malformed_parameter_types_are_rejected_not_raised():
     for bad in (["mill"], {"a": 1}, 3, None):
         assert not world.act("rice_1", "build", kind=bad).ok
     assert not world.act("rice_1", "give", to="rice_2", item=["rice"], qty=1).ok
+
+
+def test_any_named_structure_costs_what_the_farmer_puts_in_and_has_no_effect():
+    world = default_world()
+    farmer = world.farmers["rice_1"]
+    timber, labor = farmer.has("timber"), farmer.labor
+    result = world.act("rice_1", "build", kind="drying rack", timber=3, labor=2)
+    assert result.ok, result.message
+    assert farmer.has("timber") == timber - 3
+    assert farmer.labor == labor - 2
+    assert [s.kind for s in world.economy.structures] == ["drying rack"]
+    # open kinds are not limited to one per community and do not unlock the real effects
+    assert world.act("rice_1", "build", kind="drying rack", timber=1, labor=1).ok
+    assert not world.economy.has("Riverbend", "mill")
+    assert not world.act("rice_1", "build", kind="Bad Name!", timber=1).ok
+    assert not world.act("rice_1", "build", kind="shed", timber=500).ok
+
+
+def test_a_dug_channel_joins_the_shared_network_and_carries_water_when_opened():
+    world = default_world()
+    result = world.act("rice_1", "dig", src="canal_1", dst="paddy_2", labor=3)
+    assert result.ok, result.message
+    channel = world.channels["dug_1"]
+    assert channel.built_by == "rice_1" and not channel.gate_open
+    assert channel.capacity_mm == 30
+    assert not world.act("rice_1", "dig", src="canal_1", dst="paddy_2").ok
+    assert not world.act("rice_1", "dig", src="paddy_2", dst="paddy_2").ok
+    assert not world.act("rice_1", "dig", src="drain", dst="paddy_1").ok
+    assert not world.act("rice_1", "dig", src="nowhere", dst="paddy_1").ok
+    assert world.act("rice_2", "set_gate", channel="dug_1", open=True).ok
+    view = world.view("rice_2")["channels"]["dug_1"]
+    assert view["open"] and view["dug_by"] == "rice_1"
+    assert world.snapshot()["channels"]["dug_1"]["path"]

@@ -8,6 +8,7 @@ farmers see only `view`.
 from __future__ import annotations
 
 import math
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
@@ -75,6 +76,7 @@ class Channel:
     last_flow: float = 0.0
     last_changed_by: str = ""
     path: tuple[tuple[int, int], ...] = ()
+    built_by: str = ""
 
 
 CANAL_STORAGE_MM = 60.0
@@ -139,7 +141,8 @@ ACTION_PARAMS: dict[str, dict[str, str]] = {
     "dry": {"kg": "num:1:100000"},
     "mill": {"item": "item", "kg": "num:1:100000"},
     "save_seed": {"item": "item", "kg": "num:1:100000"},
-    "build": {"kind": "building"},
+    "build": {"kind": "word", "timber": "num:0:20", "stone": "num:0:20", "labor": "num:1:20"},
+    "dig": {"src": "str", "dst": "str", "labor": "num:1:10"},
     "offer": {
         "to": "farmer",
         "give_item": "good",
@@ -152,6 +155,9 @@ ACTION_PARAMS: dict[str, dict[str, str]] = {
     "give": {"to": "farmer", "item": "good", "qty": "num:1:5000"},
 }
 ACTIONS = tuple(ACTION_PARAMS)
+_WORD = re.compile(r"[a-z][a-z_ ]{0,30}")
+DIG_MM_PER_LABOR = 10.0
+OPEN_BUILD_LABOR = 4.0
 MILLABLE = ("paddy_dry", "wheat_grain")
 
 
@@ -170,8 +176,8 @@ def check_params(name: str, params: dict[str, Any]) -> str | None:
             return "variety must be winter or spring"
         if kind == "good" and not (isinstance(value, str) and value in GOODS):
             return f"{key} must be one of {GOODS}"
-        if kind == "building" and not (isinstance(value, str) and value in BUILDINGS):
-            return f"{key} must be one of {tuple(BUILDINGS)}"
+        if kind == "word" and not (isinstance(value, str) and _WORD.fullmatch(value.strip())):
+            return f"{key} must be a short lowercase name"
         if kind == "farmer" and not (isinstance(value, str) and 0 < len(value) <= 64):
             return f"{key} must be a farmer id"
         if kind == "item" and not (isinstance(value, str) and value in MILLABLE):
@@ -535,13 +541,26 @@ class FarmWorld:
             None,
         )
 
-    def _do_build(self, farmer: Farmer, kind: str) -> ActionResult:
-        cost = BUILDINGS[kind]
-        if self.economy.has(farmer.community, kind):
+    def _do_build(
+        self,
+        farmer: Farmer,
+        kind: str,
+        timber: float = 0,
+        stone: float = 0,
+        labor: float = OPEN_BUILD_LABOR,
+    ) -> ActionResult:
+        kind = kind.strip()
+        known = kind in BUILDINGS
+        # A known building has fixed costs and effect; any other name is what the farmer
+        # says it is: it costs what they put in and does nothing mechanical.
+        cost = (
+            dict(BUILDINGS[kind]) if known else {"timber": timber, "stone": stone, "labor": labor}
+        )
+        if known and self.economy.has(farmer.community, kind):
             return ActionResult(False, f"your community already has a {kind}")
         short = [m for m, n in cost.items() if m != "labor" and farmer.has(m) < n]
         if short:
-            need = ", ".join(f"{m} {n:g}" for m, n in cost.items() if m != "labor")
+            need = ", ".join(f"{m} {n:g}" for m, n in cost.items() if m != "labor" and n)
             return ActionResult(False, f"a {kind} needs {need}; you lack {', '.join(short)}")
         spot = self._free_tile(farmer)
         if spot is None:
@@ -552,12 +571,56 @@ class FarmWorld:
             if material != "labor":
                 farmer.add(material, -qty)
         number = len(self.economy.structures) + 1
+        slug = kind.replace(" ", "_")
         self.economy.structures.append(
-            Structure(f"{kind}-{number}", kind, farmer.id, farmer.community, *spot, self.day)
+            Structure(f"{slug}-{number}", kind, farmer.id, farmer.community, *spot, self.day)
         )
         farmer.at = spot
+        effect = BUILDING_EFFECT.get(kind, "no effect beyond standing there")
+        return ActionResult(True, f"built a {kind}: {effect}", {"x": spot[0], "y": spot[1]})
+
+    def _node_tile(self, node: str) -> tuple[int, int] | None:
+        if node in self.plots:
+            plot = self.plots[node]
+            return plot.x + plot.w // 2, plot.y + plot.h // 2
+        for channel in self.channels.values():
+            if channel.dst == node and channel.path:
+                return channel.path[-1]
+            if channel.src == node and channel.path:
+                return channel.path[0]
+        return None
+
+    def _do_dig(self, farmer: Farmer, src: str, dst: str, labor: float = 4) -> ActionResult:
+        nodes = {"river", "drain", *self.plots, *self.canal_nodes}
+        if src not in nodes or dst not in nodes:
+            return ActionResult(False, f"nodes are {sorted(nodes)}")
+        if src == dst:
+            return ActionResult(False, "a channel needs two different ends")
+        if src == "drain" or dst == "river":
+            return ActionResult(False, "water cannot be dug out of the drain or into the river")
+        if any(c.src == src and c.dst == dst for c in self.channels.values()):
+            return ActionResult(False, f"{src} already has a channel to {dst}")
+        start, end = self._node_tile(src), self._node_tile(dst)
+        if start is None or end is None:
+            return ActionResult(False, "that stretch of ground cannot be dug yet")
+        if error := self._spend(farmer, labor):
+            return ActionResult(False, error)
+        number = sum(1 for c in self.channels.values() if c.built_by) + 1
+        channel = Channel(
+            f"dug_{number}",
+            src,
+            dst,
+            labor * DIG_MM_PER_LABOR,
+            path=(start, end),
+            built_by=farmer.id,
+        )
+        self.channels[channel.id] = channel
+        farmer.at = start
         return ActionResult(
-            True, f"built a {kind}: {BUILDING_EFFECT[kind]}", {"x": spot[0], "y": spot[1]}
+            True,
+            f"dug {channel.id} from {src} to {dst} (carries up to {channel.capacity_mm:g} mm a "
+            "day); its gate is shut",
+            {"channel": channel.id},
         )
 
     def _latency(self, a: Farmer, b: Farmer) -> int:
@@ -795,6 +858,7 @@ class FarmWorld:
             },
             "channels": {
                 c.id: {"open": c.gate_open, "flow": c.last_flow, "silt": round(c.silt, 2)}
+                | ({"path": [list(p) for p in c.path], "by": c.built_by} if c.built_by else {})
                 for c in self.channels.values()
             },
             "structures": [
@@ -845,6 +909,9 @@ class FarmWorld:
                     "open": c.gate_open,
                     "silty": c.silt > 0.4,
                     "last_changed_by": c.last_changed_by,
+                    "from": c.src,
+                    "to": c.dst,
+                    **({"dug_by": c.built_by} if c.built_by else {}),
                 }
                 for c in self.channels.values()
             },

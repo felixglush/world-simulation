@@ -34,6 +34,7 @@ A farmer proposes up to six actions each time they think, plus up to two message
 | --- | --- | --- |
 | `set_gate` {channel, open} | 0.5 | Opens or closes the intake, a carry channel, a paddy turnout or an outlet. Water flows downhill only through open gates and only when the river stands above the canal. |
 | `clear_canal` {channel} | 4 | Removes silt that cuts a channel's capacity. |
+| `dig` {src, dst, labor} | 1 to 10 (default 4) | Digs a new channel between two nodes (`river`, `drain`, a plot id or a canal node). It carries 10 mm a day per labor spent, starts with its gate shut, silts and is shared like every other channel (anyone can open, close or clear it). Water still only runs downhill, so a ditch dug uphill carries nothing. Everyone can see who dug it. |
 
 ## Harvest and storing
 
@@ -52,6 +53,8 @@ A farmer proposes up to six actions each time they think, plus up to two message
 | `build` {kind: granary} | 8 + 6 timber | Stored rice and dry paddy spoil a fifth as fast. |
 | `build` {kind: threshing_floor} | 6 + 4 timber | Threshing is 50% faster. |
 | `build` {kind: mill} | 10 + 6 timber + 8 stone | Milling is three times faster. |
+
+Any other name is also allowed: `build` {kind: "drying rack", timber, stone, labor}. The farmer chooses what to put in (up to 20 timber, 20 stone, 20 labor; labor defaults to 4). It is placed on the map and visible to everyone, and has no mechanical effect, so what it means is for the farmers to agree. Open kinds are not limited to one per community.
 
 The building goes on the nearest free ground to the builder's home. Riverbend starts with 20 timber and 2 stone per farmer, Highfield with 6 timber and 12 stone, so the valley cannot build a mill without stone from the uplands.
 

@@ -6,7 +6,7 @@ from station_control.society.agents import RoleSpec
 from station_control.society.gate import GateConfig
 from station_control.society.roles import PLAN_SCHEMA
 
-from .economy import BUILDINGS, GOODS
+from .economy import GOODS
 from .world import ACTIONS
 
 HANDBOOK = """\
@@ -48,12 +48,17 @@ left standing lose grain.
 lost, not on rainy days), mill {item: paddy_dry or wheat_grain} (to rice or flour, 100 kg per \
 labor), save_seed {item} (keeps grain as seed, 200 kg per labor). Seed you do not save is \
 gone: each sowing eats the seed you hold.
-- build {kind: granary, threshing_floor or mill}: costs materials and labor, lands on free \
-ground near your home, and helps your whole community (granary: stored rice spoils a fifth as \
+- dig {src, dst, labor}: a new channel between two nodes (river, drain, a plot id or a canal \
+node such as canal_1). It carries 10 mm a day per labor you spend (1 to 10), starts shut, \
+silts, and is shared like every other channel. Water only runs downhill.
+- build {kind}: any name you choose. The known kinds are granary, threshing_floor or mill: \
+costs materials and labor, lands on free ground near your home, and helps your whole community (granary: stored rice spoils a fifth as \
 fast; threshing_floor: threshing 50% faster; mill: milling three times faster). Each community \
 can have one of each. A granary needs 6 timber and 8 labor, a threshing_floor 4 timber and 6 \
 labor, a mill 6 timber, 8 stone and 10 labor. You start with some timber and stone; \
-Riverbend has more timber, Highfield more stone.
+Riverbend has more timber, Highfield more stone. Any other kind name (for example "drying \
+rack") costs what you put in with {timber, stone, labor} and has no effect beyond standing \
+there.
 - give {to, item, qty}: send goods to another farmer (a day to reach your community, two to \
 reach the other).
 - offer {to, give_item, give_qty, want_item, want_qty}: propose a swap to one farmer. Your \
@@ -89,7 +94,12 @@ _ACTION_PARAMS = {
     "units": {"type": "number", "minimum": 0.5, "maximum": 20},
     "variety": {"type": "string", "enum": ["winter", "spring"]},
     "item": {"type": "string", "enum": list(GOODS)},
-    "kind": {"type": "string", "enum": list(BUILDINGS)},
+    "kind": {"type": "string", "maxLength": 31},
+    "timber": {"type": "number", "minimum": 0, "maximum": 20},
+    "stone": {"type": "number", "minimum": 0, "maximum": 20},
+    "labor": {"type": "number", "minimum": 1, "maximum": 20},
+    "src": {"type": "string"},
+    "dst": {"type": "string"},
     "to": {"type": "string"},
     "qty": {"type": "number", "minimum": 1, "maximum": 5000},
     "give_item": {"type": "string", "enum": list(GOODS)},

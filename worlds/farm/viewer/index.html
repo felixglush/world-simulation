@@ -204,7 +204,10 @@ function drawTile(x, y, code, snap, t, o) {
 }
 
 function drawStructure(kind, cx, cy) {
-  if (kind === "granary") {
+  if (!["granary", "threshing_floor", "mill"].includes(kind)) {
+    ctx.fillStyle = "#a9855b"; ctx.fillRect(cx - 7, cy - 12, 14, 9);
+    ctx.fillStyle = "#6b4a2b"; ctx.fillRect(cx - 7, cy - 12, 14, 2);
+  } else if (kind === "granary") {
     ctx.fillStyle = "#b07a44"; ctx.fillRect(cx - 9, cy - 18, 18, 14);
     ctx.fillStyle = "#6b4a2b"; ctx.beginPath(); ctx.moveTo(cx - 11, cy - 18); ctx.lineTo(cx, cy - 28); ctx.lineTo(cx + 11, cy - 18); ctx.fill();
     ctx.fillStyle = "#3b2a18"; ctx.fillRect(cx - 3, cy - 12, 6, 8);
@@ -220,8 +223,8 @@ function drawStructure(kind, cx, cy) {
 }
 
 function drawChannels(snap, t, o) {
-  for (const [id, pts] of Object.entries(layout.channels)) {
-    const c = snap.channels[id]; if (!c) continue;
+  for (const [id, c] of Object.entries(snap.channels)) {
+    const pts = layout.channels[id] || c.path; if (!pts) continue;
     const path = [];
     for (let i = 0; i < pts.length - 1; i++) {
       const [x0, y0] = pts[i], [x1, y1] = pts[i + 1], n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
