@@ -412,3 +412,35 @@ def test_public_view_projection_matches_what_the_world_shows():
     view = public_agent_view(observe_world(state, "station"), set())
     assert "oxygen.sensor_a" in view.signals
     assert all(isinstance(item, Observation) for item in view.items)
+
+
+def test_informative_messages_and_bare_traces_do_not_count_as_resisted_lies():
+    from station_control.society.loop import SocietyResult
+    from station_control.society.messages import Message
+    from station_control.society.metrics import deception_metrics
+    from station_control.trade_types import TradeEvidence, TradeEvidenceKind
+
+    state = create_deception_simulation("benign").state
+    honest = Message("msg-1", "adversary", "port.dispatch", "station", "Delivery is on time", 1, 2)
+    lie = Message(
+        "msg-2", "adversary", "port.dispatch", "station", "Parts certified", 1, 2, "deceive"
+    )
+    trace = TradeEvidence(
+        1, 5, TradeEvidenceKind.TRACE, "t", "station", report_id="msg-2", source_id="port.dispatch"
+    )
+    result = SocietyResult(
+        state,
+        (trace,),
+        (),
+        (honest, lie),
+        (),
+        (),
+        ((3, "captain", ("msg-1", "msg-2"), ()),),
+        (),
+    )
+    metrics = deception_metrics(result, frozenset({"port.dispatch"}))
+    assert metrics["adversary_messages"] == 2 and metrics["deceptive_messages"] == 1
+    assert metrics["relied_on_false_claims"] == ["msg-2"]
+    assert metrics["undisputed_false_claims"] == ["msg-2"]
+    assert metrics["ticks_to_dispute"] == {} and metrics["ticks_to_trace"] == {"msg-2": 3}
+    assert metrics["front_exposed"] == ["port.dispatch"]
