@@ -74,18 +74,12 @@ def test_no_ground_truth_reaches_a_prompt():
         assert secret not in text
 
 
-def test_quiet_days_make_no_model_call():
-    def reply(request):
-        if request.purpose == "react_check":
-            return {"react": False, "reason": "nothing new"}
-        if request.purpose == "score_importance":
-            return {"importance": 3}
-        return {"actions": [{"name": "rest"}], "rationale": "r"}
-
-    chat = FakeChat(reply)
+def test_a_resting_farmer_is_asked_once_a_day_and_never_polled_hourly():
+    chat = FakeChat(handler(idle))
     run_farm(default_world(1), chat, days=4)
-    assert len([r for r in chat.requests if r.purpose == "react_check"]) == 6  # day 0 only
-    assert not [r for r in chat.requests if r.purpose == "decide"]
+    decides = [r for r in chat.requests if r.purpose == "decide"]
+    assert len(decides) == 6 * 4
+    assert not [r for r in chat.requests if r.purpose == "react_check"]
 
 
 def test_unlisted_or_malformed_actions_are_dropped_not_executed():
@@ -97,13 +91,14 @@ def test_unlisted_or_malformed_actions_are_dropped_not_executed():
     assert not [e for e in result.events if e["type"] == "action"]
 
 
-def test_messages_arrive_after_a_delay_and_cross_community_takes_longer():
+def test_messages_arrive_in_the_hour_they_are_sent_within_and_across_communities():
     router = FarmRouter({"a": "x", "b": "x", "c": "y"})
     near, _ = router.send("a", "b", "hello", 0)
     far, _ = router.send("a", "c", "hello", 0)
+    inbox = router.deliver_due(0)
+    assert [m.message_id for m in inbox["b"]] == [near.message_id]
+    assert [m.message_id for m in inbox["c"]] == [far.message_id]
     assert router.deliver_due(0) == {}
-    assert [m.message_id for m in router.deliver_due(1)["b"]] == [near.message_id]
-    assert [m.message_id for m in router.deliver_due(2)["c"]] == [far.message_id]
 
 
 def test_message_rules_are_enforced():
@@ -111,8 +106,9 @@ def test_message_rules_are_enforced():
     assert router.send("a", "nobody", "hi", 0)[1] == "unknown_recipient"
     assert router.send("a", "a", "hi", 0)[1] == "unknown_recipient"
     assert router.send("a", "b", "  ", 0)[1] == "empty_message"
-    assert router.send("a", "b", "one", 0)[0] and router.send("a", "b", "two", 0)[0]
-    assert router.send("a", "b", "three", 0)[1] == "rate_limited"
+    for n in range(8):
+        assert router.send("a", "b", f"m{n}", 0)[0]
+    assert router.send("a", "b", "too many today", 0)[1] == "rate_limited"
 
 
 def test_a_message_reaches_the_recipients_next_review():
@@ -182,9 +178,12 @@ def test_prompts_carry_only_what_the_farmer_can_read_off_the_plot():
 
 
 def test_stray_fields_are_dropped_and_wrong_types_are_rejected_by_the_world():
+    asked = []
+
     def decide(context, request):
-        if context["world"]["me"]["id"] != "rice_1":
+        if context["world"]["me"]["id"] != "rice_1" or asked:
             return {"actions": [{"name": "rest"}], "rationale": "wait"}
+        asked.append(1)
         flat = {"plot": "paddy_1", "channel": "intake", "kg": 30, "mm": 5, "open": True}
         return {
             "actions": [
@@ -237,13 +236,45 @@ def test_channels_reach_every_member_and_farmers_can_start_and_grow_them():
     assert set(router.channels_for("rice_1")) == {"#riverbend"}
     message, error = router.send("rice_1", "#riverbend", "water at dawn?", 0)
     assert error is None and message.text.startswith("[#riverbend]")
-    inbox = router.deliver_due(1)
+    inbox = router.deliver_due(0)
     assert set(inbox) == {"rice_2", "rice_3"}
     assert router.send("wheat_1", "#riverbend", "hi", 0)[1] == "not_a_member"
     assert router.send("rice_1", "#Bad name", "hi", 0)[1] == "bad_channel_name"
     router.send("rice_1", "#grain_deal", "mill co-op?", 0, invite=("wheat_2", "nobody"))
     assert set(router.channels_for("wheat_2")) == {"#highfield", "#grain_deal"}
-    assert router.deliver_due(1) == {} and set(router.deliver_due(2)) == {"wheat_2"}
+    assert set(router.deliver_due(0)) == {"wheat_2"}
     router.send("wheat_2", "#grain_deal", "yes", 3, leave=True)
     assert "#grain_deal" not in router.channels_for("wheat_2")
     assert router.send("wheat_2", "#grain_deal", "again", 3)[1] == "not_a_member"
+
+
+def test_queued_work_runs_hour_by_hour_and_a_message_wakes_a_busy_farmer_the_same_day():
+    calls = {"rice_2": 0}
+
+    def decide(context, request):
+        me = context["world"]["me"]["id"]
+        if me == "rice_1" and context["tick"] == 0 and not context["inbox"]:
+            return {
+                "actions": [{"name": "rest"}],
+                "messages": [{"to": "rice_2", "text": "gate at noon?"}],
+                "rationale": "talk",
+            }
+        if me == "rice_2" and calls["rice_2"] == 0:
+            calls["rice_2"] += 1
+            return {"actions": [{"name": "weed"}] * 3, "rationale": "work"}
+        return {"actions": [{"name": "rest"}], "rationale": "ok"}
+
+    result, chat = run(decide, days=1)
+    weeds = [
+        e for e in result.world.events if e.get("action") == "weed" and e["farmer"] == "rice_2"
+    ]
+    assert [e["hour"] for e in weeds[:1]] == [0]
+    woken = [
+        json.loads(r.user)
+        for r in chat.requests
+        if r.purpose == "decide" and json.loads(r.user)["world"]["me"]["id"] == "rice_2"
+    ]
+    mid_shift = [c for c in woken if c["inbox"]]
+    assert mid_shift
+    assert any("gate at noon" in m["text"] for c in mid_shift for m in c["inbox"])
+    assert mid_shift[0]["world"]["queued_actions"] == ["weed", "weed"]

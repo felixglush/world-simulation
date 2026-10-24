@@ -203,6 +203,7 @@ class FarmWorld:
     ) -> None:
         self.climate = Climate(seed)
         self.day = start_day
+        self.hour = 0
         self.plots = {p.id: p for p in plots}
         self.farmers = {f.id: f for f in farmers}
         self.canal_nodes = {c.id: c for c in canals}
@@ -239,6 +240,7 @@ class FarmWorld:
             {
                 "type": "action" if result.ok else "rejected",
                 "day": self.day,
+                "hour": self.hour,
                 "farmer": farmer_id,
                 "action": name,
                 "params": params,

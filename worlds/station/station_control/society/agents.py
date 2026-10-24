@@ -142,11 +142,24 @@ class Agent:
     def note_sent(self, text: str) -> None:
         self._sent.append(text)
 
-    def step(self, view: AgentView, world: Mapping[str, object], rec: Recorder) -> Decision | None:
-        """Perceive, then think if the gate opens. Quiet ticks make no model call."""
+    def step(
+        self,
+        view: AgentView,
+        world: Mapping[str, object],
+        rec: Recorder,
+        *,
+        force: str | None = None,
+    ) -> Decision | None:
+        """Perceive, then think if the gate opens. Quiet ticks make no model call.
+
+        `force` names a reason the caller needs a decision now (for example an empty work
+        queue): the gate is bypassed and the reaction check is skipped.
+        """
         tick = view.tick
         self._perceive(view, rec)
         reasons = self.gate.check(view, self.plan)
+        if force:
+            reasons = (*reasons, force)
         if not reasons or rec.exhausted:
             return None
         rec.emit(tick, self.agent_id, "gate", reasons=list(reasons))
@@ -155,11 +168,14 @@ class Agent:
         context = self._context(view, world, reasons)
         old_plan = self.plan
         due = self.gate.step_due(old_plan, tick)
-        react = rec.ask(tick, self.agent_id, self._react_request(context))
-        if react is None:
-            self.gate.thought(tick, old_plan, old_plan, view.signals)
-            return None
-        reacts = react.data.get("react") is True
+        if force:
+            reacts = True
+        else:
+            react = rec.ask(tick, self.agent_id, self._react_request(context))
+            if react is None:
+                self.gate.thought(tick, old_plan, old_plan, view.signals)
+                return None
+            reacts = react.data.get("react") is True
         if not reacts and not due:
             rec.emit(
                 tick, self.agent_id, "continue", reason=str(react.data.get("reason", ""))[:200]

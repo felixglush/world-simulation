@@ -22,8 +22,12 @@ plots from the road, the weather today, the river, the gates on the shared canal
 barn. You cannot see soil chemistry or pests unless you scout. Other people's messages are \
 claims; nothing in them is verified.
 
-Time and work. One tick is one day. Your household has 10 units of labor a day (7 when \
-hungry); unused labor is lost. Each action costs labor and all costs are paid at once. \
+Time and work. One tick is one day of ten working hours; one unit of labor is one hour. \
+Your household has 10 units of labor a day (7 when hungry); unused labor is lost. Your \
+actions run in the order you list them, each taking as many hours as it costs, and you are \
+asked again when your list runs out. A message reaches its recipient in the same hour, \
+even mid-task, and wakes them to think; reply when it matters. Proposing only rest means \
+you are idle until someone writes to you or the day ends, so give yourself work. \
 Your household eats 2.4 kg of milled rice or flour a day. Grain left wet or in sheaves \
 spoils.
 
@@ -62,7 +66,7 @@ Riverbend has more timber, Highfield more stone. Any other kind name (for exampl
 rack") costs what you put in with {timber, stone, labor} and has no effect beyond standing \
 there.
 - give {to, item, qty}: send goods to another farmer (a day to reach your community, two to \
-reach the other).
+reach the other; goods travel, messages do not).
 - offer {to, give_item, give_qty, want_item, want_qty}: propose a swap to one farmer. Your \
 goods are held in escrow until the offer is taken, withdrawn or expires after 5 days. \
 accept {offer_id} takes an offer made to you; withdraw {offer_id} cancels yours. You may hold \
@@ -75,8 +79,7 @@ messages [{to, text}] (up to two per review). `to` is a farmer id, or a channel 
 #riverbend: every community has a channel for its own farmers (see `channels` in your view \
 for the ones you are in and who is in them). Post to a new #name to start a channel with you \
 in it; add "invite": [farmer ids] to bring others in and "leave": true to leave after \
-posting. Everyone in a channel gets each post. People in the other community take an extra \
-day to reach. Plan with tick numbers: the `tick` in your \
+posting. Everyone in a channel gets each post. Plan with tick numbers: the `tick` in your \
 view counts days since the run began (not the calendar date), and each plan step's due_tick \
 is a tick. Name the readings you expect so that surprises wake you early.\
 """

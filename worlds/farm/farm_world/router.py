@@ -7,10 +7,10 @@ import re
 from station_control.society.messages import Message
 
 MAX_CHARS = 300
-MAX_PER_DAY = 2
+MAX_PER_DAY = 8
 MAX_PER_PAIR = 30
-LATENCY_SAME_COMMUNITY = 1
-LATENCY_OTHER_COMMUNITY = 2
+LATENCY_SAME_COMMUNITY = 0
+LATENCY_OTHER_COMMUNITY = 0
 MAX_MEMBERS = 12
 _CHANNEL = re.compile(r"#[a-z][a-z0-9_]{0,23}")
 
