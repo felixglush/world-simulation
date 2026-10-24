@@ -44,6 +44,11 @@ class MessageRouter:
         self._identities = identities
         self._mailboxes = mailboxes
         self.registry = registry
+        self._aliases = {
+            identity: world
+            for agent, world in agent_worlds.items()
+            for identity in identities.get(agent, frozenset())
+        }
         self._sent: list[Message] = []
         self._per_tick: dict[tuple[str, int], int] = {}
         self._per_pair: dict[tuple[str, str], int] = {}
@@ -87,6 +92,7 @@ class MessageRouter:
     ) -> tuple[WorldState, Message | None, str | None]:
         """Queue one message; returns (state, message, rejection)."""
         tick = state.station.turn
+        recipient = self._aliases.get(recipient, recipient)
         if not isinstance(text, str) or not text.strip():
             return state, None, "empty_message"
         if identity not in self._identities.get(sender, frozenset()) or not _IDENTITY.fullmatch(

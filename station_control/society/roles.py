@@ -139,7 +139,8 @@ def _crew_schema(kinds: tuple[str, ...], attest: bool = False) -> dict[str, obje
             "relied_on": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "IDs of reports or messages your decision depends on.",
+                "description": "IDs of reports or messages you treat as TRUE in this decision. "
+                "Leave out claims you are only tracing, testing, or doubting.",
             },
             "disputes": {
                 "type": "array",

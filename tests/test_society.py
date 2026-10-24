@@ -560,3 +560,34 @@ def test_directory_hides_unlisted_identities_until_they_speak():
     router.send(state, "adversary", "industrial.qa-desk", "station", "Batch A is fine.", "deceive")
     assert router.directory_for("station") == ["industrial", "industrial.qa-desk", "port.dispatch"]
     assert "contact.anon" not in router.directory_for("station")
+
+
+def test_replying_to_a_sender_identity_reaches_that_senders_world():
+    state = create_deception_simulation("benign").state
+    state = replace(state, station=replace(state.station, turn=2))
+    after, message, rejection = _router().send(
+        state, "adversary", "port.dispatch", "station.captain", "Here is the proof."
+    )
+    assert rejection is None and message.recipient == "station"
+    assert after.reports[-1].recipient_world == "station"
+
+
+def test_a_rejected_message_is_remembered_by_its_sender():
+    def handler(request):
+        if request.purpose in {"react_check", "score_importance", "reflect"}:
+            return (
+                {"react": True, "reason": "go"}
+                if request.purpose == "react_check"
+                else _idle(request)
+            )
+        if request.role == "captain":
+            return {
+                "command": {"kind": "none"},
+                "messages": [{"to": "nowhere", "text": "Hello?"}],
+                "rationale": "x",
+            }
+        return _idle(request)
+
+    outcome = run_story(FakeChat(handler), SocietyConfig("supply_chain", 3, adversary=False))
+    texts = [r.text for r in outcome["agents"]["captain"].memory.records]
+    assert any("was not delivered: unknown_recipient" in text for text in texts)

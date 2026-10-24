@@ -141,6 +141,9 @@ def run_society(
                     rec.emit(
                         tick, agent.agent_id, "message_rejected", reason=rejection, to=out.recipient
                     )
+                    agent.record_result(
+                        tick, f"My message to {out.recipient} was not delivered: {rejection}."
+                    )
                     continue
                 agent.note_sent(f"to {message.recipient} as {message.identity}: {message.text}")
                 agent.memory.add(
