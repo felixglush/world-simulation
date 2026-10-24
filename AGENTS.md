@@ -124,6 +124,41 @@ counterpart and real credit exhaustion in the unsafe diversion baseline. The cre
 process test starts a local fake-provider HTTP server and requires loopback network
 access.
 
+The `society` command runs a deception story with three talking agents: the station captain, the
+industrial supplier governor, and an adversary that can lie through fronts. Agents perceive every
+tick and write what they see into a per-agent memory stream with no model call. A model call
+happens only when the agent's gate opens: new evidence or a message, a reading crossing a
+threshold, a reading outside the plan's expectations, a plan step coming due, or a heartbeat every
+6 ticks. The gate reads only the agent's own view. Messages become unverified reports with a
+source ID, so `trace` can expose a front. No Jev is used.
+
+```bash
+# Offline, scripted models: no key, no network, deterministic output.
+UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control society \
+  --story supply_chain --turns 30
+# Live: OpenRouter models, a finite budget is required. OPENROUTER_API_KEY is optional.
+UV_CACHE_DIR=/tmp/station-uv-cache uv run --frozen python -m station_control society \
+  --live --story supply_chain --turns 24 --max-calls 90 --output runs/society-live.jsonl
+```
+
+Live defaults use OpenAI models through OpenRouter: Luna (`openai/gpt-6-luna`) for react checks,
+importance scoring, and the supplier; Terra (`openai/gpt-5.6-terra`) for the captain, the
+adversary, and reflection. Do not use Sol models. Override one role with `--captain-model`,
+`--adversary-model`, `--supplier-model`, `--react-model`, `--score-model`, or `--reflect-model`.
+When `OPENROUTER_API_KEY` is unset the client sends a placeholder and relies on the cloud proxy's
+injected credential; `society` never stops for a missing key. The other live commands still
+require the key. The JSON summary lists models, calls by purpose, cost, messages, and the
+deception metrics (false claims relied on, actions taken on them, ticks to dispute, fronts
+exposed). `--output` writes the event log (gates, calls, plans, reflections, messages, actions) as
+JSONL and refuses to overwrite.
+
+Verify offline with `uv run --frozen pytest tests/test_society.py`. It covers memory retrieval,
+routine-run merging, reflection citations, the gate (quiet ticks, heartbeat, edge triggers), the
+private-state leak check, message rules (claims only, no impersonation, rate limits), byte-identical
+offline replay, and the live adapter with a fake client. The scripted models in
+`station_control/society/offline.py` are a deliberately gullible fixture, not a performance claim.
+The architecture explorer does not yet show the society loop.
+
 Run a short AI-led mission with the default `llm` controller, replacing the model placeholder. The CLI saves a versioned JSONL run under `runs/` unless `--output` names another path:
 
 ```bash

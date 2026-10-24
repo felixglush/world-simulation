@@ -27,6 +27,16 @@ The original ideas remain in place:
 
 Production, pricing, and shipment-specific investigations extend this cycle. A defective batch can cross worlds and fail later under load; the governor must investigate the resulting evidence, trace its source, and propose a remedy. The Python rules determine what that remedy actually changes.
 
+## Talking agents with memory
+
+`python -m station_control society` adds a loop in which the station captain, the supplier governor,
+and an adversary talk. Each agent keeps a memory stream (observations, messages, actions, plans, and
+reflections that cite their sources), perceives every tick, and calls a model only when a gate on its
+own public view opens. The adversary deliberately lies: it tracks what the crew relies on, keeps its
+claims consistent, and speaks through fronts it is given, never as a real agent. Messages are claims
+that become traceable reports and never change the world. The summary reports deception separately
+from damage. See `AGENTS.md` for commands, models, budgets, and verification.
+
 ## Purpose and current product
 
 Station Control tests how an AI crew keeps a space station operational when equipment fails or reports are misleading. Crew survival is the primary objective. Resource use, incident handling, and decision cost show how well the crew performs.
