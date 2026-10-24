@@ -281,3 +281,13 @@ def test_a_dug_channel_joins_the_shared_network_and_carries_water_when_opened():
     view = world.view("rice_2")["channels"]["dug_1"]
     assert view["open"] and view["dug_by"] == "rice_1"
     assert world.snapshot()["channels"]["dug_1"]["path"]
+
+
+def test_a_farmer_sees_where_the_land_and_their_neighbors_are():
+    world = default_world()
+    world.act("rice_2", "weed", plot="paddy_2")
+    view = world.view("rice_1")
+    assert view["map"]["plots"]["paddy_2"] and view["map"]["wells"]
+    assert view["people_nearby"]["rice_2"] == {"at": "on paddy_2", "doing": "weed"}
+    assert "wheat_1" not in view["people_nearby"]
+    assert view["you_are_at"]

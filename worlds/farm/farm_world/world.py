@@ -925,11 +925,53 @@ class FarmWorld:
                 if f.community == farmer.community and f.id != farmer.id
             ),
             "buildings": [
-                {"kind": s.kind, "owner": s.owner, "community": s.community}
+                {"kind": s.kind, "owner": s.owner, "community": s.community, "at": [s.x, s.y]}
                 for s in self.economy.structures
             ],
+            "map": self._map_view(),
+            "people_nearby": {
+                f.id: {"at": self._place_of(f.at), "doing": f.activity}
+                for f in self.farmers.values()
+                if f.community == farmer.community and f.id != farmer.id
+            },
+            "you_are_at": self._place_of(farmer.at),
             **self.economy.view_for(farmer.id, self.day),
         }
+
+    def _map_view(self) -> dict[str, Any]:
+        """The lie of the land a farmer knows by heart: where things are, as [x, y] tiles."""
+        return {
+            "size": [len(self.tiles[0]), len(self.tiles)],
+            "plots": {p.id: [p.x, p.y, p.w, p.h] for p in self.plots.values()},
+            "channels": {
+                c.id: {"from": c.src, "to": c.dst, "at": list(c.path[0]) if c.path else None}
+                for c in self.channels.values()
+            },
+            "homes": {f.id: list(f.home) for f in self.farmers.values()},
+            "wells": [
+                [x, y]
+                for y, row in enumerate(self.tiles)
+                for x, kind in enumerate(row)
+                if kind == "well"
+            ],
+            "river": "runs down the west edge",
+        }
+
+    def _place_of(self, tile: tuple[int, int]) -> str:
+        x, y = tile
+        for plot in self.plots.values():
+            if plot.x <= x < plot.x + plot.w and plot.y <= y < plot.y + plot.h:
+                return f"on {plot.id}"
+        for structure in self.economy.structures:
+            if (structure.x, structure.y) == (x, y):
+                return f"at the {structure.kind}"
+        for channel in self.channels.values():
+            if tile in channel.path:
+                return f"by {channel.id}"
+        for farmer in self.farmers.values():
+            if farmer.home == tile:
+                return f"at {farmer.id}'s home"
+        return f"at {x},{y}"
 
     def _plot_view(self, plot: Plot, viewer: Farmer) -> dict[str, Any]:
         crop = plot.crop
