@@ -1,10 +1,10 @@
 # Working on Station Control
 
-Read README.md for the product contract. Setup and operating commands are below.
+Read README.md for the list of worlds and worlds/station/README.md for the Station Control product contract. Setup and operating commands are below.
 
 ## Keep these instructions current
 
-Update this file in the same change whenever setup, dependencies, entry points, CLI flags, defaults, model configuration, verification, or cleanup commands change. Check the instructions against the implementation and CLI help. Replace obsolete commands and verify affected examples offline where possible. Record any checks that could not run. Keep product descriptions in README.md and operating instructions here.
+Update this file in the same change whenever setup, dependencies, entry points, CLI flags, defaults, model configuration, verification, or cleanup commands change. Check the instructions against the implementation and CLI help. Replace obsolete commands and verify affected examples offline where possible. Record any checks that could not run. Keep product descriptions in the READMEs and operating instructions here.
 
 For testing and test-first implementation, use the $tdd skill at .agents/skills/tdd/SKILL.md.
 For architecture design or review, use $clean-architecture at .agents/skills/clean-architecture/SKILL.md.
