@@ -57,7 +57,7 @@ SCALARS: dict[str, Range] = {
     "outside_option": (0.6, 1.0),
     "walkaway_wait_min": (6.0, 10.0),
     "monthly_lapse_rate": (0.015, 0.03),
-    "new_customer_rate": (1.5e-4, 3.0e-4),
+    "new_customer_rate": (0.008, 0.015),
     "reputation_drift": (0.015, 0.03),
     "wage_morale_sensitivity": (0.8, 1.6),
     "quit_hazard": (0.0003, 0.0007),

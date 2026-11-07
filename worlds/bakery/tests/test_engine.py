@@ -4,10 +4,10 @@ import random
 import pytest
 
 from bakery_world import machines as mc
-from bakery_world.basics import ItemId, Role
+from bakery_world.basics import Account, Ingredient, ItemId, Payment, Role
 from bakery_world.catalog import CATALOG
 from bakery_world.cli import main
-from bakery_world.engine import DayReport, run_days, simulate_day
+from bakery_world.engine import DayReport, prices_paid, run_days, simulate_day
 from bakery_world.machines import CustomerState, LocationState, StaffState
 from bakery_world.model import World
 from bakery_world.town import HOME_LOCATION, build_world
@@ -20,7 +20,7 @@ def idle(world: World, day: int) -> None:
 
 
 def run(seed: int, days: int, tweak=None) -> tuple[World, list[DayReport]]:
-    world = build_world(seed)
+    world = build_world(seed, established=True)
     if tweak:
         tweak(world)
     return world, run_days(world, days, idle, random.Random(seed + 100))
@@ -122,20 +122,49 @@ def test_lapsed_customers_churn_after_90_days():
 
 
 def test_cash_change_equals_revenue_minus_costs():
-    world = build_world(4)
+    world = build_world(4, established=True)
     rng = random.Random(1)
     for _ in range(5):
         before = world.business.cash_cents
         report = simulate_day(world, rng)
         day = report.locations[0]
         assert day.revenue_cents == sum(line.price_cents for s in day.sales for line in s.lines)
-        assert report.cash_cents - before == day.revenue_cents - day.costs_cents
-        assert day.card_fees_cents == round(day.revenue_cents * 0.02)
+        assert (
+            report.cash_cents - before
+            == day.revenue_cents - day.costs_cents - report.interest_cents
+        )
+        card = sum(
+            line.price_cents for s in day.sales if s.payment is Payment.CARD for line in s.lines
+        )
+        assert 0 < card < day.revenue_cents
+        assert day.card_fees_cents == round(card * 0.02)
+        assert day.payroll_oncost_cents == round(day.wages_cents * 0.12)
         assert day.wages_cents > 0 and day.rent_cents > 0 and day.ingredient_cost_cents > 0
+        assert day.overhead_cents > 0 and report.interest_cents > 0
+
+
+def test_ledger_explains_every_cent_of_cash():
+    world = build_world(4)
+    start = world.business.cash_cents
+    run_days(world, 10, idle, random.Random(1))
+    ledger = world.business.ledger
+    assert world.business.cash_cents - start == sum(e.amount_cents for e in ledger)
+    accounts = {e.account for e in ledger}
+    assert {Account.SALES, Account.UTILITIES, Account.INTEREST, Account.PAYROLL_ONCOSTS} <= accounts
+
+
+def test_dearer_supplier_raises_what_the_shop_pays_for_that_ingredient():
+    world = build_world(1)
+    base = prices_paid(world, 0)[Ingredient.BUTTER]
+    world.business.buy_from[Ingredient.BUTTER] = "hartley"
+    assert prices_paid(world, 0)[Ingredient.BUTTER] == round(
+        world.ingredient_prices.on(0)[Ingredient.BUTTER] * 1.12
+    )
+    assert prices_paid(world, 0)[Ingredient.BUTTER] > base
 
 
 def test_unsold_items_are_wasted_after_their_shelf_life_and_sold_day_old_at_half_price():
-    world = build_world(1)
+    world = build_world(1, established=True)
     menu = shop(world).menu
     croissant, sourdough = ItemId("croissant"), ItemId("sourdough")
     menu[croissant].bake_plan = [60] * 7
@@ -188,7 +217,7 @@ def test_no_counter_staff_means_every_visitor_walks_away():
 
 
 def test_a_resigned_worker_leaves_and_is_replaced_in_the_same_role():
-    world = build_world(1)
+    world = build_world(1, established=True)
     baker = next(s for s in world.business.staff.values() if s.role is Role.BAKER)
     baker.state = StaffState.ON_NOTICE
     baker.state_until_day = 0
@@ -218,7 +247,7 @@ def test_starting_shop_revenue_is_in_the_expected_band():
 
 def test_run_days_calls_policy_before_each_day():
     seen = []
-    world = build_world(1)
+    world = build_world(1, established=True)
     run_days(world, 3, lambda w, d: seen.append((d, w.day)), random.Random(1))
     assert seen == [(0, 0), (1, 1), (2, 2)]
 

@@ -85,3 +85,6 @@ STARTING_MENU: tuple[ItemId, ...] = tuple(
         "choccake espresso latte drip quiche cheesetwist"
     ).split()
 )
+OPENING_MENU: tuple[ItemId, ...] = tuple(
+    i for i in STARTING_MENU if i not in ("cinnamon", "choccake")
+)

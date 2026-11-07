@@ -1,6 +1,8 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from bakery_world.basics import (
+    Account,
     Category,
     Cents,
     CompetitorId,
@@ -92,6 +94,8 @@ class Location:
     reputation: float
     awareness: float
     stock: dict[ItemId, dict[int, int]] = field(default_factory=dict)
+    marketing_cents_per_month: Cents = Cents(0)
+    menu_changed_day: int = 0
 
 
 @dataclass
@@ -107,6 +111,8 @@ class Staff:
     reliability: float
     morale: float
     state_until_day: int = 0
+    hired_day: int = 0
+    owner: bool = False
 
 
 @dataclass
@@ -156,6 +162,22 @@ class Vacancy:
     fill_day: int
 
 
+@dataclass(frozen=True)
+class LedgerEntry:
+    day: int
+    account: Account
+    amount_cents: int
+    location_id: LocationId | None
+    memo: str = ""
+
+
+@dataclass(frozen=True)
+class Supplier:
+    id: str
+    name: str
+    markup: dict[Ingredient, float]
+
+
 @dataclass
 class Business:
     cash_cents: Cents
@@ -166,6 +188,9 @@ class Business:
     staff: dict[StaffId, Staff]
     transitions: list[Transition] = field(default_factory=list)
     vacancies: list[Vacancy] = field(default_factory=list)
+    ledger: list[LedgerEntry] = field(default_factory=list)
+    suppliers: dict[str, Supplier] = field(default_factory=dict)
+    buy_from: dict[Ingredient, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -179,6 +204,11 @@ class World:
     weather: Weather
     ingredient_prices: IngredientPrices
     foot_traffic: FootTraffic
+    market_wage_index: float = 1.0
+    word_of_mouth: float = 1.0
+    menu_boredom: float = 0.0
+    segment_shift: dict[tuple[NeighborhoodId, Segment], float] = field(default_factory=dict)
+    daily_hooks: list[Callable[["World"], None]] = field(default_factory=list)
 
 
 MARKET_WAGE_CENTS: dict[Role, Cents] = {

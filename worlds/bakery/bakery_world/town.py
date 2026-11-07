@@ -1,17 +1,20 @@
 import math
 import random
+from dataclasses import dataclass, replace
 
 from bakery_world.basics import (
     Cents,
     CompetitorId,
     CustomerId,
+    Ingredient,
+    ItemId,
     LocationId,
     NeighborhoodId,
     Role,
     Segment,
     StaffId,
 )
-from bakery_world.catalog import CATALOG, STARTING_MENU
+from bakery_world.catalog import CATALOG, OPENING_MENU, STARTING_MENU
 from bakery_world.exogenous import MeanRevertingPrices, SeasonalFootTraffic, SeasonalWeather
 from bakery_world.machines import (
     CompetitorState,
@@ -32,6 +35,7 @@ from bakery_world.model import (
     MenuEntry,
     Neighborhood,
     Staff,
+    Supplier,
     World,
 )
 from bakery_world.params import draw_hidden_params
@@ -56,6 +60,12 @@ def _hours(weights: dict[int, float]) -> tuple[float, ...]:
 
 OFFICE_TRAFFIC = _hours(
     {6: 1, 7: 4, 8: 7, 9: 6, 10: 4, 11: 6, 12: 9, 13: 8, 14: 5, 15: 4, 16: 4, 17: 4, 18: 2}
+)
+MARKET_QUIET_AFTERNOON = _hours(
+    {6: 1, 7: 4, 8: 7, 9: 6, 10: 4, 11: 6, 12: 9, 13: 8, 14: 5, 15: 2, 16: 1, 17: 1}
+)
+MARKET_BUSY_AFTERNOON = _hours(
+    {6: 1, 7: 4, 8: 7, 9: 6, 10: 4, 11: 6, 12: 9, 13: 8, 14: 6, 15: 7, 16: 7, 17: 6, 18: 3}
 )
 COMMUTE_TRAFFIC = _hours(
     {6: 3, 7: 8, 8: 10, 9: 6, 10: 4, 11: 4, 12: 5, 13: 4, 14: 3, 15: 3, 16: 4, 17: 6, 18: 3}
@@ -109,7 +119,16 @@ COMPETITORS = [
         1.4,
         (0.7, 0.4, 0.3, 0.6, 1.1),
     ),
+    (
+        "grind",
+        "Daily Grind Bakehouse",
+        "market",
+        CompetitorState.RUMORED,
+        0.9,
+        (1.0, 0.2, 1.2, 0.1, 0.4),
+    ),
 ]
+RIVAL_ID = CompetitorId("grind")
 
 
 def proximity(a: Neighborhood, b: Neighborhood) -> float:
@@ -163,9 +182,122 @@ STARTING_STAFF = (
     (Role.COUNTER, "Theo"),
     (Role.CLEANER, "Bea"),
 )
+OPENING_STAFF = (
+    (Role.BAKER, "Marta"),
+    (Role.BAKER, "Idris"),
+    (Role.COUNTER, "Joss"),
+    (Role.COUNTER, "Priya"),
+    (Role.CLEANER, "Bea"),
+)
+HIRE_NAMES = (
+    "Sana",
+    "Owen",
+    "Lucia",
+    "Ravi",
+    "Greta",
+    "Tomasz",
+    "Imani",
+    "Felix",
+    "Noor",
+    "Callum",
+    "Yuki",
+    "Dara",
+    "Mateo",
+    "Elsie",
+    "Kofi",
+    "Hanna",
+)
+
+SHOP_NAME = "Larkspur Bakery"
+OWNER_ID = StaffId("owner")
+OWNER_NAME = "Ada Brennan"
+OWNER_SPEED = 1.15
+OPENING_CUSTOMERS = 300
+OPENING_AWARENESS = 0.05
+OPENING_BAKE_SHARE = 0.35
+LEASE_YEARS = 5
+
+G = Ingredient
+SUPPLIERS = (
+    Supplier(
+        "millbrook", "Millbrook Wholesale", {i: 1.0 for i in (G.FLOUR, G.SUGAR, G.EGGS, G.FRUIT)}
+    ),
+    Supplier("hartley", "Hartley Dairy", {G.BUTTER: 1.12, G.DAIRY: 1.04}),
+    Supplier("greenfield", "Greenfield Creamery", {G.BUTTER: 1.0, G.DAIRY: 1.0}),
+    Supplier("beanbarrow", "Bean & Barrow Roasters", {G.COFFEE: 1.0, G.CHOCOLATE: 1.0}),
+)
+BUY_FROM: dict[Ingredient, str] = {
+    G.FLOUR: "millbrook",
+    G.SUGAR: "millbrook",
+    G.EGGS: "millbrook",
+    G.FRUIT: "millbrook",
+    G.BUTTER: "greenfield",
+    G.DAIRY: "greenfield",
+    G.COFFEE: "beanbarrow",
+    G.CHOCOLATE: "beanbarrow",
+}
 
 
-def build_world(seed: int) -> World:
+def _owner(loc: LocationId) -> Staff:
+    return Staff(
+        id=OWNER_ID,
+        name=OWNER_NAME,
+        role=Role.COUNTER,
+        state=StaffState.EMPLOYED,
+        location_id=loc,
+        wage_cents_per_hour=Cents(0),
+        skill=0.85,
+        speed=OWNER_SPEED,
+        reliability=1.0,
+        morale=0.85,
+        owner=True,
+    )
+
+
+@dataclass(frozen=True)
+class Start:
+    staff: tuple[tuple[Role, str], ...]
+    menu: tuple[ItemId, ...]
+    customers: int
+    reach_floor: float
+    awareness: float
+    reputation: float
+    close_hour: int
+    bake_share: float
+    home_traffic: tuple[float, ...]
+    cash: Cents
+    debt: Cents
+
+
+ESTABLISHED = Start(
+    STARTING_STAFF,
+    STARTING_MENU,
+    3000,
+    0.15,
+    0.62,
+    0.65,
+    18,
+    1.0,
+    OFFICE_TRAFFIC,
+    Cents(4_000_000),
+    Cents(2_500_000),
+)
+OPENING = Start(
+    OPENING_STAFF,
+    OPENING_MENU,
+    OPENING_CUSTOMERS,
+    0.0,
+    OPENING_AWARENESS,
+    0.6,
+    15,
+    OPENING_BAKE_SHARE,
+    MARKET_QUIET_AFTERNOON,
+    Cents(6_000_000),
+    Cents(4_500_000),
+)
+
+
+def build_world(seed: int, established: bool = False) -> World:
     rng = random.Random(seed)
     town = {
         NeighborhoodId(i): Neighborhood(
@@ -181,6 +313,8 @@ def build_world(seed: int) -> World:
         )
         for i, name, x, y, pop, inc, rent, mix in _TOWN
     }
+    start = ESTABLISHED if established else OPENING
+    town[HOME_NEIGHBORHOOD] = replace(town[HOME_NEIGHBORHOOD], hourly_traffic=start.home_traffic)
     home = town[HOME_NEIGHBORHOOD]
     params = draw_hidden_params(rng)
 
@@ -188,9 +322,9 @@ def build_world(seed: int) -> World:
         item: MenuEntry(
             MenuState.ON_MENU,
             CATALOG[item].typical_price_cents,
-            list(DEFAULT_BAKE_PLAN.get(item, (0,) * 7)),
+            [round(u * start.bake_share) for u in DEFAULT_BAKE_PLAN.get(item, (0,) * 7)],
         )
-        for item in STARTING_MENU
+        for item in start.menu
     }
     shop = Location(
         id=HOME_LOCATION,
@@ -198,22 +332,25 @@ def build_world(seed: int) -> World:
         size_m2=90,
         ovens=[Equipment("oven1"), Equipment("oven2", wear=0.15), Equipment("oven3", wear=0.3)],
         state=LocationState.TRADING,
-        lease=Lease(LeaseState.ACTIVE, Cents(90 * home.rent_cents_per_m2_month), 5 * 365),
+        lease=Lease(LeaseState.ACTIVE, Cents(90 * home.rent_cents_per_m2_month), LEASE_YEARS * 365),
         menu=menu,
         open_hour=7,
-        close_hour=18,
-        reputation=0.65,
-        awareness=0.62,
+        close_hour=start.close_hour,
+        reputation=start.reputation,
+        awareness=start.awareness,
     )
     staff = {}
-    for seq, (role, name) in enumerate(STARTING_STAFF):
+    for seq, (role, name) in enumerate(start.staff):
         member = _staff(rng, seq, role, name, HOME_LOCATION)
         staff[member.id] = member
+    if not established:
+        staff[OWNER_ID] = _owner(HOME_LOCATION)
 
-    weights = [n.population * (0.15 + proximity(home, n)) for n in town.values()]
+    weights = [n.population * (start.reach_floor + proximity(home, n)) for n in town.values()]
     sizes = list(town.values())
     customers = [
-        spawn_customer(rng, seq, rng.choices(sizes, weights=weights)[0], 0) for seq in range(3000)
+        spawn_customer(rng, seq, rng.choices(sizes, weights=weights)[0], 0)
+        for seq in range(start.customers)
     ]
 
     competitors = {
@@ -232,12 +369,14 @@ def build_world(seed: int) -> World:
         town=town,
         params=params,
         business=Business(
-            cash_cents=Cents(4_000_000),
-            debt_cents=Cents(2_500_000),
+            cash_cents=start.cash,
+            debt_cents=start.debt,
             credit_limit_cents=Cents(6_000_000),
             credit_drawn_cents=Cents(0),
             locations={shop.id: shop},
             staff=staff,
+            suppliers={s.id: s for s in SUPPLIERS},
+            buy_from=dict(BUY_FROM),
         ),
         customers=customers,
         competitors=competitors,
