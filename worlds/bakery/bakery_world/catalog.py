@@ -68,8 +68,13 @@ _ROWS = [
     ("spinachpie", "Spinach pie", SAVORY, {F: 70, B: 25, E: 40, D: 40}, 2.0, 35, 8, 1, 600),
 ]
 
+# the labor column is single-unit pace; working in batches cuts hands-on time
+BATCH_LABOR_FACTOR = 0.6
+
 CATALOG: dict[ItemId, Recipe] = {
-    ItemId(i): Recipe(ItemId(i), n, c, g, lab, oven, batch, shelf, Cents(p))
+    ItemId(i): Recipe(
+        ItemId(i), n, c, g, round(lab * BATCH_LABOR_FACTOR, 2), oven, batch, shelf, Cents(p)
+    )
     for i, n, c, g, lab, oven, batch, shelf, p in _ROWS
 }
 

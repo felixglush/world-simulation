@@ -54,10 +54,10 @@ TASTE: dict[Segment, dict[Category, Range]] = {
 
 SCALARS: dict[str, Range] = {
     "item_appeal": (0.85, 1.15),
-    "outside_option": (0.9, 1.3),
+    "outside_option": (0.6, 1.0),
     "walkaway_wait_min": (6.0, 10.0),
     "monthly_lapse_rate": (0.015, 0.03),
-    "new_customer_rate": (2.5e-5, 4.5e-5),
+    "new_customer_rate": (1.5e-4, 3.0e-4),
     "reputation_drift": (0.015, 0.03),
     "wage_morale_sensitivity": (0.8, 1.6),
     "quit_hazard": (0.0003, 0.0007),

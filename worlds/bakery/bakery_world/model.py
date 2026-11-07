@@ -179,3 +179,10 @@ class World:
     weather: Weather
     ingredient_prices: IngredientPrices
     foot_traffic: FootTraffic
+
+
+MARKET_WAGE_CENTS: dict[Role, Cents] = {
+    Role.BAKER: Cents(2200),
+    Role.COUNTER: Cents(1700),
+    Role.CLEANER: Cents(1500),
+}
