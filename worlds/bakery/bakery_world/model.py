@@ -1,0 +1,181 @@
+from dataclasses import dataclass, field
+
+from bakery_world.basics import (
+    Category,
+    Cents,
+    CompetitorId,
+    CustomerId,
+    Ingredient,
+    ItemId,
+    LocationId,
+    NeighborhoodId,
+    Role,
+    Segment,
+    StaffId,
+)
+from bakery_world.exogenous import FootTraffic, IngredientPrices, Weather
+from bakery_world.machines import (
+    CompetitorState,
+    CustomerState,
+    EquipmentState,
+    LeaseState,
+    LocationState,
+    MenuState,
+    StaffState,
+    Transition,
+)
+
+
+@dataclass(frozen=True)
+class Neighborhood:
+    id: NeighborhoodId
+    name: str
+    x_km: float
+    y_km: float
+    population: int
+    income_index: float
+    rent_cents_per_m2_month: Cents
+    segment_mix: dict[Segment, float]
+    hourly_traffic: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class Recipe:
+    item_id: ItemId
+    name: str
+    category: Category
+    grams: dict[Ingredient, int]
+    labor_minutes: float
+    oven_minutes: int
+    batch_size: int
+    shelf_life_days: int
+    typical_price_cents: Cents
+
+    @property
+    def made_to_order(self) -> bool:
+        return self.batch_size == 0
+
+
+@dataclass
+class MenuEntry:
+    state: MenuState
+    price_cents: Cents
+    bake_plan: list[int]
+
+
+@dataclass
+class Equipment:
+    id: str
+    state: EquipmentState = EquipmentState.WORKING
+    wear: float = 0.0
+    repair_done_day: int = 0
+
+
+@dataclass
+class Lease:
+    state: LeaseState
+    monthly_rent_cents: Cents
+    end_day: int
+
+
+@dataclass
+class Location:
+    id: LocationId
+    neighborhood_id: NeighborhoodId
+    size_m2: int
+    ovens: list[Equipment]
+    state: LocationState
+    lease: Lease
+    menu: dict[ItemId, MenuEntry]
+    open_hour: int
+    close_hour: int
+    reputation: float
+    awareness: float
+    stock: dict[ItemId, dict[int, int]] = field(default_factory=dict)
+
+
+@dataclass
+class Staff:
+    id: StaffId
+    name: str
+    role: Role
+    state: StaffState
+    location_id: LocationId
+    wage_cents_per_hour: Cents
+    skill: float
+    speed: float
+    reliability: float
+    morale: float
+    state_until_day: int = 0
+
+
+@dataclass
+class Customer:
+    id: CustomerId
+    neighborhood_id: NeighborhoodId
+    segment: Segment
+    state: CustomerState
+    loyalty_id: str | None
+    base_visit_rate: float
+    created_day: int
+    state_since_day: int
+    satisfaction: float = 0.7
+    last_visit_day: int | None = None
+    recent_visits: list[int] = field(default_factory=list)
+    fatigue: dict[ItemId, float] = field(default_factory=dict)
+
+
+@dataclass
+class Competitor:
+    id: CompetitorId
+    name: str
+    neighborhood_id: NeighborhoodId
+    state: CompetitorState
+    price_index: float
+    appeal: dict[Segment, float]
+
+
+@dataclass(frozen=True)
+class HiddenParams:
+    elasticity: dict[Segment, float]
+    taste: dict[Segment, dict[Category, float]]
+    item_appeal: dict[ItemId, float]
+    outside_option: float
+    walkaway_wait_min: float
+    monthly_lapse_rate: float
+    new_customer_rate: float
+    reputation_drift: float
+    wage_morale_sensitivity: float
+    quit_hazard: float
+
+
+@dataclass
+class Vacancy:
+    role: Role
+    location_id: LocationId
+    fill_day: int
+
+
+@dataclass
+class Business:
+    cash_cents: Cents
+    debt_cents: Cents
+    credit_limit_cents: Cents
+    credit_drawn_cents: Cents
+    locations: dict[LocationId, Location]
+    staff: dict[StaffId, Staff]
+    transitions: list[Transition] = field(default_factory=list)
+    vacancies: list[Vacancy] = field(default_factory=list)
+
+
+@dataclass
+class World:
+    day: int
+    town: dict[NeighborhoodId, Neighborhood]
+    params: HiddenParams
+    business: Business
+    customers: list[Customer]
+    competitors: dict[CompetitorId, Competitor]
+    weather: Weather
+    ingredient_prices: IngredientPrices
+    foot_traffic: FootTraffic
