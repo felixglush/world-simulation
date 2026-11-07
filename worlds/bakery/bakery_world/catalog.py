@@ -69,7 +69,7 @@ _ROWS = [
 ]
 
 # the labor column is single-unit pace; working in batches cuts hands-on time
-BATCH_LABOR_FACTOR = 0.6
+BATCH_LABOR_FACTOR = 0.5
 
 CATALOG: dict[ItemId, Recipe] = {
     ItemId(i): Recipe(

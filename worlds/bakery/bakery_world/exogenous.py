@@ -35,14 +35,14 @@ class SeasonalWeather:
 
 
 BASE_CENTS_PER_KG: dict[Ingredient, int] = {
-    Ingredient.FLOUR: 120,
-    Ingredient.BUTTER: 1100,
-    Ingredient.EGGS: 400,
-    Ingredient.SUGAR: 150,
-    Ingredient.DAIRY: 130,
-    Ingredient.COFFEE: 2400,
-    Ingredient.CHOCOLATE: 1500,
-    Ingredient.FRUIT: 450,
+    Ingredient.FLOUR: 220,
+    Ingredient.BUTTER: 1700,
+    Ingredient.EGGS: 700,
+    Ingredient.SUGAR: 250,
+    Ingredient.DAIRY: 230,
+    Ingredient.COFFEE: 4100,
+    Ingredient.CHOCOLATE: 2500,
+    Ingredient.FRUIT: 800,
 }
 
 
@@ -89,6 +89,7 @@ class TrafficShock:
     multiplier: float
 
 
+SEASONAL_AMPLITUDE = 0.015
 WEEKDAY_TRAFFIC = (1.0, 1.0, 1.0, 1.02, 1.05, 1.05, 0.88)
 
 
@@ -97,7 +98,9 @@ class SeasonalFootTraffic:
     shocks: tuple[TrafficShock, ...] = ()
 
     def multiplier(self, neighborhood: NeighborhoodId, day: int) -> float:
-        value = WEEKDAY_TRAFFIC[day % 7] * (1 + 0.06 * math.sin(2 * math.pi * (day - 120) / 365))
+        value = WEEKDAY_TRAFFIC[day % 7] * (
+            1 + SEASONAL_AMPLITUDE * math.sin(2 * math.pi * (day - 120) / 365)
+        )
         for s in self.shocks:
             if s.start_day <= day < s.end_day and s.neighborhood in (None, neighborhood):
                 value *= s.multiplier

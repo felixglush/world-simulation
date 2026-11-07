@@ -76,7 +76,7 @@ CAMPUS_TRAFFIC = _hours({8: 6, 9: 8, 10: 7, 11: 6, 12: 8, 13: 6, 14: 5, 15: 5, 1
 S = Segment
 # id, name, x, y, population, income, rent per m2 per month, mix (C, F, S, R, O)
 _TOWN = [
-    ("market", "Market Square", 0.0, 0.0, 9000, 1.15, 9500, (0.30, 0.10, 0.10, 0.10, 0.40)),
+    ("market", "Market Square", 0.0, 0.0, 9000, 1.15, 4700, (0.30, 0.10, 0.10, 0.10, 0.40)),
     ("station", "Station Quarter", 0.7, 0.4, 10000, 1.0, 5200, (0.45, 0.15, 0.10, 0.05, 0.25)),
     ("riverside", "Riverside Lofts", -0.8, 0.5, 8000, 1.3, 5600, (0.30, 0.15, 0.10, 0.05, 0.40)),
     ("oakwood", "Oakwood", -1.6, -0.9, 14000, 1.0, 3200, (0.20, 0.50, 0.05, 0.15, 0.10)),
@@ -167,8 +167,8 @@ def _staff(rng: random.Random, seq: int, role: Role, name: str, loc: LocationId)
         state=StaffState.EMPLOYED,
         location_id=loc,
         wage_cents_per_hour=Cents(round(market * rng.uniform(0.97, 1.05))),
-        skill=rng.uniform(0.4, 0.9),
-        speed=rng.uniform(0.85, 1.15),
+        skill=rng.uniform(0.5, 0.8),
+        speed=rng.uniform(0.92, 1.08),
         reliability=rng.uniform(0.7, 0.98),
         morale=rng.uniform(0.55, 0.8),
     )
@@ -212,8 +212,9 @@ SHOP_NAME = "Larkspur Bakery"
 OWNER_ID = StaffId("owner")
 OWNER_NAME = "Ada Brennan"
 OWNER_SPEED = 1.15
-OPENING_CUSTOMERS = 300
-OPENING_AWARENESS = 0.05
+OWNER_WAGE_CENTS = Cents(900)
+OPENING_CUSTOMERS = 800
+OPENING_AWARENESS = 0.12
 OPENING_BAKE_SHARE = 0.35
 LEASE_YEARS = 5
 
@@ -245,7 +246,7 @@ def _owner(loc: LocationId) -> Staff:
         role=Role.COUNTER,
         state=StaffState.EMPLOYED,
         location_id=loc,
-        wage_cents_per_hour=Cents(0),
+        wage_cents_per_hour=OWNER_WAGE_CENTS,
         skill=0.85,
         speed=OWNER_SPEED,
         reliability=1.0,

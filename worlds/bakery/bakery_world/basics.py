@@ -1,5 +1,13 @@
+from datetime import date, timedelta
 from enum import StrEnum, auto
 from typing import NewType
+
+START_DATE = date(2023, 1, 2)
+
+
+def date_of(day: int) -> date:
+    return START_DATE + timedelta(days=day)
+
 
 Cents = NewType("Cents", int)
 LocationId = NewType("LocationId", str)
@@ -51,6 +59,7 @@ class Payment(StrEnum):
 class Account(StrEnum):
     SALES = auto()
     INGREDIENTS = auto()
+    PACKAGING = auto()
     WAGES = auto()
     PAYROLL_ONCOSTS = auto()
     RENT = auto()

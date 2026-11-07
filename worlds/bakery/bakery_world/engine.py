@@ -41,13 +41,20 @@ from bakery_world.model import (
 from bakery_world.town import HIRE_NAMES, proximity, spawn_customer
 
 MONTHLY_OVERHEAD_CENTS: dict[Account, int] = {
-    Account.UTILITIES: 140_000,
-    Account.INSURANCE: 32_000,
+    Account.UTILITIES: 120_000,
+    Account.INSURANCE: 35_000,
     Account.SOFTWARE_AND_TERMINAL: 18_000,
-    Account.REPAIRS_RESERVE: 35_000,
+    Account.REPAIRS_RESERVE: 25_000,
 }
 DAILY_OVERHEAD_CENTS = {a: round(m * 12 / 365) for a, m in MONTHLY_OVERHEAD_CENTS.items()}
 PAYROLL_ONCOST_RATE = 0.12
+PACKAGING_CENTS: dict[Category, int] = {
+    Category.BREAD: 25,
+    Category.PASTRY: 18,
+    Category.CAKE: 35,
+    Category.DRINK: 30,
+    Category.SAVORY: 18,
+}
 LOAN_APR = 0.07
 CREDIT_APR = 0.11
 CARD_SHARE: dict[Segment, float] = {
@@ -62,10 +69,10 @@ BETA = 1.6
 CARD_FEE = 0.02
 DAY_OLD_DISCOUNT = 0.5
 DAY_OLD_QUALITY = 0.75
-COUNTER_CUSTOMERS_PER_HOUR = 36.0
+COUNTER_CUSTOMERS_PER_HOUR = 40.0
 BAKER_SHIFT_HOURS = 8
 CLEANER_SHIFT_HOURS = 4
-BAKE_DEADLINE_HOUR = 12
+BAKE_DEADLINE_HOUR = 13
 PRE_OPEN_BAKE_HOURS = 2
 VACANCY_DAYS = 10
 NOTICE_DAYS = 14
@@ -78,17 +85,17 @@ LAPSE_AFTER_DAYS = 30
 CHURN_AFTER_LAPSED_DAYS = 90
 NEW_QUIET_AFTER_DAYS = 60
 REGULAR_VISITS = 4
+DAYS_OFF: tuple[tuple[int, int], ...] = ((6, 2), (5, 1), (6, 4), (5, 0), (6, 3), (5, 2), (6, 0))
 STATE_VISIT_FACTOR = {CustomerState.NEW: 1.0, CustomerState.REGULAR: 1.0, CustomerState.LAPSED: 0.1}
-BAKERY_GOER_SHARE = 0.2
-AWARENESS_FLOOR = 0.04
-AWARENESS_FROM_WORD_OF_MOUTH = 0.6
-AWARENESS_FROM_MARKETING = 0.25
-AWARENESS_FULL_VISITS = 300
-AWARENESS_SPEED = 0.01
-AWARENESS_MAX = 0.95
+BAKERY_GOER_SHARE = 0.053
+AWARENESS_FROM_WORD_OF_MOUTH = 0.015
+AWARENESS_FROM_MARKETING = 0.009
+AWARENESS_HALF_VISITS = 60
+AWARENESS_FORGET = 0.0015
 MARKETING_SCALE_CENTS = 100_000
 NEUTRAL_MORALE = 0.6
-SERVICE_WEIGHT = 0.25
+SERVICE_WEIGHT = 0.4
+BOREDOM_PENALTY = 0.15
 MORALE_EFFORT_FLOOR = 0.64
 FATIGUE_RETENTION = 0.93
 BOREDOM_RETENTION = 0.05
@@ -160,6 +167,7 @@ class LocationDay:
     ingredient_grams: dict[Ingredient, int]
     revenue_cents: Cents
     ingredient_cost_cents: Cents
+    packaging_cents: Cents
     wages_cents: Cents
     payroll_oncost_cents: Cents
     rent_cents: Cents
@@ -171,6 +179,7 @@ class LocationDay:
     def costs_cents(self) -> int:
         return (
             self.ingredient_cost_cents
+            + self.packaging_cents
             + self.wages_cents
             + self.payroll_oncost_cents
             + self.rent_cents
@@ -224,7 +233,7 @@ def _poisson(rng: random.Random, lam: float) -> int:
 
 
 def _on_shift(staff: list[Staff], day: int) -> list[Staff]:
-    return [s for i, s in enumerate(staff) if day % 7 not in ((2 * i) % 7, (2 * i + 1) % 7)]
+    return [s for i, s in enumerate(staff) if day % 7 not in DAYS_OFF[i % len(DAYS_OFF)]]
 
 
 def _roster(world: World, loc: Location) -> _Roster:
@@ -233,11 +242,17 @@ def _roster(world: World, loc: Location) -> _Roster:
     for s in sorted(world.business.staff.values(), key=lambda s: s.id):
         if s.location_id == loc.id and s.state in working:
             by_role[s.role].append(s)
-    return _Roster(
+    roster = _Roster(
         _on_shift(by_role[Role.BAKER], world.day),
         _on_shift(by_role[Role.COUNTER], world.day),
         _on_shift(by_role[Role.CLEANER], world.day),
     )
+    owner = next((s for s in by_role[Role.COUNTER] if s.owner), None)
+    if owner and not roster.bakers:
+        if owner in roster.counters:
+            roster.counters.remove(owner)
+        roster.bakers.append(owner)
+    return roster
 
 
 def _effort(s: Staff) -> float:
@@ -414,9 +429,9 @@ def _visit_factors(world: World, day: int, temp: float, rain: bool) -> dict:
                     pull[seg] += comp.appeal[seg] * reach
         traffic = world.foot_traffic.multiplier(nb.id, day)
         for seg in Segment:
-            weather = (0.92 if seg is Segment.COMMUTER else 0.85) if rain else 1.0
-            if temp < 2 or temp > 30:
-                weather *= 0.9
+            weather = (0.97 if seg is Segment.COMMUTER else 0.94) if rain else 1.0
+            if temp < -1 or temp > 30:
+                weather *= 0.97
             shift = world.segment_shift.get((nb.id, seg), 1.0)
             factors[(nb.id, seg)] = (
                 traffic * shift * SEGMENT_WEEKDAY[seg][weekday] * weather / (1 + 0.45 * pull[seg])
@@ -509,8 +524,10 @@ def _run_location(
     walkaways = [0] * 24
     revenue = 0
     card_revenue = 0
+    packaging = 0
     satisfactions = []
     cleaner_penalty = 0.0 if roster.cleaners else 0.04
+    stale = BOREDOM_PENALTY * _boredom(world, loc)
     moods = [s.morale for s in roster.counters]
     service = SERVICE_WEIGHT * (
         (sum(moods) / len(moods) if moods else NEUTRAL_MORALE) - NEUTRAL_MORALE
@@ -579,11 +596,13 @@ def _run_location(
                 _use(grams, o.item_id, 1)
             lines.append(SaleLine(o.item_id, Cents(o.price), o.day_old))
             revenue += o.price
+            packaging += PACKAGING_CENTS[o.category]
             c.fatigue[o.item_id] = min(FATIGUE_CAP, c.fatigue.get(o.item_id, 0.0) + 0.12)
             weights = _refatigue(
                 weights, base_w, tastes, offers_by_item[o.item_id], c.fatigue[o.item_id]
             )
-        target = 0.85 + service - min(0.3, 0.04 * min(wait, 20)) - 0.15 * misses - cleaner_penalty
+        target = 0.85 + service - stale - min(0.3, 0.04 * min(wait, 20)) - 0.15 * misses
+        target -= cleaner_penalty
         if not lines:
             target = min(target, 0.3)
         target -= 0.05 * sum(line.day_old for line in lines)
@@ -626,6 +645,7 @@ def _run_location(
     charges = {
         Account.SALES: revenue,
         Account.INGREDIENTS: -ingredients,
+        Account.PACKAGING: -packaging,
         Account.WAGES: -wages,
         Account.PAYROLL_ONCOSTS: -oncost,
         Account.RENT: -rent,
@@ -658,6 +678,7 @@ def _run_location(
         ingredient_grams=grams,
         revenue_cents=Cents(revenue),
         ingredient_cost_cents=Cents(ingredients),
+        packaging_cents=Cents(packaging),
         wages_cents=Cents(wages),
         payroll_oncost_cents=Cents(oncost),
         rent_cents=Cents(rent),
@@ -668,14 +689,13 @@ def _run_location(
 
 
 def _update_awareness(world: World, loc: Location, visits: int) -> None:
-    buzz = min(1.0, visits / AWARENESS_FULL_VISITS) * (0.6 + 0.4 * loc.reputation)
+    buzz = visits / (visits + AWARENESS_HALF_VISITS) * (0.6 + 0.4 * loc.reputation)
     advertising = 1 - math.exp(-loc.marketing_cents_per_month / MARKETING_SCALE_CENTS)
-    target = (
-        AWARENESS_FLOOR
-        + AWARENESS_FROM_WORD_OF_MOUTH * world.word_of_mouth * buzz
+    reach = (
+        AWARENESS_FROM_WORD_OF_MOUTH * world.word_of_mouth * buzz
         + AWARENESS_FROM_MARKETING * advertising
     )
-    loc.awareness += AWARENESS_SPEED * (min(AWARENESS_MAX, target) - loc.awareness)
+    loc.awareness += (1 - loc.awareness) * reach - AWARENESS_FORGET * loc.awareness
 
 
 def _cumulative(weights: tuple[float, ...]) -> list[float]:
@@ -775,8 +795,8 @@ def _fill_vacancies(world: World, rng: random.Random) -> None:
             state=StaffState.CANDIDATE,
             location_id=v.location_id,
             wage_cents_per_hour=Cents(round(market * rng.uniform(0.97, 1.05))),
-            skill=rng.uniform(0.3, 0.8),
-            speed=rng.uniform(0.85, 1.15),
+            skill=rng.uniform(0.4, 0.7),
+            speed=rng.uniform(0.92, 1.08),
             reliability=rng.uniform(0.7, 0.98),
             morale=0.7,
             hired_day=day,
@@ -787,14 +807,17 @@ def _fill_vacancies(world: World, rng: random.Random) -> None:
     world.business.vacancies = remaining
 
 
+def _boredom(world: World, loc: Location) -> float:
+    return world.menu_boredom * min(1.0, (world.day - loc.menu_changed_day) / 365)
+
+
 def _fatigue_retention(world: World) -> float:
-    changes = [
-        loc.menu_changed_day
-        for loc in world.business.locations.values()
-        if loc.state is LocationState.TRADING
+    trading = [
+        loc for loc in world.business.locations.values() if loc.state is LocationState.TRADING
     ]
-    staleness = min(1.0, (world.day - max(changes, default=world.day)) / 365)
-    return FATIGUE_RETENTION + BOREDOM_RETENTION * world.menu_boredom * staleness
+    return FATIGUE_RETENTION + BOREDOM_RETENTION * min(
+        (_boredom(world, loc) for loc in trading), default=0.0
+    )
 
 
 def _advance_customers(world: World, rng: random.Random) -> None:
