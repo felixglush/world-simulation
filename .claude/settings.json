@@ -9,5 +9,20 @@
   },
   "enabledPlugins": {
     "pstack@pstack-claude": true
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"$CLAUDE_PROJECT_DIR/.claude/hooks/ensure-pstack.sh\"",
+            "timeout": 120,
+            "statusMessage": "Installing pstack"
+          }
+        ]
+      }
+    ]
   }
 }
