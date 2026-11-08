@@ -25,6 +25,7 @@ from bakery_world.llm import (
 )
 from bakery_world.managed import LogKind, ManagedWorld
 from bakery_world.management import StopRun
+from bakery_world.memory import MAX_RECALL, Archive, SavedAnswer
 from bakery_world.plan import (
     MAX_PLAN_ITEMS,
     MAX_REVIEW_WEEKS,
@@ -44,6 +45,7 @@ from bakery_world.town import OWNER_NAME, SHOP_NAME
 
 NOTES_LIMIT = 8000
 QUESTION_LIMIT = 2000
+QUERY_LIMIT = 500
 DASHBOARD_WEEKS = 4
 SALES_WEEKS = 13
 
@@ -82,7 +84,8 @@ SYSTEM = (
     "Each turn starts with a fresh conversation. What carries over is in the turn message: "
     "your plan (plan_update), your experiments (experiment_start, experiment_conclude), your "
     "own actions of the last four weeks, and your notes (notes_write). Keep findings, reasons "
-    "and open questions in your notes.\n\n"
+    "and open questions in your notes. Every analyst answer is saved, and recall searches the "
+    "saved answers from all turns without asking again.\n\n"
     "Work the way a good new general manager would:\n"
     "- In onboarding, build a picture before acting. Learn how sales, customers, costs and "
     "cash have moved over the whole history, and why. Look at each item's price, ingredient "
@@ -128,6 +131,8 @@ class TurnContext:
     plan: tuple[PlanItem, ...] = ()
     experiments: tuple[Experiment, ...] = ()
     actions: tuple[ActionRecord, ...] = ()
+    saved_answers: int = 0
+    recent_questions: tuple[str, ...] = ()
 
 
 def _limits(ctx: TurnContext) -> str:
@@ -137,6 +142,16 @@ def _limits(ctx: TurnContext) -> str:
         f"Budget: {b.calls} model calls left this turn, {b.questions} analyst questions left "
         f"this turn{run}. Each analyst question uses up to {ANALYST_CALLS} of the run's calls. "
         "When this turn's calls run out, the turn ends as if you had called end_week."
+    )
+
+
+def _saved(ctx: TurnContext) -> str:
+    if not ctx.saved_answers:
+        return "Saved analyst answers: none yet."
+    asked = "\n".join(f"- {q}" for q in ctx.recent_questions)
+    return (
+        f"Saved analyst answers: {ctx.saved_answers}. recall searches them without asking "
+        f"again. The latest questions:\n{asked}"
     )
 
 
@@ -159,7 +174,7 @@ def turn_messages(ctx: TurnContext) -> list[dict]:
             "your attention now. Deal with it, then call end_week to let the week carry on."
         ),
     }[ctx.kind]
-    parts = [head, _limits(ctx)]
+    parts = [head, _limits(ctx), _saved(ctx)]
     if ctx.event:
         parts.append("The event:\n" + json.dumps(ctx.event, indent=1))
     if ctx.arrivals:
@@ -299,6 +314,7 @@ class LLMManager:
     exhausted: bool = False
     dashboards: deque[dict] = field(default_factory=lambda: deque(maxlen=DASHBOARD_WEEKS))
     week: int = 0
+    archive: Archive = field(default_factory=Archive)
 
     def weekly(self, mw: ManagedWorld, week: int) -> None:
         if self.exhausted:
@@ -340,6 +356,8 @@ class LLMManager:
             self.plan,
             tuple(self.experiments),
             recent_actions(mw.log.lines, mw.day),
+            len(self.archive.answers),
+            self.archive.recent_questions(),
         )
 
     def tools(self, mw: ManagedWorld, turn: Turn) -> dict[str, Tool]:
@@ -364,8 +382,31 @@ class LLMManager:
                 lambda **f: mw.note(LogKind.TOOL_CALL, role="analyst", **f),
             )
             answer = analyst.ask(question)
-            mw.note(LogKind.ANALYST, question=question, answer=answer)
+            saved = SavedAnswer(mw.date(), self.week, turn.kind, question, answer)
+            self.archive.answers.append(saved)
+            mw.note(
+                LogKind.ANALYST, week=self.week, turn=turn.kind, question=question, answer=answer
+            )
             return answer
+
+        def recall(args: dict) -> str:
+            query, limit = args.get("query"), args.get("limit", 5)
+            if not isinstance(query, str) or not query.strip():
+                raise ToolError("error: query must be text")
+            if len(query) > QUERY_LIMIT:
+                raise ToolError(f"error: keep queries under {QUERY_LIMIT} characters")
+            if (
+                not isinstance(limit, int)
+                or isinstance(limit, bool)
+                or not 1 <= limit <= MAX_RECALL
+            ):
+                raise ToolError(f"error: limit must be a whole number from 1 to {MAX_RECALL}")
+            found = self.archive.recall(query, limit)
+            if not found:
+                return "no saved answer matches; ask the analyst"
+            return json.dumps(
+                [{"date": a.date, "question": a.question, "answer": a.answer} for a in found]
+            )
 
         def notes_write(args: dict) -> str:
             text = args.get("text")
@@ -401,6 +442,17 @@ class LLMManager:
                 "and the SQL used.",
                 {"question": {"type": "string", "description": "one clear question"}},
                 ask,
+            ),
+            Tool(
+                "recall",
+                "Search every saved analyst answer from earlier turns by words; returns the best "
+                "matches with their date, question and answer. Uses no analyst question.",
+                {
+                    "query": {"type": "string", "description": "words to look for"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": MAX_RECALL},
+                },
+                recall,
+                required=("query",),
             ),
             Tool("notes_read", "Read your notes.", {}, lambda args: self.notes or "(empty)"),
             Tool(

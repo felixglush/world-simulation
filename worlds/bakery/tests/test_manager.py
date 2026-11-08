@@ -248,3 +248,52 @@ def test_the_call_budget_stops_the_run_cleanly(seed1_history) -> None:
     stopped = kinds(result.log, "stopped")
     assert stopped == [stopped[0]] and stopped[0]["reason"] == "call budget exhausted"
     assert kinds(result.log, "finish")
+
+
+ANSWERS = {
+    "How have croissant sales moved over the past three years?": (
+        "Croissant units fell from 210 to 168 a week between 2023 and 2025, mostly on weekdays."
+    ),
+    "What does the flour supplier charge per kg?": "Millbrook charges 98 cents per kg of flour.",
+    "Which hours are busiest on Saturdays?": "Saturday sales peak from 9 to 11 in the morning.",
+}
+
+
+def answering_analyst(messages, tools) -> Reply:
+    return Reply(ANSWERS[messages[1]["content"]])
+
+
+def recalling_agent(messages, tools) -> Reply:
+    head = messages[1]["content"]
+    n = sum(m["role"] == "assistant" for m in messages)
+    if "onboarding" in head and n < len(ANSWERS):
+        return step("ask_analyst", question=list(ANSWERS)[n])
+    if "start of week 3 of" in head and n == 0:
+        return Reply(
+            None,
+            (
+                tool_call("recall", query="trend in croissants sold"),
+                tool_call("recall", query="what we pay per kg of flour in 2025"),
+            ),
+        )
+    return step("end_week")
+
+
+def test_recall_finds_an_onboarding_answer_by_a_paraphrase(seed1_history) -> None:
+    policy = manager(
+        recalling_agent,
+        records=seed1_history.records,
+        analyst=FakeChatModel(answering_analyst, name="fake-analyst"),
+    )
+    result = manage(seed1_history.handoff, policy, weeks=3)
+    saved = kinds(result.log, "analyst")
+    assert [(a["turn"], a["week"]) for a in saved] == [("onboarding", 0)] * 3
+    recalls = [t["result"] for t in kinds(result.log, "tool_call") if t["tool"] == "recall"]
+    paraphrase, unrelated = recalls
+    top = json.loads(paraphrase)[0]
+    assert top["question"].startswith("How have croissant sales") and top["date"] == "2026-01-01"
+    assert json.loads(unrelated)[0]["question"] == "What does the flour supplier charge per kg?"
+    seen = [m[1]["content"] for m, _ in policy.manager_model.seen]
+    week3 = next(text for text in seen if "week 3 of" in text)
+    assert "Saved analyst answers: 3." in week3
+    assert "- Which hours are busiest on Saturdays?" in week3
