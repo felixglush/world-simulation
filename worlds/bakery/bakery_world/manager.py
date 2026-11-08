@@ -25,7 +25,14 @@ from bakery_world.llm import (
 )
 from bakery_world.managed import LogKind, ManagedWorld
 from bakery_world.management import StopRun
-from bakery_world.memory import MAX_RECALL, Archive, SavedAnswer
+from bakery_world.memory import (
+    HANDOVER_LIMIT,
+    MAX_RECALL,
+    NONE_WRITTEN,
+    Archive,
+    Handover,
+    SavedAnswer,
+)
 from bakery_world.plan import (
     MAX_PLAN_ITEMS,
     MAX_REVIEW_WEEKS,
@@ -83,7 +90,8 @@ SYSTEM = (
     "Money is in US cents.\n\n"
     "Each turn starts with a fresh conversation. What carries over is in the turn message: "
     "your plan (plan_update), your experiments (experiment_start, experiment_conclude), your "
-    "own actions of the last four weeks, and your notes (notes_write). Keep findings, reasons "
+    "own actions of the last four weeks, your notes (notes_write), and the handover you wrote "
+    "when you ended your last turn. Keep findings, reasons "
     "and open questions in your notes. Every analyst answer is saved, and recall searches the "
     "saved answers from all turns without asking again.\n\n"
     "Work the way a good new general manager would:\n"
@@ -104,7 +112,7 @@ SYSTEM = (
     "- Ask the analyst focused questions and follow up on its answers.\n"
     "- Use the turn's budget when there is something worth investigating; end the week early "
     "only when nothing useful is left to do.\n\n"
-    "Call end_week when you are done; the week then runs."
+    "Call end_week with a handover when you are done; the week then runs."
 )
 
 
@@ -133,6 +141,7 @@ class TurnContext:
     actions: tuple[ActionRecord, ...] = ()
     saved_answers: int = 0
     recent_questions: tuple[str, ...] = ()
+    handovers: tuple[Handover, ...] = ()
 
 
 def _limits(ctx: TurnContext) -> str:
@@ -155,6 +164,10 @@ def _saved(ctx: TurnContext) -> str:
     )
 
 
+def _handover(h: Handover) -> str:
+    return f"{h.date} ({h.turn} turn, week {h.week + 1}):\n{h.text}"
+
+
 def turn_messages(ctx: TurnContext) -> list[dict]:
     head = {
         TurnKind.ONBOARDING: (
@@ -174,7 +187,10 @@ def turn_messages(ctx: TurnContext) -> list[dict]:
             "your attention now. Deal with it, then call end_week to let the week carry on."
         ),
     }[ctx.kind]
-    parts = [head, _limits(ctx), _saved(ctx)]
+    parts = [head]
+    if ctx.handovers:
+        parts.append("Handover from your last turn, " + _handover(ctx.handovers[-1]))
+    parts += [_limits(ctx), _saved(ctx)]
     if ctx.event:
         parts.append("The event:\n" + json.dumps(ctx.event, indent=1))
     if ctx.arrivals:
@@ -287,6 +303,7 @@ class Turn:
     kind: TurnKind
     questions_left: int
     ended: bool = False
+    handover: str | None = None
 
 
 def records_path(mw: ManagedWorld, fallback: Path | None) -> Path | None:
@@ -358,6 +375,7 @@ class LLMManager:
             recent_actions(mw.log.lines, mw.day),
             len(self.archive.answers),
             self.archive.recent_questions(),
+            tuple(self.archive.handovers),
         )
 
     def tools(self, mw: ManagedWorld, turn: Turn) -> dict[str, Tool]:
@@ -432,7 +450,15 @@ class LLMManager:
             return f"experiment {e.name!r} concluded after {e.weeks_run(mw.day)} weeks"
 
         def end_week(args: dict) -> str:
-            turn.ended = True
+            text = args.get("handover")
+            if not isinstance(text, str) or not text.strip():
+                raise ToolError(
+                    "error: write a handover for your next turn: what you saw, what you "
+                    "changed and what to check next"
+                )
+            if len(text) > HANDOVER_LIMIT:
+                raise ToolError(f"error: keep the handover under {HANDOVER_LIMIT} characters")
+            turn.handover, turn.ended = text.strip(), True
             return "turn over"
 
         own = [
@@ -511,7 +537,19 @@ class LLMManager:
                 {"text": {"type": "string", "description": "the whole new notes"}},
                 notes_write,
             ),
-            Tool("end_week", "Finish this turn and let the week run.", {}, end_week),
+            Tool(
+                "end_week",
+                "Finish this turn and let the week run. The handover is shown at the top of "
+                "your next turn.",
+                {
+                    "handover": {
+                        "type": "string",
+                        "description": f"at most {HANDOVER_LIMIT} characters: what you saw, "
+                        "what you changed and what to check next",
+                    }
+                },
+                end_week,
+            ),
         ]
         return {t.name: t for t in view_tools(mw) + action_tools(mw) + own}
 
@@ -565,4 +603,14 @@ class LLMManager:
             reason = str(e)
         except ModelError as e:
             reason = f"model error: {e}"
-        mw.note(LogKind.TURN, turn=kind, week=self.week, phase="end", calls=calls, reason=reason)
+        handover = turn.handover or NONE_WRITTEN
+        self.archive.handovers.append(Handover(mw.date(), self.week, kind, handover))
+        mw.note(
+            LogKind.TURN,
+            turn=kind,
+            week=self.week,
+            phase="end",
+            calls=calls,
+            reason=reason,
+            handover=handover,
+        )

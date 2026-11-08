@@ -25,6 +25,10 @@ def step(name: str, /, **args) -> Reply:
     return Reply(None, (tool_call(name, **args),))
 
 
+def end(handover: str = "Nothing new; keep the plan.") -> Reply:
+    return step("end_week", handover=handover)
+
+
 def kinds(lines: list[str], kind: str) -> list[dict]:
     return [r for r in map(json.loads, lines) if r["kind"] == kind]
 
@@ -40,11 +44,11 @@ def manager(script, budget: int = 500, analyst=None, **kw) -> LLMManager:
 
 def test_a_scripted_manager_acts_asks_and_ends_the_week(seed1_history) -> None:
     script = [
-        step("end_week"),
+        end(),
         step("set_price", location=HOME_LOCATION, item="croissant", price_cents=455),
         step("ask_analyst", question="How have croissant sales moved?"),
         step("set_price", location=HOME_LOCATION, item="unicorn", price_cents=400),
-        step("end_week"),
+        end(),
     ]
     policy = manager(script, records=seed1_history.records)
     result = manage(seed1_history.handoff, policy, weeks=1)
@@ -120,7 +124,7 @@ def test_the_turn_header_shows_what_is_left_of_the_budget(seed1_history) -> None
         "Budget: 25 model calls left this turn, 4 analyst questions left this turn, and 1,234 "
         "model calls left in the whole run."
     )
-    policy = manager([step("end_week")] * 2, budget=300, records=seed1_history.records)
+    policy = manager([end()] * 2, budget=300, records=seed1_history.records)
     manage(seed1_history.handoff, policy, weeks=1)
     onboarding, weekly = (m[1]["content"] for m, _ in policy.manager_model.seen)
     assert "80 model calls left this turn, 20 analyst questions left this turn, and 300" in (
@@ -132,7 +136,7 @@ def test_the_turn_header_shows_what_is_left_of_the_budget(seed1_history) -> None
 def deep_agent(messages, tools) -> Reply:
     head = messages[1]["content"]
     n = sum(m["role"] == "assistant" for m in messages)
-    if "onboarding" in head:
+    if "This is your onboarding" in head:
         return [
             step("plan_update", items=[{"text": "Test a latte price rise", "state": "doing"}]),
             step(
@@ -145,7 +149,7 @@ def deep_agent(messages, tools) -> Reply:
             ),
             step("set_price", location=HOME_LOCATION, item="latte", price_cents=475),
             step("calculate", expression="pct_change(450, 475)"),
-            step("end_week"),
+            end(),
         ][n]
     if "start of week 3 of" in head and n == 0:
         return step(
@@ -154,7 +158,7 @@ def deep_agent(messages, tools) -> Reply:
             result="units flat, revenue up 5%",
             decision="keep 475",
         )
-    return step("end_week")
+    return end()
 
 
 def test_a_deep_agent_plans_runs_an_experiment_and_concludes_it(seed1_history) -> None:
@@ -197,9 +201,9 @@ def test_plan_and_experiment_arguments_are_checked_at_the_tool(seed1_history) ->
 def test_context_is_fresh_each_week_but_notes_carry_over(seed1_history) -> None:
     script = [
         step("notes_write", text="check croissant waste"),
-        step("end_week"),
-        step("end_week"),
-        step("end_week"),
+        end(),
+        end(),
+        end(),
     ]
     policy = manager(script, records=seed1_history.records)
     manage(seed1_history.handoff, policy, weeks=2)
@@ -231,7 +235,7 @@ def test_turns_stop_at_their_call_caps(seed1_history, kind: TurnKind) -> None:
 
 def test_at_most_four_analyst_questions_per_week(seed1_history) -> None:
     asks = tuple(tool_call("ask_analyst", question=f"Question {n}?") for n in range(6))
-    script = [Reply(None, asks), step("end_week")]
+    script = [Reply(None, asks), end()]
     mw = load(seed1_history.handoff)
     policy = manager(script, records=seed1_history.records, onboarded=True)
     policy.weekly(mw, 0)
@@ -266,7 +270,7 @@ def answering_analyst(messages, tools) -> Reply:
 def recalling_agent(messages, tools) -> Reply:
     head = messages[1]["content"]
     n = sum(m["role"] == "assistant" for m in messages)
-    if "onboarding" in head and n < len(ANSWERS):
+    if "This is your onboarding" in head and n < len(ANSWERS):
         return step("ask_analyst", question=list(ANSWERS)[n])
     if "start of week 3 of" in head and n == 0:
         return Reply(
@@ -276,7 +280,7 @@ def recalling_agent(messages, tools) -> Reply:
                 tool_call("recall", query="what we pay per kg of flour in 2025"),
             ),
         )
-    return step("end_week")
+    return end()
 
 
 def test_recall_finds_an_onboarding_answer_by_a_paraphrase(seed1_history) -> None:
@@ -297,3 +301,24 @@ def test_recall_finds_an_onboarding_answer_by_a_paraphrase(seed1_history) -> Non
     week3 = next(text for text in seen if "week 3 of" in text)
     assert "Saved analyst answers: 3." in week3
     assert "- Which hours are busiest on Saturdays?" in week3
+
+
+def test_end_week_needs_a_handover_and_the_next_turn_shows_it(seed1_history) -> None:
+    script = [
+        step("end_week"),
+        step("end_week", handover="  "),
+        end("Saw weekday croissant waste. Cut the Tuesday bake. Check waste next week."),
+        Reply("I am done."),
+        end(),
+    ]
+    policy = manager(script, records=seed1_history.records)
+    result = manage(seed1_history.handoff, policy, weeks=2)
+    refusals = [t["result"] for t in kinds(result.log, "tool_call")][:2]
+    assert all(r.startswith("error: write a handover") for r in refusals)
+    week1, week2 = (m[1]["content"] for m, _ in policy.manager_model.seen[3:5])
+    heading = "Handover from your last turn, 2026-01-01 (onboarding turn, week 1):\n"
+    assert heading + "Saw weekday croissant waste." in week1
+    assert week1.index(heading) < week1.index("Budget:")
+    assert "(weekly turn, week 1):\n(none written)" in week2
+    ends = [t["handover"] for t in kinds(result.log, "turn") if t["phase"] == "end"]
+    assert ends[1:] == ["(none written)", "Nothing new; keep the plan."]
