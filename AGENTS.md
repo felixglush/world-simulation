@@ -30,6 +30,18 @@ The farm command is live only and always needs a finite `--max-calls` (a day has
 
 Every farmer action (labor cost, prerequisites, effect) is listed in `worlds/farm/ACTIONS.md`; building (granary, threshing floor, mill) and trade (escrowed offers, gifts, shipments with latency) live in `farm_world/economy.py`.
 
+## Bakery world
+
+`worlds/bakery/` holds the `bakery_world` package: a stdlib-only, seeded simulation of one bakery from opening day. Each seed produces a three-year history (1,095 days from 2023-01-02) driven by a founder policy, per-seed decay forces and planted habits. Run from the repository root with `PYTHONPATH=worlds/bakery`:
+
+```bash
+PYTHONPATH=worlds/bakery uv run --frozen python -m bakery_world history --seed 1 --out runs/bakery/seed-1
+PYTHONPATH=worlds/bakery uv run --frozen python -m bakery_world calibrate --seeds 1-8
+PYTHONPATH=worlds/bakery uv run --frozen python -m bakery_world simulate --seed 1 --days 30
+```
+
+`history` writes `records.sqlite` (the observable records), `hidden.json` (seed, params, forces and habits, which never appear in the sqlite file) and `handoff.pickle` (the world on day 1,095, which `bakery_world.history.resume` loads and continues exactly). It takes about 8 s per seed. `calibrate` prints monthly revenue and operating profit for the home shop and exits 1 if any seed misses the envelope; `--jobs` sets worker processes. Verify with `uv run --frozen pytest worlds/bakery`, which takes about 20 s.
+
 ## Environment commands
 
 - Install: bash scripts/setup-cloud.sh
