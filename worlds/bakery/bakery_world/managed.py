@@ -131,6 +131,11 @@ class LogKind(StrEnum):
     DOCUMENT = auto()
     INTERRUPT = auto()
     BANKRUPT = auto()
+    TURN = auto()
+    TOOL_CALL = auto()
+    ANALYST = auto()
+    MODEL_CALL = auto()
+    STOPPED = auto()
     FINISH = auto()
 
 

@@ -31,6 +31,12 @@ DAYS_PER_WEEK = 7
 DEMAND_WEEKS = 8
 
 
+class StopRun(Exception):
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class Policy(Protocol):
     name: str
     keeps_founder: bool
@@ -233,11 +239,17 @@ def manage(
     start_nw = net_worth(mw)
     mw.note(LogKind.START, seed=mw.seed, policy=policy.name, weeks=weeks, net_worth_cents=start_nw)
     advance(ev.START)
-    bankrupt, week = False, 0
+    bankrupt, played = False, 0
     for week in range(weeks):
         mw.manager_hours = MANAGER_HOURS_PER_WEEK
         mw.note(LogKind.WEEK, week=week, dashboard=dashboard(mw))
-        policy.weekly(mw, week)
+        try:
+            policy.weekly(mw, week)
+        except StopRun as stop:
+            advance(ev.STOP)
+            mw.note(LogKind.STOPPED, week=week, reason=stop.reason)
+            break
+        played += 1
         advance(ev.SUBMIT_TURN)
         for _ in range(DAYS_PER_WEEK):
             asked = advance_day(mw)
@@ -255,6 +267,7 @@ def manage(
             break
         advance(ev.FINISH_YEAR if week == weeks - 1 else ev.FINISH_WEEK)
         if conn:
+            mw.recorder.refresh_tables()
             conn.commit()
     end_nw = net_worth(mw, bankrupt)
     diag = diagnostics(mw)
@@ -268,7 +281,7 @@ def manage(
     return RunResult(
         mw.seed,
         policy.name,
-        week + 1,
+        played,
         bankrupt,
         start_nw,
         end_nw,

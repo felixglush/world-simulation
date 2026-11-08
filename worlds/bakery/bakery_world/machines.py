@@ -179,6 +179,7 @@ class RunState(StrEnum):
     INTERRUPTED = auto()
     SCORED = auto()
     BANKRUPT = auto()
+    STOPPED = auto()
 
 
 class RunEvent(StrEnum):
@@ -189,6 +190,7 @@ class RunEvent(StrEnum):
     RESUME = auto()
     FINISH_YEAR = auto()
     GO_BANKRUPT = auto()
+    STOP = auto()
 
 
 L, LE = LocationState, LocationEvent
@@ -335,8 +337,9 @@ RUN = Machine(
         (R.INTERRUPTED, RE.RESUME): R.SIMULATING,
         (R.SIMULATING, RE.FINISH_YEAR): R.SCORED,
         (R.SIMULATING, RE.GO_BANKRUPT): R.BANKRUPT,
+        (R.WEEKLY_TURN, RE.STOP): R.STOPPED,
     },
-    frozenset({R.SCORED, R.BANKRUPT}),
+    frozenset({R.SCORED, R.BANKRUPT, R.STOPPED}),
     R,
     RE,
 )
