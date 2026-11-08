@@ -176,7 +176,7 @@ def _record(mw: ManagedWorld, report: DayReport) -> None:
 
 def advance_day(mw: ManagedWorld) -> list[Curveball]:
     founding, b = mw.founding, mw.world.business
-    marks = len(b.transitions), len(b.ledger)
+    marks = len(b.transitions)
     asked = morning(mw)
     _standing(mw)
     if mw.keeps_founder:
@@ -187,14 +187,15 @@ def advance_day(mw: ManagedWorld) -> list[Curveball]:
     else:
         _overdraft(mw)
     _record(mw, report)
-    fresh = b.transitions[marks[0] :]
+    fresh = b.transitions[marks:]
     mw.totals["leavers"] += sum(
         t.entity == mc.STAFF.entity and t.after == StaffState.GONE.name and t.entity_id in b.staff
         for t in fresh
     )
     mw.log_transitions(fresh)
     if mw.recorder:
-        mw.recorder.append_ledger(b.ledger[marks[1] :])
+        mw.recorder.append_ledger(b.ledger[mw.ledger_mark :])
+        mw.ledger_mark = len(b.ledger)
     return asked
 
 
@@ -213,6 +214,7 @@ def _open_records(
     shutil.copyfile(records, target)
     conn = sqlite3.connect(target)
     mw.recorder = Recorder(conn, mw.world, mw.seed, resume=True)
+    mw.ledger_mark = len(mw.world.business.ledger)
     return conn
 
 

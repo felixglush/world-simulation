@@ -279,7 +279,7 @@ def set_hours(mw: ManagedWorld, location: str, open_hour: int, close_hour: int) 
     if close_hour - open_hour < 4:
         raise ActionRefused("the shop must open for at least 4 hours")
     loc.open_hour, loc.close_hour = open_hour, close_hour
-    return ActionResult(f"{location} opens {open_hour}:00 to {close_hour}:00 from tomorrow")
+    return ActionResult(f"{location} opens {open_hour}:00 to {close_hour}:00 from today")
 
 
 def _next_staff_seq(mw: ManagedWorld) -> int:
@@ -609,7 +609,7 @@ ACTIONS: dict[str, Action] = {
     for a in (
         Action(
             "set_price",
-            "Set an item's price at a location, effective tomorrow.",
+            "Set an item's price at a location, effective from today's opening.",
             (LOC, ITEM, Param("price_cents", int, "price in cents", 25, 5000)),
             set_price,
         ),
@@ -639,7 +639,7 @@ ACTIONS: dict[str, Action] = {
         ),
         Action(
             "set_hours",
-            "Set opening and closing hours, effective tomorrow.",
+            "Set opening and closing hours, effective from today.",
             (
                 LOC,
                 Param("open_hour", int, "opening hour", 5, 12),

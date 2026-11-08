@@ -185,6 +185,7 @@ class ManagedWorld:
     handoff_day: int = 0
     log: RunLog = field(default_factory=RunLog)
     recorder: Recorder | None = None
+    ledger_mark: int = 0
     jobs_posted: int = 0
     totals: Counter = field(default_factory=Counter)
     handoff_prices: dict[ItemId, int] = field(default_factory=dict)

@@ -197,3 +197,24 @@ def test_management_days_are_appended_to_the_records(seed1_history, tmp_path) ->
     assert last_sale == ledger == date_of(1095 + 13).isoformat()
     assert bakes > 0
     assert (tmp_path / "run.jsonl").read_text().count("\n") > 10
+
+
+@dataclass
+class OneCampaign(Freeze):
+    name: str = "one campaign"
+
+    def weekly(self, world: ManagedWorld, week: int) -> None:
+        if week == 0:
+            perform(
+                world, "spend_marketing", location="shop1", channel="flyers", amount_cents=50_000
+            )
+
+
+def test_ledger_entries_from_weekly_actions_reach_the_records(seed1_history, tmp_path) -> None:
+    manage(seed1_history.records.parent, OneCampaign(), weeks=1, out_dir=tmp_path)
+    with sqlite3.connect(tmp_path / "records.sqlite") as conn:
+        rows = conn.execute(
+            "SELECT amount_cents FROM ledger WHERE day >= 1095 AND memo = 'flyers campaign'"
+        ).fetchall()
+    conn.close()
+    assert rows == [(-50_000,)]
