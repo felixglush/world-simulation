@@ -6,6 +6,7 @@ import pytest
 
 from bakery_world.basics import date_of
 from bakery_world.calibrate import ENVELOPE
+from bakery_world.catalog import CATALOG
 from bakery_world.cli import main
 from bakery_world.decay import FORCES, Force, ForceId, draw_forces
 from bakery_world.habits import HABITS, HabitId
@@ -134,6 +135,29 @@ def test_hidden_facts_never_reach_the_records(history) -> None:
     assert not columns & {"skill", "morale", "speed", "elasticity", "reputation", "awareness"}
     assert set(hidden) >= {"seed", "params", "forces", "habits"}
     assert all(h["description"] for h in hidden["habits"].values())
+
+
+def test_recipes_joined_with_supplier_prices_give_a_cost_per_item(history) -> None:
+    sql = (
+        "SELECT r.item, SUM(r.grams_per_unit * p.price) / 1000.0, MAX(r.labor_minutes_per_unit) "
+        "FROM recipes r JOIN (SELECT ingredient, MIN(list_price_cents_per_kg) AS price "
+        "FROM suppliers WHERE month = '2025-12' GROUP BY ingredient) p USING (ingredient) "
+        "GROUP BY r.item"
+    )
+    cost = {item: (cents, labor) for item, cents, labor in rows(history.records, sql)}
+    assert len(cost) == len(CATALOG)
+    flour, butter = (
+        rows(
+            history.records,
+            "SELECT MIN(list_price_cents_per_kg) FROM suppliers "
+            "WHERE month = '2025-12' AND ingredient = ?",
+            ing,
+        )[0][0]
+        for ing in ("flour", "butter")
+    )
+    assert cost["croissant"][0] == pytest.approx((60 * flour + 35 * butter) / 1000)
+    assert cost["croissant"][1] == CATALOG["croissant"].labor_minutes > 0
+    assert 0 < cost["croissant"][0] < CATALOG["croissant"].typical_price_cents
 
 
 def test_documents_cover_the_notebook_contracts_and_news(history) -> None:

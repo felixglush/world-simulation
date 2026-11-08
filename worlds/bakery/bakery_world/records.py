@@ -134,6 +134,15 @@ TABLES: dict[str, tuple[str, ...]] = {
         "rating INTEGER",
         "text TEXT",
     ),
+    "recipes": (
+        "item TEXT",
+        "name TEXT",
+        "category TEXT",
+        "ingredient TEXT",
+        "grams_per_unit INTEGER",
+        "labor_minutes_per_unit REAL",
+        "shelf_life_days INTEGER",
+    ),
     "documents": (
         "doc_id INTEGER PRIMARY KEY",
         "date TEXT",
@@ -463,6 +472,7 @@ class Recorder:
             return
         for table, cols in TABLES.items():
             conn.execute(f"CREATE TABLE {table} ({', '.join(cols)})")
+        self._insert("recipes", _recipe_rows())
 
     def _insert(self, table: str, rows: list[tuple]) -> None:
         if rows:
@@ -634,6 +644,15 @@ class Recorder:
             self.conn.execute(
                 f"UPDATE {table} SET {column} = ? WHERE {id_column} = ?", (text, int(row))
             )
+
+
+def _recipe_rows() -> list[tuple]:
+    return [
+        (r.item_id, r.name, r.category.value, ing.value, grams, r.labor_minutes)
+        + (r.shelf_life_days,)
+        for r in CATALOG.values()
+        for ing, grams in r.grams.items()
+    ]
 
 
 def _ledger_row(e: LedgerEntry) -> tuple:
