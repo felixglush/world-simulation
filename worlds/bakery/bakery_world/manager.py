@@ -139,7 +139,7 @@ def action_tools(mw: ManagedWorld) -> list[Tool]:
 
     return [
         Tool(s["name"], s["summary"], s["arguments"], handler(s["name"]), tuple(s["required"]))
-        for s in describe_actions()
+        for s in describe_actions(mw.allow_expansion)
     ]
 
 
@@ -183,7 +183,11 @@ def view_tools(mw: ManagedWorld) -> list[Tool]:
             observe.price_list,
         ),
     )
-    tools = [Tool(n, d, {}, lambda args, f=f: show(f(mw))) for n, d, f in plain]
+    tools = [
+        Tool(n, d, {}, lambda args, f=f: show(f(mw)))
+        for n, d, f in plain
+        if mw.allow_expansion or n != "view_sites_scouted"
+    ]
     tools += [
         Tool(
             "view_menu",

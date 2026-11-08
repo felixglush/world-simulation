@@ -747,7 +747,7 @@ ACTIONS: dict[str, Action] = {
 def perform(mw: ManagedWorld, name: str, **args: object) -> ActionResult:
     try:
         action = ACTIONS.get(name)
-        if action is None:
+        if action is None or (name in EXPANSION_ACTIONS and not mw.allow_expansion):
             raise ActionRefused(f"there is no action {name!r}")
         expected = {p.name for p in action.params}
         if set(args) != expected:
@@ -762,5 +762,10 @@ def perform(mw: ManagedWorld, name: str, **args: object) -> ActionResult:
     return result
 
 
-def describe_actions() -> list[dict]:
-    return [a.schema() for a in ACTIONS.values()]
+EXPANSION_ACTIONS = frozenset({"scout_site", "sign_lease", "close_location"})
+
+
+def describe_actions(allow_expansion: bool = False) -> list[dict]:
+    return [
+        a.schema() for a in ACTIONS.values() if allow_expansion or a.name not in EXPANSION_ACTIONS
+    ]

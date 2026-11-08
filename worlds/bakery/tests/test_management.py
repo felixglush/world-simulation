@@ -20,6 +20,7 @@ from bakery_world.town import HOME_LOCATION
 def mw(seed1_history) -> ManagedWorld:
     world = load(seed1_history.handoff)
     world.world.business.credit_limit_cents = Cents(50_000_000)
+    world.allow_expansion = True
     return world
 
 
@@ -108,7 +109,7 @@ def test_a_new_site_trades_only_after_fit_out(mw: ManagedWorld) -> None:
 
 
 def test_actions_describe_their_arguments() -> None:
-    schemas = {s["name"]: s for s in describe_actions()}
+    schemas = {s["name"]: s for s in describe_actions(allow_expansion=True)}
     assert set(schemas) == set(ACTIONS)
     price = schemas["set_price"]["arguments"]["price_cents"]
     assert price["type"] == "integer" and price["minimum"] > 0
@@ -218,3 +219,12 @@ def test_ledger_entries_from_weekly_actions_reach_the_records(seed1_history, tmp
         ).fetchall()
     conn.close()
     assert rows == [(-50_000,)]
+
+
+def test_expansion_is_off_by_default(seed1_history) -> None:
+    mw = load(seed1_history.handoff)
+    names = {a["name"] for a in describe_actions()}
+    assert names.isdisjoint({"scout_site", "sign_lease", "close_location"})
+    with pytest.raises(ActionRefused):
+        perform(mw, "scout_site", neighborhood="campus")
+    assert mw.sites == {}
