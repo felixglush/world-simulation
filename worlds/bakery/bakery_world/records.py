@@ -183,6 +183,16 @@ TEMPLATES: dict[str, tuple[str, ...]] = {
         "Long wait at the counter this morning.",
         "Only one person serving and a long line.",
     ),
+    "review_dirty": (
+        "Tables were sticky and the floor needed a sweep.",
+        "Crumbs everywhere and the bin was overflowing.",
+        "The place could do with a proper clean.",
+    ),
+    "review_uneven": (
+        "The {item} was pale and underbaked, like it was rushed.",
+        "Half the {item}s were overdone and the rest were doughy.",
+        "The {item} looked rushed out of the oven.",
+    ),
     "review_sold_out": (
         "Sold out of {item} before noon.",
         "No {item} left by the time I got there.",
@@ -386,6 +396,10 @@ MIN_WAGE_NEW_CENTS = 1750
 MIN_WAGE_EFFECTIVE_DAY = (date(2026, 4, 1) - START_DATE).days
 MIN_WAGE_ANNOUNCED_DAY = 1040
 REVIEWS_PER_VISIT = 0.0015
+DIRTY_REVIEW_GRIME = 0.35
+DIRTY_STARS = 2.5
+UNEVEN_REVIEW_STRAIN = 0.1
+UNEVEN_STARS = 1.5
 EARLY_STOCKOUT_HOUR = 12
 RAISE_NOTE_MIN_STAFF = 3
 
@@ -427,14 +441,29 @@ def draw_reviews(rng: random.Random, loc: Location, shop: LocationDay) -> list[R
         if d.first_stockout_hour is not None and d.first_stockout_hour < EARLY_STOCKOUT_HOUR
     ]
     busy = shop.walkaways > 0.08 * max(1, shop.visits)
+    grime = 1 - loc.cleanliness
+    dirty = grime > DIRTY_REVIEW_GRIME
     out = []
     for _ in range(count):
-        rating = round(rng.gauss(1 + 4 * loc.reputation, 0.9) - (0.8 if busy else 0))
-        rating = min(5, max(1, rating))
+        drag = (0.8 if busy else 0) + DIRTY_STARS * grime + UNEVEN_STARS * shop.bake_strain
+        rating = min(5, max(1, round(rng.gauss(1 + 4 * loc.reputation, 0.9) - drag)))
         item = CATALOG[rng.choice(sold) if sold else ItemId("croissant")].name.lower()
         text = write(f"review_{rating}", rng, item=item)
-        facts: dict = {"rating": rating, "item": item, "long_wait": False, "sold_out": None}
-        if busy and rng.random() < 0.6:
+        facts: dict = {
+            "rating": rating,
+            "item": item,
+            "long_wait": False,
+            "sold_out": None,
+            "dirty": False,
+            "uneven_bake": False,
+        }
+        if dirty and rng.random() < 0.5:
+            text += " " + write("review_dirty", rng)
+            facts["dirty"] = True
+        elif shop.bake_strain > UNEVEN_REVIEW_STRAIN and rng.random() < 0.5:
+            text += " " + write("review_uneven", rng, item=item)
+            facts["uneven_bake"] = True
+        elif busy and rng.random() < 0.6:
             text += " " + write("review_wait", rng)
             facts["long_wait"] = True
         elif early_out and rng.random() < 0.3:

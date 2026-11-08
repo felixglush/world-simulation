@@ -300,3 +300,40 @@ def test_a_hire_starts_on_a_standard_rota(mw: ManagedWorld) -> None:
     perform(mw, "hire", candidate=applicant, wage_cents_per_hour=4000)
     shown = next(s for s in staff_view(mw) if s["staff"] == applicant)
     assert shown["weekly_hours"] == 40 and shown["rota"].count("off") == 2
+
+
+@dataclass
+class Rotas(Freeze):
+    name: str = "rotas"
+    role: str = "cleaner"
+    shifts: tuple[str, ...] = ("off",) * 7
+
+    def weekly(self, world: ManagedWorld, week: int) -> None:
+        if week == 0:
+            for s in staff_view(world):
+                if s["role"] == self.role:
+                    perform(world, "set_rota", staff=s["staff"], shifts=list(self.shifts))
+
+
+def test_without_cleaner_hours_the_shop_gets_dirty_and_reviews_fall(seed1_history) -> None:
+    control = manage(seed1_history.handoff, Freeze(), weeks=8).world
+    dirty = manage(seed1_history.handoff, Rotas(), weeks=8).world
+    shop = HOME_LOCATION
+    assert dirty.world.business.locations[shop].cleanliness < 0.7
+    assert control.world.business.locations[shop].cleanliness > 0.9
+
+    def stars(mw: ManagedWorld) -> float:
+        late = [r for day, _, r in mw.reviews if day >= mw.handoff_day + 21]
+        return sum(late) / len(late)
+
+    assert stars(dirty) < stars(control) - 0.5
+
+
+def test_cutting_baker_hours_cuts_the_bake(seed1_history) -> None:
+    control = manage(seed1_history.handoff, Freeze(), weeks=2)
+    short = manage(
+        seed1_history.handoff, Rotas(role="baker", shifts=("05-07",) * 5 + ("off",) * 2), weeks=2
+    )
+    assert short.world.totals["baked"] < 0.7 * control.world.totals["baked"]
+    strained = [s.bake_strain for r in short.world.reports for s in r.locations]
+    assert max(strained) > 0

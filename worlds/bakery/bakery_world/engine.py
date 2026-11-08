@@ -94,6 +94,17 @@ AWARENESS_FORGET = 0.0015
 MARKETING_SCALE_CENTS = 100_000
 NEUTRAL_MORALE = 0.6
 HOURS_CUT_UNNOTICED = 0.2
+DIRT_PER_VISIT = 0.0005
+CLEAN_PER_HOUR = 0.05
+SLACK_CLEANING = 0.1
+DIRTY_SATISFACTION = 0.35
+DIRTY_UTILITY = 0.3
+BAKER_HANDS_ON = 0.8
+STRAIN_FREE_LOAD = 0.85
+MAX_BAKE_LOAD = 2.0
+STRAIN_QUALITY = 0.4
+MIN_RUSHED_QUALITY = 0.6
+STRAIN_SATISFACTION = 0.2
 HOURS_CUT_MORALE = 0.5
 SERVICE_WEIGHT = 0.4
 BOREDOM_PENALTY = 0.15
@@ -173,6 +184,7 @@ class LocationDay:
     items: dict[ItemId, ItemDay]
     walkaways: int
     walkaways_by_hour: tuple[int, ...]
+    bake_strain: float
     wait_minutes_by_hour: tuple[float, ...]
     shifts: tuple[Shift, ...]
     ingredient_grams: dict[Ingredient, int]
@@ -369,7 +381,7 @@ def _bake(
     weekday: int,
     grams: dict[Ingredient, int],
     items: dict[ItemId, ItemDay],
-) -> tuple[dict[ItemId, int], float]:
+) -> tuple[dict[ItemId, int], float, float]:
     window_hours = max(0, BAKE_DEADLINE_HOUR - (loc.open_hour - PRE_OPEN_BAKE_HOURS))
     capacity_by_oven = {
         o.id: 60.0 * window_hours * (WORN_OVEN_CAPACITY if o.state is EquipmentState.WORN else 1.0)
@@ -378,16 +390,24 @@ def _bake(
     }
     oven_total = sum(capacity_by_oven.values())
     oven_left = oven_total
-    labor_left = sum(on.shift.hours * 60 * _effort(on.staff) for on in roster.bakers)
+    labor_left = sum(
+        on.shift.hours * 60 * BAKER_HANDS_ON * _effort(on.staff) for on in roster.bakers
+    )
+    plans = {
+        item: entry.bake_plan[weekday]
+        for item, entry in sorted(
+            loc.menu.items(), key=lambda kv: kv[1].state is not MenuState.ON_MENU
+        )
+        if entry.state in (MenuState.ON_MENU, MenuState.TRIAL)
+        and not CATALOG[item].made_to_order
+        and entry.bake_plan[weekday] > 0
+    }
+    need = sum(units * CATALOG[item].labor_minutes for item, units in plans.items())
+    load = need / labor_left if labor_left else 0.0
     fresh: dict[ItemId, int] = {}
-    ordered = sorted(loc.menu.items(), key=lambda kv: kv[1].state is not MenuState.ON_MENU)
-    for item, entry in ordered:
+    for item, planned in plans.items():
         recipe = CATALOG[item]
-        plan = entry.bake_plan[weekday]
-        if entry.state not in (MenuState.ON_MENU, MenuState.TRIAL) or recipe.made_to_order:
-            continue
-        if plan <= 0:
-            continue
+        plan = math.floor(planned / load) if load > 1 else planned
         by_oven = int(oven_left // recipe.oven_minutes) * recipe.batch_size
         by_labor = int(labor_left // recipe.labor_minutes)
         units = min(plan, by_oven, by_labor)
@@ -399,20 +419,28 @@ def _bake(
         items.setdefault(item, ItemDay()).baked = units
         _use(grams, item, units)
     utilisation = 0.0 if oven_total == 0 else 1 - oven_left / oven_total
-    return fresh, utilisation
+    strain = max(0.0, min(load, MAX_BAKE_LOAD) - STRAIN_FREE_LOAD) if fresh else 0.0
+    return fresh, utilisation, strain
 
 
 def _build_offers(
-    loc: Location, day: int, fresh: dict[ItemId, int], old: dict[ItemId, dict[int, int]]
+    loc: Location,
+    day: int,
+    fresh: dict[ItemId, int],
+    old: dict[ItemId, dict[int, int]],
+    strain: float,
 ) -> list[_Offer]:
+    rushed = max(MIN_RUSHED_QUALITY, 1 - STRAIN_QUALITY * strain)
     offers = []
     for item, entry in loc.menu.items():
         recipe = CATALOG[item]
         if entry.state not in (MenuState.ON_MENU, MenuState.TRIAL):
             continue
         typical, price = recipe.typical_price_cents, entry.price_on(day)
-        if recipe.made_to_order or fresh.get(item, 0) > 0:
+        if recipe.made_to_order:
             offers.append(_Offer(item, recipe.category, price, typical, False, 1.0))
+        elif fresh.get(item, 0) > 0:
+            offers.append(_Offer(item, recipe.category, price, typical, False, rushed))
         if old.get(item):
             price = round(price * DAY_OLD_DISCOUNT)
             offers.append(_Offer(item, recipe.category, price, typical, True, DAY_OLD_QUALITY))
@@ -524,8 +552,8 @@ def _run_location(
     grams: dict[Ingredient, int] = {}
     roster = _roster(world, loc)
     old = _age_stock(loc, items)
-    fresh, oven_use = _bake(loc, roster, weekday, grams, items)
-    offers = _build_offers(loc, day, fresh, old)
+    fresh, oven_use, strain = _bake(loc, roster, weekday, grams, items)
+    offers = _build_offers(loc, day, fresh, old, strain)
     qty: list[int | None] = []
     for o in offers:
         if CATALOG[o.item_id].made_to_order:
@@ -559,13 +587,13 @@ def _run_location(
     card_revenue = 0
     packaging = 0
     satisfactions = []
-    cleaner_penalty = 0.0 if roster.cleaners else 0.04
+    grime = 1 - loc.cleanliness
     stale = BOREDOM_PENALTY * _boredom(world, loc)
     moods = [on.staff.morale for on in roster.counters]
     service = SERVICE_WEIGHT * (
         (sum(moods) / len(moods) if moods else NEUTRAL_MORALE) - NEUTRAL_MORALE
     )
-    w_out = math.exp(BETA * params.outside_option)
+    w_out = math.exp(BETA * (params.outside_option + DIRTY_UTILITY * grime))
     old_lots = old
 
     for hour, c in inside:
@@ -635,7 +663,7 @@ def _run_location(
                 weights, base_w, tastes, offers_by_item[o.item_id], c.fatigue[o.item_id]
             )
         target = 0.85 + service - stale - min(0.3, 0.04 * min(wait, 20)) - 0.15 * misses
-        target -= cleaner_penalty
+        target -= DIRTY_SATISFACTION * grime + STRAIN_SATISFACTION * strain
         if not lines:
             target = min(target, 0.3)
         target -= 0.05 * sum(line.day_old for line in lines)
@@ -697,6 +725,7 @@ def _run_location(
         mean_sat = sum(satisfactions) / n
         loc.reputation += params.reputation_drift * min(1.0, n / 60) * (mean_sat - loc.reputation)
     _update_awareness(world, loc, len(inside))
+    _tidy(loc, roster, arrivals, capacity, len(inside))
     _staff_day(world, loc, roster, arrivals, capacity, rng)
 
     return LocationDay(
@@ -710,6 +739,7 @@ def _run_location(
         items=items,
         walkaways=sum(walkaways),
         walkaways_by_hour=tuple(walkaways),
+        bake_strain=round(strain, 3),
         wait_minutes_by_hour=tuple(round(min(w, 60.0), 1) for w in waits),
         shifts=shifts,
         ingredient_grams=grams,
@@ -723,6 +753,16 @@ def _run_location(
         repairs_cents=Cents(repairs),
         overhead_cents=Cents(sum(DAILY_OVERHEAD_CENTS.values())),
     )
+
+
+def _tidy(
+    loc: Location, roster: _Roster, arrivals: list[int], capacity: list[float], visits: int
+) -> None:
+    cleaning = sum(on.shift.hours * _effort(on.staff) for on in roster.cleaners)
+    slack = sum(max(0.0, c - a) for c, a in zip(capacity, arrivals, strict=True))
+    cleaning += SLACK_CLEANING * slack / COUNTER_CUSTOMERS_PER_HOUR
+    dirt = DIRT_PER_VISIT * visits * loc.cleanliness
+    loc.cleanliness = min(1.0, max(0.0, loc.cleanliness - dirt + CLEAN_PER_HOUR * cleaning))
 
 
 def _update_awareness(world: World, loc: Location, visits: int) -> None:

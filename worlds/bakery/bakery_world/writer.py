@@ -25,8 +25,8 @@ VOICES = {
         30,
         60,
         "a customer's online review: casual, first person, one to three sentences; the star "
-        "rating sets the tone, and a long wait or a sold-out item is mentioned when the facts "
-        "say so",
+        "rating sets the tone, and a long wait, a sold-out item, a dirty shop or an uneven bake "
+        "is mentioned when the facts say so",
     ),
     "notebook": Voice(
         15,

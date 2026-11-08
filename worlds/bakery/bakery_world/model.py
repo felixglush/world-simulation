@@ -105,6 +105,7 @@ class Location:
     menu_changed_day: int = 0
     campaign_cents_per_month: float = 0.0
     price_index: float = 1.0
+    cleanliness: float = 1.0
 
 
 @dataclass(frozen=True)
