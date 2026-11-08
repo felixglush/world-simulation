@@ -157,9 +157,9 @@ def _record(mw: ManagedWorld, report: DayReport) -> None:
                 t["stockouts"] += d.first_stockout_hour is not None
         t["walkaways"] += shop.walkaways
         reviews = draw_reviews(mw.review_rng, loc, shop)
-        for rating, _ in reviews:
-            mw.reviews.append((report.day, shop.location_id, rating))
-            t["stars"] += rating
+        for review in reviews:
+            mw.reviews.append((report.day, shop.location_id, review.rating))
+            t["stars"] += review.rating
             t["reviews"] += 1
         if mw.recorder:
             mw.recorder.insert_reviews(report.day, shop.location_id, reviews)

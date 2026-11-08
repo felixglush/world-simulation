@@ -20,7 +20,7 @@ from bakery_world.managed import (
     write_off,
 )
 from bakery_world.model import Competitor, Equipment, Location
-from bakery_world.records import MIN_WAGE_EFFECTIVE_DAY, SHOP_ADDRESS, write
+from bakery_world.records import MIN_WAGE_EFFECTIVE_DAY, SHOP_ADDRESS, Review, write
 from bakery_world.town import HOME_LOCATION, HOME_NEIGHBORHOOD, RIVAL_ID, SHOP_NAME
 
 HANDOFF_DAY, LAST_DAY = 1095, 1459
@@ -451,7 +451,7 @@ def _viral_begin(mw: ManagedWorld, cb: Curveball) -> Start:
     review = write(f"review_viral_{tone}", rng, item=item)
     mw.reviews.append((mw.day, home.id, rating))
     if mw.recorder:
-        mw.recorder.insert_reviews(mw.day, home.id, [(rating, review)])
+        mw.recorder.insert_reviews(mw.day, home.id, [Review(rating, review, {})])
     _letter(
         mw, cb, "news", f"{SHOP_NAME} goes viral", f"news_viral_{tone}", shop=SHOP_NAME, item=item
     )

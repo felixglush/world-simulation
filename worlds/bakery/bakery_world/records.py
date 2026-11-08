@@ -5,6 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import NamedTuple
 
 from bakery_world import machines as mc
 from bakery_world.basics import (
@@ -386,13 +387,27 @@ def _snapshot(world: World) -> dict[tuple[LocationId, ItemId], tuple[str, int]]:
     }
 
 
+class Review(NamedTuple):
+    rating: int
+    text: str
+    facts: dict
+
+
+@dataclass(frozen=True)
+class TextItem:
+    key: str
+    kind: str
+    facts: dict
+    draft: str
+
+
 @dataclass
 class _InvoiceLine:
     grams: int = 0
     cents: int = 0
 
 
-def draw_reviews(rng: random.Random, loc: Location, shop: LocationDay) -> list[tuple[int, str]]:
+def draw_reviews(rng: random.Random, loc: Location, shop: LocationDay) -> list[Review]:
     count = sum(rng.random() < REVIEWS_PER_VISIT for _ in range(shop.visits))
     sold = [i for i, d in sorted(shop.items.items()) if d.sold + d.day_old_sold]
     early_out = [
@@ -407,12 +422,15 @@ def draw_reviews(rng: random.Random, loc: Location, shop: LocationDay) -> list[t
         rating = min(5, max(1, rating))
         item = CATALOG[rng.choice(sold) if sold else ItemId("croissant")].name.lower()
         text = write(f"review_{rating}", rng, item=item)
+        facts: dict = {"rating": rating, "item": item, "long_wait": False, "sold_out": None}
         if busy and rng.random() < 0.6:
             text += " " + write("review_wait", rng)
+            facts["long_wait"] = True
         elif early_out and rng.random() < 0.3:
             out_item = CATALOG[rng.choice(early_out)].name.lower()
             text += " " + write("review_sold_out", rng, item=out_item)
-        out.append((rating, text))
+            facts["sold_out"] = out_item
+        out.append(Review(rating, text, facts))
     return out
 
 
@@ -422,6 +440,8 @@ class Recorder:
         self.rng = random.Random(f"{seed}:records" + (":management" if resume else ""))
         self.sale_id = 0
         self.invoice_id = 0
+        self.review_id = 0
+        self.texts: list[TextItem] = []
         self.menu: dict[tuple[LocationId, ItemId], tuple[str, int]] = {}
         self.wages: dict[StaffId, int] = {}
         self.week: dict[tuple[LocationId, str, Ingredient], _InvoiceLine] = defaultdict(
@@ -433,6 +453,7 @@ class Recorder:
             self.invoice_id = (
                 conn.execute("SELECT MAX(invoice_id) FROM invoices").fetchone()[0] or 0
             )
+            self.review_id = conn.execute("SELECT MAX(review_id) FROM reviews").fetchone()[0] or 0
             self.menu = _snapshot(world)
             self.wages = {
                 s.id: s.wage_cents_per_hour
@@ -526,8 +547,14 @@ class Recorder:
         loc = self.world.business.locations[shop.location_id]
         self.insert_reviews(day, shop.location_id, draw_reviews(self.rng, loc, shop))
 
-    def insert_reviews(self, day: int, loc: LocationId, reviews: list[tuple[int, str]]) -> None:
-        self._insert("reviews", [(None, _iso(day), loc, rating, text) for rating, text in reviews])
+    def insert_reviews(self, day: int, loc: LocationId, reviews: list[Review]) -> None:
+        rows = []
+        for r in reviews:
+            self.review_id += 1
+            rows.append((self.review_id, _iso(day), loc, r.rating, r.text))
+            facts = r.facts | {"date": _iso(day), "location": loc}
+            self.texts.append(TextItem(f"review:{self.review_id}", "review", facts, r.text))
+        self._insert("reviews", rows)
 
     def append_ledger(self, entries: list[LedgerEntry]) -> None:
         self._insert("ledger", [_ledger_row(e) for e in entries])
@@ -537,6 +564,9 @@ class Recorder:
 
     def refresh_summaries(self) -> None:
         self._flush_invoices(self.world.day - 1)
+        self.refresh_tables()
+
+    def refresh_tables(self) -> None:
         for table, rows in (
             ("monthly_pnl", _pnl_rows(self.world)),
             ("staff", _staff_rows(self.world)),
@@ -587,7 +617,23 @@ class Recorder:
         self._insert("monthly_pnl", _pnl_rows(world))
         self._insert("staff", _staff_rows(world))
         docs = _documents(world, founding_facts, self.raise_days, self.rng)
-        self._insert("documents", [(None, _iso(d), k, t, b) for d, k, t, b in docs])
+        self._insert("documents", [(n, _iso(d.day), d.kind, d.title, d.body) for n, d in docs])
+        self.texts += [
+            TextItem(f"document:{n}", d.template, d.facts | {"date": _iso(d.day)}, d.body)
+            for n, d in docs
+        ]
+
+    def apply_texts(self, texts: dict[str, str]) -> None:
+        tables = {
+            "review": ("reviews", "text", "review_id"),
+            "document": ("documents", "body", "doc_id"),
+        }
+        for key, text in sorted(texts.items()):
+            kind, _, row = key.partition(":")
+            table, column, id_column = tables[kind]
+            self.conn.execute(
+                f"UPDATE {table} SET {column} = ? WHERE {id_column} = ?", (text, int(row))
+            )
 
 
 def _ledger_row(e: LedgerEntry) -> tuple:
@@ -666,19 +712,28 @@ def _first(world: World, entity: str, entity_id: str, event: str) -> int | None:
     )
 
 
+class Document(NamedTuple):
+    day: int
+    kind: str
+    title: str
+    body: str
+    template: str
+    facts: dict
+
+
 def _documents(
     world: World, facts: Facts, raise_days: list[int], rng: random.Random
-) -> list[tuple[int, str, str, str]]:
+) -> list[tuple[int, Document]]:
     last = world.day - 1
     b = world.business
     home = b.locations[HOME_LOCATION]
     rival = next(name for i, name, *_ in COMPETITORS if i == RIVAL_ID)
     area = world.town[home.neighborhood_id].name
-    docs: list[tuple[int, str, str, str]] = []
+    docs: list[Document] = []
 
     def doc(day: int, kind: str, title: str, template: str, **f: object) -> None:
         if 0 <= day <= last or kind != "news":
-            docs.append((day, kind, title, write(template, rng, **f)))
+            docs.append(Document(day, kind, title, write(template, rng, **f), template, f))
 
     doc(
         -30,
@@ -760,13 +815,17 @@ def _documents(
     if spike:
         doc(spike["start_day"] + 3, "news", "Flour prices jump", "news_flour")
 
-    for day, text in _notebook(world, facts, raise_days, opened, rumor, hybrid, rng):
-        docs.append((day, "notebook", f"Notebook, {_iso(day)}", text))
-    return sorted(docs, key=lambda d: (d[0], d[1], d[2]))
+    for day, template, f, text in _notebook(world, facts, raise_days, opened, rumor, hybrid, rng):
+        docs.append(Document(day, "notebook", f"Notebook, {_iso(day)}", text, template, f))
+    ordered = sorted(docs, key=lambda d: (d.day, d.kind, d.title))
+    return list(enumerate(ordered, start=1))
 
 
 def _phase(day: int) -> str:
     return f"y{min(3, day // 365 + 1)}"
+
+
+MOODS = {"y1": "hopeful and energetic", "y2": "steady", "y3": "tired and terse"}
 
 
 def _notebook(
@@ -777,7 +836,7 @@ def _notebook(
     rumor: int,
     hybrid: int,
     rng: random.Random,
-) -> list[tuple[int, str]]:
+) -> list[tuple[int, str, dict, str]]:
     last = world.day - 1
     b = world.business
     rival = next(name for i, name, *_ in COMPETITORS if i == RIVAL_ID)
@@ -826,8 +885,11 @@ def _notebook(
         notes.append((day, f"note_belief_{hid.value}", {"name": details.get("name", "")}))
     notes.append((rng.randint(1000, 1060), "note_belief_weather", {}))
     notes += _reflections(world, rng)
-    out = [(d, write(k, rng, **f)) for d, k, f in sorted(notes, key=lambda n: (n[0], n[1]))]
-    return [(d, text) for d, text in out if 0 <= d <= last]
+    out = [
+        (d, k, f | {"mood": MOODS[_phase(d)]}, write(k, rng, **f))
+        for d, k, f in sorted(notes, key=lambda n: (n[0], n[1]))
+    ]
+    return [note for note in out if 0 <= note[0] <= last]
 
 
 REFLECTION_MONTHS = (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 27, 30, 33, 35)
