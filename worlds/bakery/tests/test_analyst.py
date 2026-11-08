@@ -71,6 +71,23 @@ def test_the_analyst_answers_after_querying(seed1_history) -> None:
     assert seen[0]["tool"] == "query_records"
 
 
+def test_the_analyst_sees_the_documents_index_and_can_calculate(seed1_history) -> None:
+    model = FakeChatModel(
+        [
+            Reply(None, (tool_call("calculate", expression="pct_change(200, 230)"),)),
+            Reply("Up 15%."),
+        ]
+    )
+    Analyst(seed1_history.records, Caller(CallBudget(5)), model).ask("Change?")
+    system = model.seen[0][0][0]["content"]
+    index = system.split("Documents (id, date, kind, title):\n")[1].split("\n\n")[0]
+    assert "loan: Equipment loan agreement" in index
+    notebook = [line for line in index.splitlines() if "notebook" in line]
+    assert len(notebook) == 1 and "entries from 2023-01-02 to" in notebook[0]
+    assert "same weeks last year" in system
+    assert model.seen[1][0][-1]["content"] == "15"
+
+
 def test_the_analyst_must_answer_at_its_call_cap(seed1_history) -> None:
     def keep_querying(messages, tools):
         if not tools:

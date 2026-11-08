@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from bakery_world.basics import START_DATE
+from bakery_world.calc import calculator_tool
 from bakery_world.llm import (
     Caller,
     ChatModel,
@@ -22,6 +23,7 @@ MAX_CELL_CHARS = 300
 MAX_CALLS = 10
 MAX_ANSWER_WORDS = 300
 QUERY_SECONDS = 10.0
+INDEX_GROUP_OVER = 12
 NO_ANSWER = "The analyst gave no answer."
 READ_ONLY_ACTIONS = frozenset(
     {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION, sqlite3.SQLITE_RECURSIVE}
@@ -90,6 +92,29 @@ def read_document(path: Path, doc_id: int) -> str:
     return f"{title}\n{date} ({kind})\n\n{body}"
 
 
+def documents_index(path: Path) -> str:
+    with closing(connect(path)) as conn:
+        rows = conn.execute(
+            "SELECT doc_id, date, kind, title FROM documents ORDER BY doc_id"
+        ).fetchall()
+    by_kind: dict[str, list[tuple]] = {}
+    for row in rows:
+        by_kind.setdefault(row[2], []).append(row)
+    lines = []
+    for kind, docs in sorted(by_kind.items()):
+        if len(docs) > INDEX_GROUP_OVER:
+            dates = sorted(d[1] for d in docs)
+            lines.append(
+                f"- {kind}: {len(docs)} entries from {dates[0]} to {dates[-1]} "
+                f"(list_documents with kind {kind} lists them)"
+            )
+        else:
+            lines += [
+                f"- {doc_id} {date} {kind}: {_cell(title)}" for doc_id, date, kind, title in docs
+            ]
+    return "\n".join(lines) or "(no documents)"
+
+
 def schema(path: Path) -> str:
     with closing(connect(path)) as conn:
         tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
@@ -104,16 +129,22 @@ def schema(path: Path) -> str:
     return "\n".join(lines)
 
 
-def system_prompt(schema_text: str) -> str:
+def system_prompt(schema_text: str, index_text: str) -> str:
     return (
         f"You are the analyst for {SHOP_NAME}. The general manager asks you questions about the "
         "business and you answer from its records. You can read the records but cannot change "
         "anything in the business.\n\n"
         f"Tools: query_records runs one read-only SELECT or WITH query on the SQLite records and "
         f"returns at most {MAX_ROWS} rows; list_documents lists the letters, contracts, news "
-        "and notebook entries; read_document returns one in full. Columns ending in _cents are "
-        f"US cents. The day column counts days from {START_DATE.isoformat()} (day 0).\n\n"
+        "and notebook entries; read_document returns one in full; calculate does arithmetic "
+        "and statistics exactly. Columns ending in _cents are US cents. The day column counts "
+        f"days from {START_DATE.isoformat()} (day 0).\n\n"
         f"Schema:\n{schema_text}\n\n"
+        f"Documents (id, date, kind, title):\n{index_text}\n\n"
+        "Method: check the row counts and date ranges behind every number, so a partial week or "
+        "month does not mislead. Compare like with like: the same weekdays, the same weeks last "
+        "year, whole months against whole months. Prefer totals and rates computed in SQL over "
+        "reading rows by eye. Say how sure you are and what the records cannot tell.\n\n"
         f"You have at most {MAX_CALLS} model calls for this question. Answer in at most "
         f"{MAX_ANSWER_WORDS} words: give the key numbers, then the SQL you ran."
     )
@@ -155,6 +186,7 @@ class Analyst:
                 raise ToolError(f"error: {e}") from None
 
         tools = (
+            calculator_tool(),
             Tool(
                 "query_records",
                 f"Run one read-only SELECT or WITH query; at most {MAX_ROWS} rows come back.",
@@ -181,11 +213,11 @@ class Analyst:
         tools = self.tools()
         schemas = [t.schema() for t in tools.values()]
         try:
-            schema_text = schema(self.records)
+            schema_text, index_text = schema(self.records), documents_index(self.records)
         except sqlite3.Error as e:
             return f"The analyst could not open the records: {e}"
         messages = [
-            {"role": "system", "content": system_prompt(schema_text)},
+            {"role": "system", "content": system_prompt(schema_text, index_text)},
             {"role": "user", "content": question},
         ]
         for n in range(1, MAX_CALLS + 1):
