@@ -44,7 +44,7 @@ from bakery_world.rota import PRE_OPEN_BAKE_HOURS, assign_rota, standard_shift, 
 from bakery_world.town import HIRE_NAMES, proximity, spawn_customer
 
 MONTHLY_OVERHEAD_CENTS: dict[Account, int] = {
-    Account.UTILITIES: 120_000,
+    Account.UTILITIES: 60_000,
     Account.INSURANCE: 35_000,
     Account.SOFTWARE_AND_TERMINAL: 18_000,
     Account.REPAIRS_RESERVE: 25_000,
@@ -411,16 +411,18 @@ def _bake(
         plan = math.floor(planned / load) if load > 1 else planned
         by_oven = int(oven_left // recipe.oven_minutes) * recipe.batch_size
         by_labor = int(labor_left // recipe.labor_minutes)
-        units = min(plan, by_oven, by_labor)
-        if units <= 0:
-            continue
+        units = max(0, min(plan, by_oven, by_labor))
         oven_left -= math.ceil(units / recipe.batch_size) * recipe.oven_minutes
         labor_left -= units * recipe.labor_minutes
         fresh[item] = units
-        items.setdefault(item, ItemDay()).baked = units
+        stat = items.setdefault(item, ItemDay())
+        stat.baked = units
+        if units == 0:
+            stat.first_stockout_hour = loc.open_hour
         _use(grams, item, units)
     utilisation = 0.0 if oven_total == 0 else 1 - oven_left / oven_total
-    strain = max(0.0, min(load, MAX_BAKE_LOAD) - STRAIN_FREE_LOAD) if fresh else 0.0
+    baked = any(fresh.values())
+    strain = max(0.0, min(load, MAX_BAKE_LOAD) - STRAIN_FREE_LOAD) if baked else 0.0
     return fresh, utilisation, strain
 
 
@@ -440,7 +442,7 @@ def _build_offers(
         typical, price = recipe.typical_price_cents, entry.price_on(day)
         if recipe.made_to_order:
             offers.append(_Offer(item, recipe.category, price, typical, False, 1.0))
-        elif fresh.get(item, 0) > 0:
+        elif item in fresh:
             offers.append(_Offer(item, recipe.category, price, typical, False, rushed))
         if old.get(item):
             price = round(price * DAY_OLD_DISCOUNT)

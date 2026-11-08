@@ -11,6 +11,7 @@ from bakery_world.history import generate_history
 from bakery_world.machines import CustomerState, LocationState, MenuState, StaffState
 from bakery_world.managed import ManagedWorld
 from bakery_world.management import manage
+from bakery_world.model import ShiftTime
 from bakery_world.observe import candidates, price_list, sales_by_hour, sites_scouted
 from bakery_world.observe import staff as staff_list
 from bakery_world.rota import SHIFT_HOURS, standard_shift
@@ -45,14 +46,17 @@ def _round25(cents: float) -> int:
 
 
 def fit_rotas(mw: ManagedWorld, loc: LocationId) -> None:
-    shop, late = mw.world.business.locations[loc], False
-    for s in staff_list(mw):
-        if s["location"] != loc or s["owner"]:
-            continue
-        role = Role(s["role"])
-        shift = str(standard_shift(role, shop, late))
-        late ^= role is Role.COUNTER
-        shifts = ["off" if day == "off" else shift for day in s["rota"]]
+    """Standard shifts, with counter starts spread evenly from opening to the last full shift."""
+    shop = mw.world.business.locations[loc]
+    here = [s for s in staff_list(mw) if s["location"] == loc and not s["owner"]]
+    counters = [s["staff"] for s in here if s["role"] == Role.COUNTER.value]
+    for s in here:
+        shift = standard_shift(Role(s["role"]), shop)
+        if s["staff"] in counters and len(counters) > 1:
+            room = shop.close_hour - shop.open_hour - shift.hours
+            start = shop.open_hour + round(counters.index(s["staff"]) * room / (len(counters) - 1))
+            shift = ShiftTime(start, start + shift.hours)
+        shifts = ["off" if day == "off" else str(shift) for day in s["rota"]]
         if shifts != s["rota"]:
             _try(mw, "set_rota", staff=s["staff"], shifts=shifts)
 
@@ -105,6 +109,7 @@ class Heuristic:
                 self.reprice(mw, loc)
             if week and week % HOURS_EVERY_WEEKS == 0:
                 self.fit_hours(mw, loc)
+            fit_rotas(mw, loc)
         self.staff_up(mw)
 
     def interrupt(self, mw: ManagedWorld, event: Curveball) -> None:
@@ -162,12 +167,12 @@ class Heuristic:
         )
 
     def reprice(self, mw: ManagedWorld, loc: LocationId) -> None:
+        """Raise prices toward the food-cost target; a cut would only add demand to serve."""
         for item, e in mw.world.business.locations[loc].menu.items():
             if e.state is not MenuState.ON_MENU:
                 continue
             target = self.unit_cost(mw, item) / FOOD_COST_TARGET
-            low, high = e.price_cents * (1 - MAX_PRICE_MOVE), e.price_cents * (1 + MAX_PRICE_MOVE)
-            price = _round25(min(high, max(low, target)))
+            price = _round25(min(e.price_cents * (1 + MAX_PRICE_MOVE), max(e.price_cents, target)))
             if price != e.price_cents:
                 _try(mw, "set_price", location=loc, item=item, price_cents=price)
 
@@ -186,7 +191,6 @@ class Heuristic:
             open_hour += 1
         if (open_hour, close_hour) != (shop.open_hour, shop.close_hour):
             _try(mw, "set_hours", location=loc, open_hour=open_hour, close_hour=close_hour)
-            fit_rotas(mw, loc)
 
     def going_wage(self, mw: ManagedWorld, role: Role) -> int:
         wages = sorted(
@@ -278,6 +282,7 @@ class Oracle(Heuristic):
             if week % MENU_REFRESH_WEEKS == 0:
                 self.refresh_menu(mw, loc)
             self.top_up_awareness(mw, loc)
+            fit_rotas(mw, loc)
         self.pay_market(mw)
         self.staff_up(mw)
 
@@ -322,7 +327,6 @@ class Oracle(Heuristic):
             open_hour=max(6, busy[0]),
             close_hour=min(20, busy[-1] + 1),
         )
-        fit_rotas(mw, loc)
 
     def price_factor(self, mw: ManagedWorld, loc: LocationId) -> float:
         world = mw.world

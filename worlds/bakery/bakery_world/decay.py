@@ -103,7 +103,7 @@ FORCES: dict[ForceId, ForceSpec] = {
 }
 
 
-SEVERITY = (0.32, 0.35)
+SEVERITY = (0.34, 0.37)
 MIX = (0.25, 1.0)
 
 
