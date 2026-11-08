@@ -40,7 +40,16 @@ PYTHONPATH=worlds/bakery uv run --frozen python -m bakery_world calibrate --seed
 PYTHONPATH=worlds/bakery uv run --frozen python -m bakery_world simulate --seed 1 --days 30
 ```
 
-`history` writes `records.sqlite` (the observable records), `hidden.json` (seed, params, forces and habits, which never appear in the sqlite file) and `handoff.pickle` (the world on day 1,095, which `bakery_world.history.resume` loads and continues exactly). It takes about 8 s per seed. `calibrate` prints monthly revenue and operating profit for the home shop and exits 1 if any seed misses the envelope; `--jobs` sets worker processes. Verify with `uv run --frozen pytest worlds/bakery`, which takes about 20 s.
+`history` writes `records.sqlite` (the observable records), `hidden.json` (seed, params, forces and habits, which never appear in the sqlite file) and `handoff.pickle` (the world on day 1,095, which `bakery_world.history.resume` loads and continues exactly). It takes about 7 s per seed. `calibrate` prints monthly revenue and operating profit for the home shop and exits 1 if any seed misses the envelope; `--jobs` sets worker processes.
+
+The management year (days 1,095 to 1,459) runs a policy week by week from a handoff:
+
+```bash
+PYTHONPATH=worlds/bakery uv run --frozen python -m bakery_world baselines --seeds 1-5
+PYTHONPATH=worlds/bakery uv run --frozen python -m bakery_world baselines --seeds 1 --weeks 8 --history-dir runs/bakery --out runs/bakery/baselines
+```
+
+`baselines` generates each seed's history (into a temporary folder unless `--history-dir` is given; an existing `seed-N/handoff.pickle` there is reused, so delete it after changing the engine), runs the freeze, founder, heuristic and oracle policies, and prints net worth change, score against the founder and diagnostics per seed. `--out` keeps each run's `run.jsonl` and a copy of `records.sqlite` with the management days appended. A 52-week run takes about 2.5 s; five seeds take about 35 s with the default jobs. In code, `bakery_world.management.manage(seed_dir_or_handoff, policy, weeks=52, out_dir=None)` returns a `RunResult`; policies call `bakery_world.actions.perform(world, name, **args)`, whose schemas come from `describe_actions()`, and read `bakery_world.observe`. Curveballs live in `curveballs.py` and the score in `score.py`. Verify with `uv run --frozen pytest worlds/bakery`, which takes about 25 s.
 
 ## Environment commands
 
