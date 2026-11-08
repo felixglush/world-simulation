@@ -97,21 +97,20 @@ def documents_index(path: Path) -> str:
         rows = conn.execute(
             "SELECT doc_id, date, kind, title FROM documents ORDER BY doc_id"
         ).fetchall()
-    by_kind: dict[str, list[tuple]] = {}
-    for row in rows:
-        by_kind.setdefault(row[2], []).append(row)
-    lines = []
-    for kind, docs in sorted(by_kind.items()):
-        if len(docs) > INDEX_GROUP_OVER:
-            dates = sorted(d[1] for d in docs)
-            lines.append(
-                f"- {kind}: {len(docs)} entries from {dates[0]} to {dates[-1]} "
-                f"(list_documents with kind {kind} lists them)"
-            )
-        else:
-            lines += [
-                f"- {doc_id} {date} {kind}: {_cell(title)}" for doc_id, date, kind, title in docs
-            ]
+    by_kind: dict[str, list[str]] = {}
+    for _, date, kind, _ in rows:
+        by_kind.setdefault(kind, []).append(date)
+    grouped = {kind for kind, dates in by_kind.items() if len(dates) > INDEX_GROUP_OVER}
+    lines = [
+        f"- {doc_id} {date} {kind}: {_cell(title)}"
+        for doc_id, date, kind, title in rows
+        if kind not in grouped
+    ]
+    lines += [
+        f"- {kind}: {len(by_kind[kind])} entries from {min(by_kind[kind])} to "
+        f"{max(by_kind[kind])} (list_documents with kind {kind} lists them)"
+        for kind in sorted(grouped)
+    ]
     return "\n".join(lines) or "(no documents)"
 
 

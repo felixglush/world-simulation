@@ -152,15 +152,15 @@ def show_experiments(experiments: tuple[Experiment, ...], day: int) -> str:
     lines = [
         f"- {e.name} [{e.state(day)}]: started "
         f"{date_of(e.start_day)}, {e.weeks_run(day)} of {e.review_after_weeks} weeks run, "
-        f"review on {date_of(e.due_day)}. Change: {e.change} Hypothesis: {e.hypothesis} "
-        f"Metric: {e.metric}"
+        f"review on {date_of(e.due_day)}.\n  change: {e.change}\n  hypothesis: "
+        f"{e.hypothesis}\n  metric: {e.metric}"
         for e in open_
     ] or ["(none open)"]
     if done:
         lines.append("Recently concluded:")
         lines += [
             f"- {e.name} ({date_of(e.start_day)} to {date_of(e.concluded_day)}): "
-            f"{e.result} Decision: {e.decision}"
+            f"result: {e.result}; decision: {e.decision}"
             for e in done
         ]
     return "\n".join(lines)
