@@ -103,6 +103,8 @@ FATIGUE_CAP = 0.8
 # regulars remember a shop's price board: a dearer shop than usual gets fewer visits
 PRICE_VISIT_SENSITIVITY = 1.0
 PRICE_MEMORY = 1 / 28
+PRICE_UNNOTICED = 0.05
+SHOP_LOYALTY = 3
 
 SEGMENT_WEEKDAY: dict[Segment, tuple[float, ...]] = {
     Segment.COMMUTER: (1.25, 1.25, 1.25, 1.25, 1.2, 0.5, 0.3),
@@ -451,12 +453,23 @@ def _visitors(
     awareness_f = 0.4 + 1.2 * loc.awareness
     reputation_f = 0.7 + 0.6 * loc.reputation
     cum = {nb.id: _cumulative(nb.hourly_traffic) for nb in nbs.values()}
-    prox = {nb.id: proximity(nb, home) for nb in nbs.values()}
+    shops = [
+        nbs[other.neighborhood_id]
+        for other in world.business.locations.values()
+        if other.state is LocationState.TRADING
+    ]
+    # customers mostly use their nearest shop, so a second shop takes few of the first's
+    prox = {
+        nb.id: proximity(nb, home)
+        * proximity(nb, home) ** SHOP_LOYALTY
+        / sum(proximity(nb, shop) ** SHOP_LOYALTY for shop in shops)
+        for nb in nbs.values()
+    }
     scale = awareness_f * reputation_f / 7
+    gap = loc.price_index - 1
+    noticed = math.copysign(max(0.0, abs(gap) - PRICE_UNNOTICED), gap)
     price_f = {
-        (nb.id, seg): math.exp(
-            -PRICE_VISIT_SENSITIVITY * e / nb.income_index * (loc.price_index - 1)
-        )
+        (nb.id, seg): math.exp(-PRICE_VISIT_SENSITIVITY * e / nb.income_index * noticed)
         for nb in nbs.values()
         for seg, e in world.params.elasticity.items()
     }

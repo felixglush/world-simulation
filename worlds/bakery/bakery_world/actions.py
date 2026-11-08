@@ -443,7 +443,7 @@ def scout_site(mw: ManagedWorld, neighborhood: str) -> ActionResult:
         nb.id,
         size,
         Cents(round(size * nb.rent_cents_per_m2_month * rng.uniform(0.9, 1.1))),
-        Cents(round(size * rng.uniform(50_000, 70_000), -3)),
+        Cents(int(round(size * rng.uniform(50_000, 70_000), -3))),
         rng.randint(28, 42),
     )
     mw.sites[site.id] = site
