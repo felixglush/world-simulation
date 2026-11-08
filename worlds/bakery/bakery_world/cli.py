@@ -3,9 +3,12 @@ import json
 import os
 import random
 import sys
+import tempfile
 from collections.abc import Callable, Sequence
+from multiprocessing import Pool
 from pathlib import Path
 
+from bakery_world.baselines import POLICIES, run_seed, table
 from bakery_world.calibrate import calibrate
 from bakery_world.calibrate import report as calibration_report
 from bakery_world.engine import DayReport, run_days
@@ -63,6 +66,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     cal = sub.add_parser("calibrate", help="check each seed's history against the envelope")
     cal.add_argument("--seeds", type=_seed_range, required=True, help="e.g. 1-8")
     cal.add_argument("--jobs", type=_bounded_int(1, 64), default=min(8, os.cpu_count() or 1))
+    base = sub.add_parser("baselines", help="score the four baseline policies per seed")
+    base.add_argument("--seeds", type=_seed_range, required=True, help="e.g. 1-5")
+    base.add_argument("--weeks", type=_bounded_int(1, 52), default=52)
+    base.add_argument("--jobs", type=_bounded_int(1, 64), default=min(8, os.cpu_count() or 1))
+    base.add_argument("--history-dir", type=Path, help="reuse or keep histories here")
+    base.add_argument("--out", type=Path, help="write each run's log and records here")
     args = parser.parse_args(argv)
     return COMMANDS[args.command](args)
 
@@ -93,10 +102,28 @@ def _calibrate(args: argparse.Namespace) -> int:
     return 0 if passed == len(results) else 1
 
 
+def _baselines(args: argparse.Namespace) -> int:
+    with tempfile.TemporaryDirectory() as scratch:
+        history = args.history_dir or Path(scratch)
+        jobs = [(seed, args.weeks, history, args.out) for seed in args.seeds]
+        if args.jobs <= 1:
+            per_seed = [run_seed(*job) for job in jobs]
+        else:
+            with Pool(min(args.jobs, len(jobs))) as pool:
+                per_seed = pool.starmap(run_seed, jobs)
+    rows = [row for rows in per_seed for row in rows]
+    print(table(rows))
+    for name in POLICIES:
+        mine = [r.score for r in rows if r.policy == name]
+        print(f"mean score {name}: ${sum(mine) / len(mine) / 100:,.0f}")
+    return 0
+
+
 COMMANDS: dict[str, Callable[[argparse.Namespace], int]] = {
     "simulate": _simulate,
     "history": _history,
     "calibrate": _calibrate,
+    "baselines": _baselines,
 }
 
 
