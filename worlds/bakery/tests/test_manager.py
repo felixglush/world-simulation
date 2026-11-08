@@ -5,9 +5,9 @@ import pytest
 from bakery_world.llm import CallBudget, Caller, FakeChatModel, Reply, ToolError, tool_call
 from bakery_world.management import load, manage
 from bakery_world.manager import (
-    CAPS,
     OBJECTIVE,
     SYSTEM,
+    TURNS,
     Budget,
     LLMManager,
     Turn,
@@ -15,6 +15,7 @@ from bakery_world.manager import (
     TurnKind,
     turn_messages,
 )
+from bakery_world.memory import Handover
 from bakery_world.plan import ActionRecord, Experiment, PlanItem, PlanState
 from bakery_world.town import HOME_LOCATION
 
@@ -111,6 +112,9 @@ def test_the_objective_system_and_turn_templates_give_nothing_away(kind: TurnKin
         plan=(PlanItem("Look at bake plans", PlanState.DOING),),
         experiments=(Experiment("latte", "h", "c", "m", 2, 1095),),
         actions=(ActionRecord(1095, "set_price", {"item": "latte"}, "price set", False),),
+        saved_answers=1,
+        recent_questions=("How have latte sales moved?",),
+        handovers=(Handover("2026-01-05", 0, "weekly", "Raised the latte price."),),
     )
     text = (OBJECTIVE + SYSTEM + json.dumps(turn_messages(ctx))).lower()
     assert [word for word in FORBIDDEN if word in text] == []
@@ -226,10 +230,12 @@ def test_turns_stop_at_their_call_caps(seed1_history, kind: TurnKind) -> None:
         policy.weekly(mw, 0)
     elif kind is TurnKind.WEEKLY:
         policy.weekly(mw, 0)
+    elif kind is TurnKind.REVIEW:
+        policy.weekly(mw, 4)
     else:
         policy.interrupt(mw, mw.curveballs[0])
     ends = [t for t in kinds(mw.log.lines, "turn") if t["phase"] == "end"]
-    assert ends[0]["turn"] == kind and ends[0]["calls"] == CAPS[kind].calls
+    assert ends[0]["turn"] == kind and ends[0]["calls"] == TURNS[kind].calls
     assert ends[0]["reason"].startswith("call cap")
 
 
@@ -239,7 +245,7 @@ def test_at_most_four_analyst_questions_per_week(seed1_history) -> None:
     mw = load(seed1_history.handoff)
     policy = manager(script, records=seed1_history.records, onboarded=True)
     policy.weekly(mw, 0)
-    assert len(kinds(mw.log.lines, "analyst")) == CAPS[TurnKind.WEEKLY].questions == 4
+    assert len(kinds(mw.log.lines, "analyst")) == TURNS[TurnKind.WEEKLY].questions == 4
     results = [t["result"] for t in kinds(mw.log.lines, "tool_call") if t["role"] == "manager"]
     assert [r.startswith("refused") for r in results[:6]] == [False] * 4 + [True] * 2
 
@@ -322,3 +328,62 @@ def test_end_week_needs_a_handover_and_the_next_turn_shows_it(seed1_history) -> 
     assert "(weekly turn, week 1):\n(none written)" in week2
     ends = [t["handover"] for t in kinds(result.log, "turn") if t["phase"] == "end"]
     assert ends[1:] == ["(none written)", "Nothing new; keep the plan."]
+
+
+def reviewing_agent(messages, tools) -> Reply:
+    head = messages[1]["content"].split("\n\n")[0]
+    n = sum(m["role"] == "assistant" for m in messages)
+    if "monthly review" in head:
+        if n == 0:
+            return step("notes_write", text="Review: the latte rise held; test croissant next.")
+        return step("end_review", summary="Latte rise worked; croissant bake is next.")
+    return end(f"Handover written {head[9:40]}.")
+
+
+def test_a_monthly_review_comes_before_week_5_and_rewrites_the_notes(seed1_history) -> None:
+    policy = manager(reviewing_agent, records=seed1_history.records)
+    result = manage(seed1_history.handoff, policy, weeks=6)
+    turns = kinds(result.log, "turn")
+    starts = [(t["turn"], t["week"]) for t in turns if t["phase"] == "start"]
+    starts = [s for s in starts if s[0] != "interrupt"]
+    assert starts == [("onboarding", 0)] + [("weekly", w) for w in range(4)] + [
+        ("review", 4),
+        ("weekly", 4),
+        ("weekly", 5),
+    ]
+    review = next(i for i, t in enumerate(turns) if t["turn"] == "review")
+    earlier = [t["handover"] for t in turns[:review] if t["phase"] == "end"][-4:]
+    seen = policy.manager_model.seen
+    (messages, tools), *_ = [(m, t) for m, t in seen if "monthly review" in m[1]["content"]]
+    text = messages[1]["content"]
+    assert text.startswith("Today is 2026-01-29. This is your monthly review, before week 5")
+    assert all(h in text for h in earlier) and len(set(earlier)) == 4
+    assert text.index(earlier[0]) < text.index(earlier[-1]) < text.index("Budget: 15 model")
+    names = {t["function"]["name"] for t in tools}
+    assert {"recall", "ask_analyst", "calculate", "notes_write", "plan_update"} <= names
+    assert {"experiment_start", "experiment_conclude", "end_review", "view_dashboard"} <= names
+    assert not names & {"set_price", "set_bake_plan", "end_week", "hire"}
+    week5 = next(m[1]["content"] for m, _ in seen if "start of week 5 of" in m[1]["content"])
+    assert "(review turn, week 5):\nLatte rise worked; croissant bake is next." in week5
+    assert "Your notes:\nReview: the latte rise held; test croissant next." in week5
+    lowered = (text + json.dumps(tools)).lower()
+    assert [word for word in FORBIDDEN if word in lowered] == []
+
+
+def test_the_review_lists_only_experiments_from_its_four_weeks() -> None:
+    old = Experiment("old", "h", "c", "m", 1, 1060, "r", "d", concluded_day=1090)
+    closed = Experiment("closed", "h", "c", "m", 1, 1095, "r", "d", concluded_day=1110)
+    running = Experiment("running", "h", "c", "m", 8, 1100)
+    ctx = TurnContext(
+        TurnKind.REVIEW,
+        "2026-01-29",
+        4,
+        52,
+        (),
+        (),
+        "",
+        day=1123,
+        experiments=(old, closed, running),
+    )
+    text = turn_messages(ctx)[1]["content"]
+    assert "- closed (" in text and "- running [running]" in text and "- old" not in text

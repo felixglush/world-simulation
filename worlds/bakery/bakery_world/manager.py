@@ -40,6 +40,7 @@ from bakery_world.plan import (
     Experiment,
     PlanItem,
     PlanState,
+    active_since,
     conclude_experiment,
     parse_plan,
     recent_actions,
@@ -54,6 +55,7 @@ NOTES_LIMIT = 8000
 QUESTION_LIMIT = 2000
 QUERY_LIMIT = 500
 DASHBOARD_WEEKS = 4
+REVIEW_EVERY = 4
 SALES_WEEKS = 13
 
 
@@ -61,18 +63,22 @@ class TurnKind(StrEnum):
     ONBOARDING = auto()
     WEEKLY = auto()
     INTERRUPT = auto()
+    REVIEW = auto()
 
 
 @dataclass(frozen=True)
-class Caps:
+class TurnSpec:
     calls: int
     questions: int
+    end: str = "end_week"
+    acts: bool = True
 
 
-CAPS = {
-    TurnKind.ONBOARDING: Caps(80, 20),
-    TurnKind.WEEKLY: Caps(25, 4),
-    TurnKind.INTERRUPT: Caps(10, 4),
+TURNS = {
+    TurnKind.ONBOARDING: TurnSpec(80, 20),
+    TurnKind.WEEKLY: TurnSpec(25, 4),
+    TurnKind.INTERRUPT: TurnSpec(10, 4),
+    TurnKind.REVIEW: TurnSpec(15, 2, end="end_review", acts=False),
 }
 
 OBJECTIVE = (
@@ -111,7 +117,10 @@ SYSTEM = (
     "doing arithmetic in your head.\n"
     "- Ask the analyst focused questions and follow up on its answers.\n"
     "- Use the turn's budget when there is something worth investigating; end the week early "
-    "only when nothing useful is left to do.\n\n"
+    "only when nothing useful is left to do.\n"
+    "- Every four weeks a review turn comes before the weekly turn. It offers no action tools: "
+    "look back at what worked and what did not, rewrite your notes and plan, and call "
+    "end_review with a summary.\n\n"
     "Call end_week with a handover when you are done; the week then runs."
 )
 
@@ -145,12 +154,13 @@ class TurnContext:
 
 
 def _limits(ctx: TurnContext) -> str:
-    b = ctx.budget or Budget(CAPS[ctx.kind].calls, CAPS[ctx.kind].questions, 0)
+    spec = TURNS[ctx.kind]
+    b = ctx.budget or Budget(spec.calls, spec.questions, 0)
     run = f", and {b.run_calls:,} model calls left in the whole run" if ctx.budget else ""
     return (
         f"Budget: {b.calls} model calls left this turn, {b.questions} analyst questions left "
         f"this turn{run}. Each analyst question uses up to {ANALYST_CALLS} of the run's calls. "
-        "When this turn's calls run out, the turn ends as if you had called end_week."
+        f"When this turn's calls run out, the turn ends as if you had called {spec.end}."
     )
 
 
@@ -166,6 +176,50 @@ def _saved(ctx: TurnContext) -> str:
 
 def _handover(h: Handover) -> str:
     return f"{h.date} ({h.turn} turn, week {h.week + 1}):\n{h.text}"
+
+
+def _dashboards(ctx: TurnContext) -> str:
+    shown = (
+        json.dumps(list(ctx.dashboards), indent=1)
+        if ctx.dashboards
+        else "none yet; dashboards cover only the weeks you have run, so ask the analyst"
+    )
+    return "Weekly dashboards, oldest first (each covers the 7 days before its date):\n" + shown
+
+
+def _work(ctx: TurnContext) -> list[str]:
+    parts = []
+    if ctx.handovers:
+        parts.append("Handover from your last turn, " + _handover(ctx.handovers[-1]))
+    parts += [_limits(ctx), _saved(ctx)]
+    if ctx.event:
+        parts.append("The event:\n" + json.dumps(ctx.event, indent=1))
+    if ctx.arrivals:
+        parts.append("Arrived today:\n" + json.dumps(list(ctx.arrivals), indent=1))
+    return parts + [
+        "Your plan:\n" + show_plan(ctx.plan),
+        "Your experiments:\n" + show_experiments(ctx.experiments, ctx.day),
+        "Your actions in the last four weeks, oldest first:\n" + show_actions(ctx.actions),
+        _dashboards(ctx),
+        "Open events:\n" + (json.dumps(list(ctx.events), indent=1) if ctx.events else "none"),
+        "Your notes:\n" + (ctx.notes or "(empty)"),
+    ]
+
+
+def _review(ctx: TurnContext) -> list[str]:
+    handovers = "\n\n".join(map(_handover, ctx.handovers)) or "(none)"
+    since = ctx.day - 7 * REVIEW_EVERY
+    return [
+        "Your handovers from your last turns, oldest first:\n" + handovers,
+        _limits(ctx),
+        _saved(ctx),
+        "Your experiments that ran or closed in the last four weeks:\n"
+        + show_experiments(active_since(ctx.experiments, since), ctx.day, concluded=None),
+        "Your actions in the last four weeks, oldest first:\n" + show_actions(ctx.actions),
+        _dashboards(ctx),
+        "Your plan:\n" + show_plan(ctx.plan),
+        "Your notes:\n" + (ctx.notes or "(empty)"),
+    ]
 
 
 def turn_messages(ctx: TurnContext) -> list[dict]:
@@ -186,28 +240,18 @@ def turn_messages(ctx: TurnContext) -> list[dict]:
             f"Today is {ctx.date}, during week {ctx.week + 1} of {ctx.weeks}. Something needs "
             "your attention now. Deal with it, then call end_week to let the week carry on."
         ),
+        TurnKind.REVIEW: (
+            f"Today is {ctx.date}. This is your monthly review, before week {ctx.week + 1} of "
+            f"{ctx.weeks}; the weekly turn follows it. No action tools are offered in this turn. "
+            "Look back over the last four weeks with your handovers, the dashboards, your "
+            "experiments and your actions below: what worked, what did not, and why? Check "
+            "what you are unsure of with recall, calculate or the analyst. Then rewrite your "
+            "notes with notes_write and your plan with plan_update so the coming weeks build on "
+            "what you learned, conclude or start experiments as needed, and call end_review "
+            "with a summary of what you concluded."
+        ),
     }[ctx.kind]
-    parts = [head]
-    if ctx.handovers:
-        parts.append("Handover from your last turn, " + _handover(ctx.handovers[-1]))
-    parts += [_limits(ctx), _saved(ctx)]
-    if ctx.event:
-        parts.append("The event:\n" + json.dumps(ctx.event, indent=1))
-    if ctx.arrivals:
-        parts.append("Arrived today:\n" + json.dumps(list(ctx.arrivals), indent=1))
-    dashboards = (
-        json.dumps(list(ctx.dashboards), indent=1)
-        if ctx.dashboards
-        else "none yet; dashboards cover only the weeks you have run, so ask the analyst"
-    )
-    parts += [
-        "Your plan:\n" + show_plan(ctx.plan),
-        "Your experiments:\n" + show_experiments(ctx.experiments, ctx.day),
-        "Your actions in the last four weeks, oldest first:\n" + show_actions(ctx.actions),
-        "Weekly dashboards, oldest first (each covers the 7 days before its date):\n" + dashboards,
-        "Open events:\n" + (json.dumps(list(ctx.events), indent=1) if ctx.events else "none"),
-        "Your notes:\n" + (ctx.notes or "(empty)"),
-    ]
+    parts = [head] + (_work if TURNS[ctx.kind].acts else _review)(ctx)
     return [
         {"role": "system", "content": f"{OBJECTIVE}\n\n{SYSTEM}"},
         {"role": "user", "content": "\n\n".join(parts)},
@@ -342,6 +386,8 @@ class LLMManager:
         if not self.onboarded:
             self.onboarded = True
             self._turn(mw, TurnKind.ONBOARDING)
+        if week and week % REVIEW_EVERY == 0:
+            self._turn(mw, TurnKind.REVIEW)
         self._turn(mw, TurnKind.WEEKLY)
 
     def interrupt(self, mw: ManagedWorld, event: Curveball) -> None:
@@ -357,7 +403,7 @@ class LLMManager:
         self._turn(mw, TurnKind.INTERRUPT, facts, arrivals)
 
     def context(self, mw: ManagedWorld, kind: TurnKind, event=None, arrivals=()) -> TurnContext:
-        caps = CAPS[kind]
+        caps = TURNS[kind]
         return TurnContext(
             kind,
             mw.date(),
@@ -388,7 +434,7 @@ class LLMManager:
             if len(question) > QUESTION_LIMIT:
                 raise ToolError(f"error: keep questions under {QUESTION_LIMIT} characters")
             if turn.questions_left <= 0:
-                limit = CAPS[turn.kind].questions
+                limit = TURNS[turn.kind].questions
                 raise ToolError(f"refused: you have asked {limit} questions this turn")
             if records is None:
                 raise ToolError("error: no records are available")
@@ -449,17 +495,17 @@ class LLMManager:
             e = conclude_experiment(self.experiments, args, mw.day)
             return f"experiment {e.name!r} concluded after {e.weeks_run(mw.day)} weeks"
 
-        def end_week(args: dict) -> str:
-            text = args.get("handover")
-            if not isinstance(text, str) or not text.strip():
-                raise ToolError(
-                    "error: write a handover for your next turn: what you saw, what you "
-                    "changed and what to check next"
-                )
-            if len(text) > HANDOVER_LIMIT:
-                raise ToolError(f"error: keep the handover under {HANDOVER_LIMIT} characters")
-            turn.handover, turn.ended = text.strip(), True
-            return "turn over"
+        def closing(key: str, missing: str):
+            def close(args: dict) -> str:
+                text = args.get(key)
+                if not isinstance(text, str) or not text.strip():
+                    raise ToolError(f"error: write {missing}")
+                if len(text) > HANDOVER_LIMIT:
+                    raise ToolError(f"error: keep the {key} under {HANDOVER_LIMIT} characters")
+                turn.handover, turn.ended = text.strip(), True
+                return "turn over"
+
+            return close
 
         own = [
             Tool(
@@ -537,7 +583,9 @@ class LLMManager:
                 {"text": {"type": "string", "description": "the whole new notes"}},
                 notes_write,
             ),
-            Tool(
+        ]
+        ends = {
+            "end_week": Tool(
                 "end_week",
                 "Finish this turn and let the week run. The handover is shown at the top of "
                 "your next turn.",
@@ -548,10 +596,28 @@ class LLMManager:
                         "what you changed and what to check next",
                     }
                 },
-                end_week,
+                closing(
+                    "handover",
+                    "a handover for your next turn: what you saw, what you changed and what "
+                    "to check next",
+                ),
             ),
-        ]
-        return {t.name: t for t in view_tools(mw) + action_tools(mw) + own}
+            "end_review": Tool(
+                "end_review",
+                "Finish the review. The summary is shown at the top of your next turn.",
+                {
+                    "summary": {
+                        "type": "string",
+                        "description": f"at most {HANDOVER_LIMIT} characters: what worked, what "
+                        "did not and what you changed in your notes and plan",
+                    }
+                },
+                closing("summary", "a summary of what you concluded in this review"),
+            ),
+        }
+        spec = TURNS[turn.kind]
+        acts = action_tools(mw) if spec.acts else []
+        return {t.name: t for t in view_tools(mw) + acts + own + [ends[spec.end]]}
 
     def _sink(self, mw: ManagedWorld):
         def sink(record: CallRecord, reply: Reply) -> None:
@@ -565,7 +631,7 @@ class LLMManager:
         return sink
 
     def _turn(self, mw: ManagedWorld, kind: TurnKind, event=None, arrivals=()) -> None:
-        caps = CAPS[kind]
+        caps = TURNS[kind]
         turn = Turn(kind, caps.questions)
         tools = self.tools(mw, turn)
         schemas = [t.schema() for t in tools.values()]
@@ -574,14 +640,14 @@ class LLMManager:
         mw.note(
             LogKind.TURN, turn=kind, week=self.week, phase="start", prompt=messages[-1]["content"]
         )
-        calls, reason = 0, "call cap reached, end_week forced"
+        calls, reason = 0, f"call cap reached, {caps.end} forced"
         try:
             while calls < caps.calls:
                 reply = self.caller.call("manager", self.manager_model, messages, schemas)
                 calls += 1
                 messages.append(reply.message())
                 if not reply.tool_calls:
-                    reason = "no tool calls, end_week assumed"
+                    reason = f"no tool calls, {caps.end} assumed"
                     break
                 for call in reply.tool_calls:
                     result = dispatch(tools, call)
@@ -596,7 +662,7 @@ class LLMManager:
                     if turn.ended:
                         break
                 if turn.ended:
-                    reason = "end_week"
+                    reason = caps.end
                     break
         except BudgetExhausted as e:
             self.exhausted = True

@@ -146,9 +146,16 @@ def show_plan(plan: tuple[PlanItem, ...]) -> str:
     return "\n".join(f"{n}. [{i.state}] {i.text}" for n, i in enumerate(plan, 1))
 
 
-def show_experiments(experiments: tuple[Experiment, ...], day: int) -> str:
+def active_since(experiments: tuple[Experiment, ...], day: int) -> tuple[Experiment, ...]:
+    return tuple(e for e in experiments if e.concluded_day is None or e.concluded_day >= day)
+
+
+def show_experiments(
+    experiments: tuple[Experiment, ...], day: int, concluded: int | None = SHOWN_CONCLUDED
+) -> str:
     open_ = [e for e in experiments if e.concluded_day is None]
-    done = [e for e in experiments if e.concluded_day is not None][-SHOWN_CONCLUDED:]
+    done = [e for e in experiments if e.concluded_day is not None]
+    done = done[-concluded:] if concluded else done
     lines = [
         f"- {e.name} [{e.state(day)}]: started "
         f"{date_of(e.start_day)}, {e.weeks_run(day)} of {e.review_after_weeks} weeks run, "
