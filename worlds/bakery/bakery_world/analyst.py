@@ -140,13 +140,19 @@ class Analyst:
             kind = args.get("kind")
             if kind is not None and not isinstance(kind, str):
                 raise ToolError("error: kind must be text")
-            return list_documents(self.records, kind)
+            try:
+                return list_documents(self.records, kind)
+            except sqlite3.Error as e:
+                raise ToolError(f"error: {e}") from None
 
         def run_read(args: dict) -> str:
             doc_id = args.get("doc_id")
             if not isinstance(doc_id, int) or isinstance(doc_id, bool):
                 raise ToolError("error: doc_id must be a whole number")
-            return read_document(self.records, doc_id)
+            try:
+                return read_document(self.records, doc_id)
+            except sqlite3.Error as e:
+                raise ToolError(f"error: {e}") from None
 
         tools = (
             Tool(
@@ -174,8 +180,12 @@ class Analyst:
     def ask(self, question: str) -> str:
         tools = self.tools()
         schemas = [t.schema() for t in tools.values()]
+        try:
+            schema_text = schema(self.records)
+        except sqlite3.Error as e:
+            return f"The analyst could not open the records: {e}"
         messages = [
-            {"role": "system", "content": system_prompt(schema(self.records))},
+            {"role": "system", "content": system_prompt(schema_text)},
             {"role": "user", "content": question},
         ]
         for n in range(1, MAX_CALLS + 1):
