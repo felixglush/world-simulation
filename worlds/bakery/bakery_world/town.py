@@ -41,6 +41,7 @@ from bakery_world.model import (
     World,
 )
 from bakery_world.params import draw_hidden_params
+from bakery_world.rota import assign_rota
 
 HOME_NEIGHBORHOOD = NeighborhoodId("market")
 HOME_LOCATION = LocationId("shop1")
@@ -346,11 +347,14 @@ def build_world(seed: int, established: bool = False) -> World:
         awareness=start.awareness,
     )
     staff = {}
-    for seq, (role, name) in enumerate(start.staff):
-        member = _staff(rng, seq, role, name, HOME_LOCATION)
-        staff[member.id] = member
+    members = [
+        _staff(rng, seq, role, name, HOME_LOCATION) for seq, (role, name) in enumerate(start.staff)
+    ]
     if not established:
-        staff[OWNER_ID] = _owner(HOME_LOCATION)
+        members.insert(0, _owner(HOME_LOCATION))
+    for member in members:
+        assign_rota(staff, member, shop)
+        staff[member.id] = member
 
     weights = [n.population * (start.reach_floor + proximity(home, n)) for n in town.values()]
     sizes = list(town.values())

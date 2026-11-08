@@ -318,7 +318,11 @@ def view_tools(mw: ManagedWorld) -> list[Tool]:
         ),
         ("view_candidates", "Job applicants and their estimated skill.", observe.candidates),
         ("view_sites_scouted", "Sites you have scouted for a new shop.", observe.sites_scouted),
-        ("view_staff", "Current staff, roles and wages.", observe.staff),
+        (
+            "view_staff",
+            "Current staff, roles, wages and rotas (shift hours per weekday, Monday first).",
+            observe.staff,
+        ),
         (
             "view_price_list",
             "Each supplier's current ingredient prices (cents per kg).",

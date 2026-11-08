@@ -86,6 +86,8 @@ TABLES: dict[str, tuple[str, ...]] = {
         "location TEXT",
         "staff_id TEXT",
         "role TEXT",
+        "start_hour INTEGER",
+        "end_hour INTEGER",
         "hours INTEGER",
         "pay_cents INTEGER",
     ),
@@ -523,7 +525,7 @@ class Recorder:
         staff = self.world.business.staff
         rows = [
             (day, _iso(day), shop.location_id, s.staff_id, _role(self.world, s.staff_id))
-            + (s.hours, s.pay_cents)
+            + (s.start_hour, s.end_hour, s.hours, s.pay_cents)
             for s in shop.shifts
             if s.staff_id in staff
         ]

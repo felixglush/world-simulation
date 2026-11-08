@@ -33,8 +33,17 @@ from bakery_world.managed import (
     let_go,
     shut_location,
 )
-from bakery_world.model import Equipment, Lease, Location, MenuEntry, Staff
+from bakery_world.model import Equipment, Lease, Location, MenuEntry, ShiftTime, Staff, rota_hours
 from bakery_world.records import MIN_WAGE_EFFECTIVE_DAY, MIN_WAGE_NEW_CENTS, MIN_WAGE_OLD_CENTS
+from bakery_world.rota import (
+    MAX_DAY_HOURS,
+    MAX_WEEK_HOURS,
+    PRE_OPEN_BAKE_HOURS,
+    WEEKDAYS,
+    assign_rota,
+    describe,
+    shift_window,
+)
 from bakery_world.town import _TOWN as TOWN_ROWS
 from bakery_world.town import HIRE_NAMES, HOME_LOCATION
 
@@ -74,6 +83,7 @@ class Param:
     maximum: int | None = None
     choices: tuple[str, ...] | None = None
     length: int | None = None
+    items: type = int
 
     def schema(self) -> dict:
         kinds = {int: "integer", str: "string", list: "array"}
@@ -81,7 +91,7 @@ class Param:
         bounds = {"minimum": self.minimum, "maximum": self.maximum}
         bounds = {k: v for k, v in bounds.items() if v is not None}
         if self.type is list:
-            out |= {"items": {"type": "integer"} | bounds}
+            out |= {"items": {"type": kinds[self.items]} | bounds}
             out |= {"minItems": self.length, "maxItems": self.length}
         else:
             out |= bounds
@@ -104,10 +114,14 @@ class Param:
             if self.choices and value not in self.choices:
                 raise ActionRefused(f"{self.name} must be one of {', '.join(self.choices)}")
         elif self.type is list:
+            kind = "numbers" if self.items is int else "texts"
             if not isinstance(value, list) or len(value) != self.length:
-                raise ActionRefused(f"{self.name} must be a list of {self.length} numbers")
+                raise ActionRefused(f"{self.name} must be a list of {self.length} {kind}")
             for v in value:
-                bounded(v)
+                if self.items is int:
+                    bounded(v)
+                elif not isinstance(v, str):
+                    raise ActionRefused(f"{self.name} must be a list of {self.length} {kind}")
         else:
             bounded(value)
 
@@ -279,7 +293,46 @@ def set_hours(mw: ManagedWorld, location: str, open_hour: int, close_hour: int) 
     if close_hour - open_hour < 4:
         raise ActionRefused("the shop must open for at least 4 hours")
     loc.open_hour, loc.close_hour = open_hour, close_hour
-    return ActionResult(f"{location} opens {open_hour}:00 to {close_hour}:00 from today")
+    return ActionResult(
+        f"{location} opens {open_hour}:00 to {close_hour}:00 from today; staff rotas are "
+        "unchanged and shifts outside the hours they may work are cut to fit"
+    )
+
+
+def _shift(day: str, text: str) -> ShiftTime | None:
+    if text == "off":
+        return None
+    start, sep, end = text.partition("-")
+    if not (sep and start.isdigit() and end.isdigit()):
+        raise ActionRefused(f"{day}: {text!r} must be 'off' or start-end hours such as '07-15'")
+    return ShiftTime(int(start), int(end))
+
+
+def set_rota(mw: ManagedWorld, staff: str, shifts: list[str]) -> ActionResult:
+    s = _staff(mw, staff)
+    loc = mw.world.business.locations[s.location_id]
+    low, high = shift_window(s.role, loc)
+    rota = []
+    for day, text in zip(WEEKDAYS, shifts, strict=True):
+        shift = _shift(day, text)
+        if shift and shift.start_hour >= shift.end_hour:
+            raise ActionRefused(f"{day}: {text} ends before it starts")
+        if shift and not low <= shift.start_hour < shift.end_hour <= high:
+            raise ActionRefused(
+                f"{day}: {text} is outside {low:02d}-{high:02d}, the hours a {s.role.value} can "
+                f"work while {loc.id} opens {loc.open_hour:02d}-{loc.close_hour:02d}"
+            )
+        if shift and shift.hours > MAX_DAY_HOURS:
+            raise ActionRefused(f"{day}: {shift.hours} hours is more than {MAX_DAY_HOURS} a day")
+        rota.append(shift)
+    total, before = rota_hours(tuple(rota)), rota_hours(s.rota)
+    if total > MAX_WEEK_HOURS:
+        raise ActionRefused(f"that is {total} hours a week, more than {MAX_WEEK_HOURS}")
+    s.rota = tuple(rota)
+    return ActionResult(
+        f"{s.name}: {' '.join(describe(s.rota))} from today, {total} hours a week (was {before})",
+        {"weekly_hours": total},
+    )
 
 
 def _next_staff_seq(mw: ManagedWorld) -> int:
@@ -361,6 +414,7 @@ def hire(mw: ManagedWorld, candidate: str, wage_cents_per_hour: int) -> ActionRe
         return ActionResult(f"{s.name} declined ${wage / 100:.2f} an hour", {"hired": False})
     s.state = _step(mw, mc.STAFF, s.id, s.state, mc.StaffEvent.ACCEPT)
     s.wage_cents_per_hour, s.hired_day = wage, mw.day
+    assign_rota(mw.world.business.staff, s, mw.world.business.locations[s.location_id])
     mw.world.business.staff[s.id] = s
     del mw.candidates[s.id]
     return ActionResult(
@@ -646,6 +700,24 @@ ACTIONS: dict[str, Action] = {
                 Param("close_hour", int, "closing hour", 12, 22),
             ),
             set_hours,
+        ),
+        Action(
+            "set_rota",
+            "Set a staff member's shifts for each weekday, Monday first, from today; pay "
+            "follows the hours worked.",
+            (
+                Param("staff", str, "staff id"),
+                Param(
+                    "shifts",
+                    list,
+                    "7 entries, Monday first: 'off' or start-end hours such as '07-15'; bakers "
+                    f"may start {PRE_OPEN_BAKE_HOURS} hours before opening; at most "
+                    f"{MAX_DAY_HOURS} hours a day and {MAX_WEEK_HOURS} a week",
+                    length=7,
+                    items=str,
+                ),
+            ),
+            set_rota,
         ),
         Action(
             "post_job",

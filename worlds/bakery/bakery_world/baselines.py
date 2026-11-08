@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -8,10 +9,11 @@ from bakery_world.curveballs import Curveball, Kind
 from bakery_world.engine import PACKAGING_CENTS, market_wage
 from bakery_world.history import generate_history
 from bakery_world.machines import CustomerState, LocationState, MenuState, StaffState
-from bakery_world.managed import SHIFT_HOURS, ManagedWorld
+from bakery_world.managed import ManagedWorld
 from bakery_world.management import manage
 from bakery_world.observe import candidates, price_list, sales_by_hour, sites_scouted
 from bakery_world.observe import staff as staff_list
+from bakery_world.rota import SHIFT_HOURS, standard_shift
 from bakery_world.town import HOME_LOCATION, proximity
 
 QUARTER_WEEKS = 13
@@ -21,6 +23,9 @@ MAX_PRICE_MOVE = 0.10
 PAR_PERCENTILE, PAR_WEEKS = 80, 4
 EXTEND_SHARE, TRIM_SHARE = 0.5, 0.12
 HIRE_RETRY_RAISE = 1.08
+COUNTER_COVER = 1.0
+WEEK_SHIFTS = 5
+WORKING = (StaffState.EMPLOYED, StaffState.SICK, StaffState.ON_NOTICE)
 
 
 def _try(mw: ManagedWorld, name: str, **args: object) -> object | None:
@@ -37,6 +42,19 @@ def _trading(mw: ManagedWorld) -> list[LocationId]:
 
 def _round25(cents: float) -> int:
     return max(25, round(cents / 25) * 25)
+
+
+def fit_rotas(mw: ManagedWorld, loc: LocationId) -> None:
+    shop, late = mw.world.business.locations[loc], False
+    for s in staff_list(mw):
+        if s["location"] != loc or s["owner"]:
+            continue
+        role = Role(s["role"])
+        shift = str(standard_shift(role, shop, late))
+        late ^= role is Role.COUNTER
+        shifts = ["off" if day == "off" else shift for day in s["rota"]]
+        if shifts != s["rota"]:
+            _try(mw, "set_rota", staff=s["staff"], shifts=shifts)
 
 
 @dataclass
@@ -94,12 +112,24 @@ class Heuristic:
             _try(mw, "respond_to_event", event=event.id, option=SENSIBLE[event.kind])
 
     def _headcount(self, mw: ManagedWorld) -> dict[tuple[LocationId, Role], int]:
+        left = {
+            t.entity_id
+            for t in mw.world.business.transitions
+            if t.day >= mw.handoff_day and t.after == StaffState.GONE.name
+        }
         counts: dict[tuple[LocationId, Role], int] = {}
-        for s in staff_list(mw):
-            if not s["owner"]:
-                key = (LocationId(s["location"]), Role(s["role"]))
+        for s in mw.world.business.staff.values():
+            if s.state in WORKING or s.id in left:
+                key = (s.location_id, s.role)
                 counts[key] = counts.get(key, 0) + 1
         return counts
+
+    def wanted(self, mw: ManagedWorld, loc: LocationId, role: Role, base: int) -> int:
+        if role is not Role.COUNTER:
+            return base
+        shop = mw.world.business.locations[loc]
+        hours = 7 * (shop.close_hour - shop.open_hour) * COUNTER_COVER
+        return max(base, math.ceil(hours / (WEEK_SHIFTS * SHIFT_HOURS[role])))
 
     def cheapest_suppliers(self, mw: ManagedWorld) -> None:
         prices = price_list(mw)
@@ -156,6 +186,7 @@ class Heuristic:
             open_hour += 1
         if (open_hour, close_hour) != (shop.open_hour, shop.close_hour):
             _try(mw, "set_hours", location=loc, open_hour=open_hour, close_hour=close_hour)
+            fit_rotas(mw, loc)
 
     def going_wage(self, mw: ManagedWorld, role: Role) -> int:
         wages = sorted(
@@ -169,7 +200,8 @@ class Heuristic:
 
     def staff_up(self, mw: ManagedWorld) -> None:
         staying = (StaffState.EMPLOYED.value, StaffState.SICK.value)
-        for (loc, role), want in sorted(self.headcount.items()):
+        for (loc, role), base in sorted(self.headcount.items()):
+            want = self.wanted(mw, loc, role, base)
             if mw.world.business.locations[loc].state not in (
                 LocationState.TRADING,
                 LocationState.FITTING_OUT,
@@ -290,6 +322,7 @@ class Oracle(Heuristic):
             open_hour=max(6, busy[0]),
             close_hour=min(20, busy[-1] + 1),
         )
+        fit_rotas(mw, loc)
 
     def price_factor(self, mw: ManagedWorld, loc: LocationId) -> float:
         world = mw.world

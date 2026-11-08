@@ -12,11 +12,10 @@ from bakery_world.basics import (
     ItemId,
     LocationId,
     NeighborhoodId,
-    Role,
     StaffId,
     date_of,
 )
-from bakery_world.engine import BAKER_SHIFT_HOURS, CLEANER_SHIFT_HOURS, DayReport, post
+from bakery_world.engine import DayReport, post
 from bakery_world.history import Founding
 from bakery_world.machines import (
     CurveballState,
@@ -35,12 +34,6 @@ OVEN_LIFE_DAYS = 8 * 365
 HOME_FITOUT_CENTS = 4_000_000
 FITOUT_LIFE_DAYS = 10 * 365
 SEVERANCE_WEEKS = 2
-WORKING_DAYS_PER_WEEK = 5
-SHIFT_HOURS: dict[Role, int] = {
-    Role.BAKER: BAKER_SHIFT_HOURS,
-    Role.COUNTER: 8,
-    Role.CLEANER: CLEANER_SHIFT_HOURS,
-}
 
 
 class Channel(StrEnum):
@@ -247,10 +240,6 @@ def home_assets(world: World) -> list[Asset]:
     return assets
 
 
-def weekly_hours(staff: Staff) -> int:
-    return SHIFT_HOURS[staff.role] * WORKING_DAYS_PER_WEEK
-
-
 def depart(mw: ManagedWorld, staff: Staff) -> None:
     log = mw.world.business.transitions
     if staff.state is not StaffState.ON_NOTICE:
@@ -262,7 +251,7 @@ def depart(mw: ManagedWorld, staff: Staff) -> None:
 
 def let_go(mw: ManagedWorld, staff: Staff, memo: str) -> None:
     depart(mw, staff)
-    pay = SEVERANCE_WEEKS * weekly_hours(staff) * staff.wage_cents_per_hour
+    pay = SEVERANCE_WEEKS * staff.contract_hours * staff.wage_cents_per_hour
     post(
         mw.world.business,
         mw.day,

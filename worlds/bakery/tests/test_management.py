@@ -44,6 +44,10 @@ def frozen(mw: ManagedWorld) -> bytes:
         ("set_bake_plan", {"location": "shop1", "item": "latte", "weekday_units": [1] * 7}),
         ("set_wage", {"staff": "owner", "wage_cents_per_hour": 3000}),
         ("post_job", {"location": "shop1", "role": "baker", "wage_cents_per_hour": 1100}),
+        ("set_rota", {"staff": "s99", "shifts": ["off"] * 7}),
+        ("set_rota", {"staff": "s1", "shifts": ["15-09"] + ["off"] * 6}),
+        ("set_rota", {"staff": "s1", "shifts": ["05-15"] * 7}),
+        ("set_rota", {"staff": "s1", "shifts": ["05-13"] * 6}),
         ("launch_rocket", {}),
     ],
 )
@@ -243,3 +247,56 @@ def test_the_founder_retires_at_handover(seed1_history, tmp_path) -> None:
     conn.close()
     kept = manage(seed1_history.handoff, Founder(), weeks=1).world
     assert kept.world.business.staff[OWNER_ID].state is StaffState.EMPLOYED
+
+
+def _baker(mw: ManagedWorld) -> str:
+    return next(s["staff"] for s in staff_view(mw) if s["role"] == "baker")
+
+
+def test_a_rota_sets_the_hours_worked_and_paid(mw: ManagedWorld) -> None:
+    baker = _baker(mw)
+    result = perform(mw, "set_rota", staff=baker, shifts=["05-09"] + ["off"] * 6)
+    assert result.data == {"weekly_hours": 4}
+    shown = next(s for s in staff_view(mw) if s["staff"] == baker)
+    assert shown["rota"] == ["05-09"] + ["off"] * 6 and shown["weekly_hours"] == 4
+    for _ in range(7):
+        advance_day(mw)
+    worked = [
+        (shift.start_hour, shift.end_hour, shift.pay_cents)
+        for r in mw.reports
+        for shop in r.locations
+        for shift in shop.shifts
+        if shift.staff_id == baker
+    ]
+    wage = mw.world.business.staff[baker].wage_cents_per_hour
+    assert worked == [(5, 9, 4 * wage)]
+
+
+@pytest.mark.parametrize(
+    "shifts, reason",
+    [
+        (["13-05"] + ["off"] * 6, "mon: 13-05 ends before it starts"),
+        (["off", "03-11"] + ["off"] * 5, "tue: 03-11 is outside 05-15"),
+        (["05-15"] * 7, "70 hours a week, more than 48"),
+        (["late"] + ["off"] * 6, "must be 'off' or start-end hours"),
+    ],
+)
+def test_a_bad_rota_is_refused_with_a_reason(mw: ManagedWorld, shifts: list, reason: str) -> None:
+    with pytest.raises(ActionRefused, match=reason):
+        perform(mw, "set_rota", staff=_baker(mw), shifts=shifts)
+
+
+def test_an_unknown_staff_member_has_no_rota(mw: ManagedWorld) -> None:
+    with pytest.raises(ActionRefused, match="'s99' is not on the staff"):
+        perform(mw, "set_rota", staff="s99", shifts=["off"] * 7)
+
+
+def test_a_hire_starts_on_a_standard_rota(mw: ManagedWorld) -> None:
+    perform(mw, "post_job", location="shop1", role="counter", wage_cents_per_hour=2500)
+    for _ in range(7):
+        advance_day(mw)
+    applicant = candidates(mw)[0]["candidate"]
+    perform(mw, "interview", candidate=applicant)
+    perform(mw, "hire", candidate=applicant, wage_cents_per_hour=4000)
+    shown = next(s for s in staff_view(mw) if s["staff"] == applicant)
+    assert shown["weekly_hours"] == 40 and shown["rota"].count("off") == 2

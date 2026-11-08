@@ -3,6 +3,8 @@ from bakery_world.basics import LocationId
 from bakery_world.catalog import CATALOG
 from bakery_world.machines import LocationState, StaffState
 from bakery_world.managed import ManagedWorld
+from bakery_world.model import rota_hours
+from bakery_world.rota import describe
 
 WEEK = 7
 
@@ -102,6 +104,8 @@ def staff(mw: ManagedWorld) -> list[dict]:
             "wage_cents_per_hour": s.wage_cents_per_hour,
             "hired_day": s.hired_day,
             "owner": s.owner,
+            "rota": describe(s.rota),
+            "weekly_hours": rota_hours(s.rota),
         }
         for s in sorted(mw.world.business.staff.values(), key=lambda s: s.id)
         if s.state in working

@@ -34,10 +34,13 @@ from bakery_world.model import (
     Customer,
     LedgerEntry,
     Location,
+    ShiftTime,
     Staff,
     Vacancy,
     World,
+    rota_hours,
 )
+from bakery_world.rota import PRE_OPEN_BAKE_HOURS, assign_rota, standard_shift, worked
 from bakery_world.town import HIRE_NAMES, proximity, spawn_customer
 
 MONTHLY_OVERHEAD_CENTS: dict[Account, int] = {
@@ -70,10 +73,7 @@ CARD_FEE = 0.02
 DAY_OLD_DISCOUNT = 0.5
 DAY_OLD_QUALITY = 0.75
 COUNTER_CUSTOMERS_PER_HOUR = 40.0
-BAKER_SHIFT_HOURS = 8
-CLEANER_SHIFT_HOURS = 4
 BAKE_DEADLINE_HOUR = 13
-PRE_OPEN_BAKE_HOURS = 2
 VACANCY_DAYS = 10
 NOTICE_DAYS = 14
 OVEN_REPAIR_CENTS = 40_000
@@ -85,7 +85,6 @@ LAPSE_AFTER_DAYS = 30
 CHURN_AFTER_LAPSED_DAYS = 90
 NEW_QUIET_AFTER_DAYS = 60
 REGULAR_VISITS = 4
-DAYS_OFF: tuple[tuple[int, int], ...] = ((6, 2), (5, 1), (6, 4), (5, 0), (6, 3), (5, 2), (6, 0))
 STATE_VISIT_FACTOR = {CustomerState.NEW: 1.0, CustomerState.REGULAR: 1.0, CustomerState.LAPSED: 0.1}
 BAKERY_GOER_SHARE = 0.053
 AWARENESS_FROM_WORD_OF_MOUTH = 0.015
@@ -94,6 +93,8 @@ AWARENESS_HALF_VISITS = 60
 AWARENESS_FORGET = 0.0015
 MARKETING_SCALE_CENTS = 100_000
 NEUTRAL_MORALE = 0.6
+HOURS_CUT_UNNOTICED = 0.2
+HOURS_CUT_MORALE = 0.5
 SERVICE_WEIGHT = 0.4
 BOREDOM_PENALTY = 0.15
 MORALE_EFFORT_FLOOR = 0.64
@@ -141,8 +142,13 @@ class Sale:
 @dataclass(frozen=True)
 class Shift:
     staff_id: StaffId
-    hours: int
+    start_hour: int
+    end_hour: int
     pay_cents: Cents
+
+    @property
+    def hours(self) -> int:
+        return self.end_hour - self.start_hour
 
 
 @dataclass
@@ -220,11 +226,24 @@ class _Offer:
     quality: float
 
 
+@dataclass(frozen=True)
+class _OnShift:
+    staff: Staff
+    shift: ShiftTime
+
+    def covers(self, hour: int) -> bool:
+        return self.shift.start_hour <= hour < self.shift.end_hour
+
+
 @dataclass
 class _Roster:
-    bakers: list[Staff] = field(default_factory=list)
-    counters: list[Staff] = field(default_factory=list)
-    cleaners: list[Staff] = field(default_factory=list)
+    bakers: list[_OnShift] = field(default_factory=list)
+    counters: list[_OnShift] = field(default_factory=list)
+    cleaners: list[_OnShift] = field(default_factory=list)
+
+    @property
+    def everyone(self) -> list[_OnShift]:
+        return self.bakers + self.counters + self.cleaners
 
 
 def _poisson(rng: random.Random, lam: float) -> int:
@@ -237,26 +256,19 @@ def _poisson(rng: random.Random, lam: float) -> int:
     return k
 
 
-def _on_shift(staff: list[Staff], day: int) -> list[Staff]:
-    return [s for i, s in enumerate(staff) if day % 7 not in DAYS_OFF[i % len(DAYS_OFF)]]
-
-
 def _roster(world: World, loc: Location) -> _Roster:
     working = (StaffState.EMPLOYED, StaffState.ON_NOTICE)
-    by_role: dict[Role, list[Staff]] = {r: [] for r in Role}
-    for s in sorted(world.business.staff.values(), key=lambda s: s.id):
-        if s.location_id == loc.id and s.state in working:
-            by_role[s.role].append(s)
-    roster = _Roster(
-        _on_shift(by_role[Role.BAKER], world.day),
-        _on_shift(by_role[Role.COUNTER], world.day),
-        _on_shift(by_role[Role.CLEANER], world.day),
-    )
-    owner = next((s for s in by_role[Role.COUNTER] if s.owner), None)
+    by_role: dict[Role, list[_OnShift]] = {r: [] for r in Role}
+    here = [s for s in world.business.staff.values() if s.location_id == loc.id]
+    for s in sorted(here, key=lambda s: s.id):
+        shift = worked(s, loc, world.day % 7)
+        if shift and s.state in working:
+            by_role[s.role].append(_OnShift(s, shift))
+    roster = _Roster(by_role[Role.BAKER], by_role[Role.COUNTER], by_role[Role.CLEANER])
+    owner = next((s for s in here if s.owner and s.state in working), None)
     if owner and not roster.bakers:
-        if owner in roster.counters:
-            roster.counters.remove(owner)
-        roster.bakers.append(owner)
+        roster.counters = [on for on in roster.counters if on.staff is not owner]
+        roster.bakers.append(_OnShift(owner, standard_shift(Role.BAKER, loc)))
     return roster
 
 
@@ -269,13 +281,13 @@ def market_wage(world: World, role: Role) -> Cents:
     return Cents(round(MARKET_WAGE_CENTS[role] * world.market_wage_index))
 
 
-def _counter_capacity(loc: Location, counters: list[Staff]) -> list[float]:
-    open_len = loc.close_hour - loc.open_hour
-    if open_len <= 0:
-        return [0.0] * 24
-    cover = min(8, open_len) / open_len
-    per_hour = COUNTER_CUSTOMERS_PER_HOUR * cover * sum(_effort(s) for s in counters)
-    return [per_hour if loc.open_hour <= h < loc.close_hour else 0.0 for h in range(24)]
+def _counter_capacity(loc: Location, counters: list[_OnShift]) -> list[float]:
+    return [
+        COUNTER_CUSTOMERS_PER_HOUR * sum(_effort(on.staff) for on in counters if on.covers(h))
+        if loc.open_hour <= h < loc.close_hour
+        else 0.0
+        for h in range(24)
+    ]
 
 
 def _wait_minutes(arrivals: int, capacity: float) -> float:
@@ -294,18 +306,15 @@ def _walkaway_probability(wait: float, threshold: float) -> float:
     return min(0.95, max(0.0, (wait - 0.5 * threshold) / (2 * threshold)))
 
 
-def _shifts(loc: Location, roster: _Roster) -> tuple[Shift, ...]:
-    open_len = loc.close_hour - loc.open_hour
-    if open_len <= 0:
-        return ()
-    hours = {
-        Role.BAKER: BAKER_SHIFT_HOURS,
-        Role.COUNTER: min(8, open_len),
-        Role.CLEANER: CLEANER_SHIFT_HOURS,
-    }
+def _shifts(roster: _Roster) -> tuple[Shift, ...]:
     return tuple(
-        Shift(s.id, hours[s.role], Cents(s.wage_cents_per_hour * hours[s.role]))
-        for s in roster.bakers + roster.counters + roster.cleaners
+        Shift(
+            on.staff.id,
+            on.shift.start_hour,
+            on.shift.end_hour,
+            Cents(on.staff.wage_cents_per_hour * on.shift.hours),
+        )
+        for on in roster.everyone
     )
 
 
@@ -369,7 +378,7 @@ def _bake(
     }
     oven_total = sum(capacity_by_oven.values())
     oven_left = oven_total
-    labor_left = sum(BAKER_SHIFT_HOURS * 60 * _effort(b) for b in roster.bakers)
+    labor_left = sum(on.shift.hours * 60 * _effort(on.staff) for on in roster.bakers)
     fresh: dict[ItemId, int] = {}
     ordered = sorted(loc.menu.items(), key=lambda kv: kv[1].state is not MenuState.ON_MENU)
     for item, entry in ordered:
@@ -552,7 +561,7 @@ def _run_location(
     satisfactions = []
     cleaner_penalty = 0.0 if roster.cleaners else 0.04
     stale = BOREDOM_PENALTY * _boredom(world, loc)
-    moods = [s.morale for s in roster.counters]
+    moods = [on.staff.morale for on in roster.counters]
     service = SERVICE_WEIGHT * (
         (sum(moods) / len(moods) if moods else NEUTRAL_MORALE) - NEUTRAL_MORALE
     )
@@ -660,7 +669,7 @@ def _run_location(
     loc.stock = stock
 
     repairs = _tend_ovens(world, loc, oven_use, rng)
-    shifts = _shifts(loc, roster)
+    shifts = _shifts(roster)
     wages = sum(s.pay_cents for s in shifts)
     oncost = round(wages * PAYROLL_ONCOST_RATE)
     rent = round(loc.lease.monthly_rent_cents * 12 / 365)
@@ -791,7 +800,13 @@ def _staff_day(
         if s.state in (StaffState.CANDIDATE, StaffState.GONE):
             continue
         wage_gap = s.wage_cents_per_hour / market_wage(world, s.role) - 1
-        target = NEUTRAL_MORALE + params.wage_morale_sensitivity * wage_gap - 0.4 * overload
+        cut = 1 - rota_hours(s.rota) / s.contract_hours if s.contract_hours else 0.0
+        target = (
+            NEUTRAL_MORALE
+            + params.wage_morale_sensitivity * wage_gap
+            - 0.4 * overload
+            - HOURS_CUT_MORALE * max(0.0, cut - HOURS_CUT_UNNOTICED)
+        )
         s.morale = max(0.05, min(1.0, s.morale + 0.04 * (target - s.morale)))
         if s.state is StaffState.EMPLOYED:
             s.skill = min(1.0, s.skill + 0.0003)
@@ -833,6 +848,7 @@ def _fill_vacancies(world: World, rng: random.Random) -> None:
         )
         for event in (ev.INTERVIEW, ev.OFFER, ev.ACCEPT):
             hire.state = step(log, day, mc.STAFF, hire.id, hire.state, event)
+        assign_rota(staff, hire, world.business.locations[v.location_id])
         staff[hire.id] = hire
     world.business.vacancies = remaining
 

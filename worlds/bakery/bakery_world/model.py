@@ -107,6 +107,26 @@ class Location:
     price_index: float = 1.0
 
 
+@dataclass(frozen=True)
+class ShiftTime:
+    start_hour: int
+    end_hour: int
+
+    @property
+    def hours(self) -> int:
+        return self.end_hour - self.start_hour
+
+    def __str__(self) -> str:
+        return f"{self.start_hour:02d}-{self.end_hour:02d}"
+
+
+Rota = tuple[ShiftTime | None, ...]
+
+
+def rota_hours(rota: Rota) -> int:
+    return sum(s.hours for s in rota if s)
+
+
 @dataclass
 class Staff:
     id: StaffId
@@ -122,6 +142,8 @@ class Staff:
     state_until_day: int = 0
     hired_day: int = 0
     owner: bool = False
+    rota: Rota = ()
+    contract_hours: int = 0
 
 
 @dataclass
