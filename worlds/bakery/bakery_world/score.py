@@ -7,8 +7,9 @@ from bakery_world.machines import CurveballState, LocationState, StaffState
 from bakery_world.managed import ManagedWorld
 from bakery_world.town import HOME_LOCATION
 
-WINDOW_DAYS = 91
-GOING_CONCERN_YEARS = 3
+GOING_CONCERN_MULTIPLE = 2
+GOING_CONCERN_WEEKS = 26
+WINDOW_DAYS = 7 * GOING_CONCERN_WEEKS
 LIQUIDATION_SHARE = 0.3
 WORKING = (StaffState.EMPLOYED, StaffState.SICK, StaffState.ON_NOTICE)
 
@@ -29,7 +30,7 @@ def book_value(mw: ManagedWorld) -> int:
 
 def going_concern(mw: ManagedWorld) -> int:
     return sum(
-        max(0, round(GOING_CONCERN_YEARS * operating_profit(mw, loc.id) * 365 / WINDOW_DAYS))
+        max(0, round(GOING_CONCERN_MULTIPLE * operating_profit(mw, loc.id) * 365 / WINDOW_DAYS))
         for loc in mw.world.business.locations.values()
         if loc.state is LocationState.TRADING
     )

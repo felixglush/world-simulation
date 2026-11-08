@@ -7,13 +7,15 @@ import pytest
 
 from bakery_world.actions import ACTIONS, ActionRefused, describe_actions, perform
 from bakery_world.baselines import Founder, Freeze, Heuristic
-from bakery_world.basics import Cents, date_of
+from bakery_world.basics import Account, Cents, date_of
 from bakery_world.curveballs import Curveball
 from bakery_world.machines import LocationState, StaffState
 from bakery_world.managed import ManagedWorld
 from bakery_world.management import advance_day, load, manage
+from bakery_world.model import LedgerEntry
 from bakery_world.observe import candidates, dashboard, open_events
 from bakery_world.observe import staff as staff_view
+from bakery_world.score import going_concern
 from bakery_world.town import HOME_LOCATION, OWNER_ID
 
 
@@ -337,3 +339,18 @@ def test_cutting_baker_hours_cuts_the_bake(seed1_history) -> None:
     assert short.world.totals["baked"] < 0.7 * control.world.totals["baked"]
     strained = [s.bake_strain for r in short.world.reports for s in r.locations]
     assert max(strained) > 0
+
+
+def test_the_going_concern_is_twice_the_annualised_last_26_weeks(seed1_history) -> None:
+    mw = load(seed1_history.handoff)
+    ledger = mw.world.business.ledger
+
+    def book(days_ago: int) -> int:
+        day = mw.day - days_ago
+        at = next(i for i, e in enumerate(ledger) if e.day > day)
+        ledger.insert(at, LedgerEntry(day, Account.SALES, 10_000_000, HOME_LOCATION))
+        return going_concern(mw)
+
+    base = book(26 * 7)
+    assert book(26 * 7 - 1) - base == round(2 * 10_000_000 * 365 / (26 * 7))
+    assert book(26 * 7 + 1) == book(26 * 7 + 2)
