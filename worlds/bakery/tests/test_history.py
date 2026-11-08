@@ -16,8 +16,12 @@ from bakery_world.town import RIVAL_ID
 SEED = 1
 
 
-def shop_revenue(seed: int, forces: tuple[Force, ...], days: int, after: int) -> int:
+def shop_revenue(
+    seed: int, forces: tuple[Force, ...], days: int, after: int, launches: bool = True
+) -> int:
     founding = found(seed, forces=forces)
+    if not launches:
+        founding.founder._launch_items = lambda world, day: None
     total = []
 
     def add(report) -> None:
@@ -37,9 +41,23 @@ def baseline_revenue() -> int:
     return shop_revenue(SEED, (), 240, 120)
 
 
-@pytest.mark.parametrize("fid", list(ForceId))
+SLOW_FORCES = (ForceId.MENU_FATIGUE, ForceId.QUALITY_SLIP)
+
+
+@pytest.mark.parametrize("fid", [f for f in ForceId if f not in SLOW_FORCES])
 def test_each_decay_force_lowers_shop_revenue(fid: ForceId, baseline_revenue: int) -> None:
     assert shop_revenue(SEED, (early(fid),), 240, 120) < 0.99 * baseline_revenue
+
+
+@pytest.fixture(scope="module")
+def steady_menu_revenue() -> int:
+    return shop_revenue(SEED, (), 360, 240, launches=False)
+
+
+@pytest.mark.parametrize("fid", SLOW_FORCES)
+def test_slow_forces_lower_revenue_once_new_items_stop(fid: ForceId, steady_menu_revenue) -> None:
+    bored = shop_revenue(SEED, (early(fid),), 360, 240, launches=False)
+    assert bored < 0.97 * steady_menu_revenue
 
 
 def test_competitor_entry_opens_the_rival_only_when_the_force_acts() -> None:
@@ -124,7 +142,7 @@ def test_documents_cover_the_notebook_contracts_and_news(history) -> None:
     assert kinds["supplier_contract"] == 2 and kinds["loan"] == 1 and kinds["lease"] >= 1
     handoff = date_of(HISTORY_DAYS).isoformat()
     lease = rows(history.records, "SELECT body FROM documents WHERE title LIKE '%Market%'")[0][0]
-    assert "to 2028-01-01" in lease
+    assert "to 2026-08-01" in lease
     news = rows(history.records, "SELECT date, title, body FROM documents WHERE kind = 'news'")
     wage = next(n for n in news if "Minimum wage" in n[1])
     assert wage[0] < handoff and "April 2026" in wage[2]

@@ -63,6 +63,7 @@ class MeanRevertingPrices:
         reversion: float = 0.03,
         volatility: float = 0.025,
     ) -> None:
+        self.seed, self.horizon_days, self.spikes = seed, horizon_days, spikes
         rng = random.Random(f"{seed}:ingredient-prices")
         self._by_day: list[dict[Ingredient, int]] = []
         log_dev = {ing: 0.0 for ing in BASE_CENTS_PER_KG}

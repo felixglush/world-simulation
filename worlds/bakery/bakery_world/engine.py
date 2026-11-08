@@ -100,6 +100,9 @@ MORALE_EFFORT_FLOOR = 0.64
 FATIGUE_RETENTION = 0.93
 BOREDOM_RETENTION = 0.05
 FATIGUE_CAP = 0.8
+# regulars remember a shop's price board: a dearer shop than usual gets fewer visits
+PRICE_VISIT_SENSITIVITY = 1.0
+PRICE_MEMORY = 1 / 28
 
 SEGMENT_WEEKDAY: dict[Segment, tuple[float, ...]] = {
     Segment.COMMUTER: (1.25, 1.25, 1.25, 1.25, 1.2, 0.5, 0.3),
@@ -389,18 +392,18 @@ def _bake(
 
 
 def _build_offers(
-    loc: Location, fresh: dict[ItemId, int], old: dict[ItemId, dict[int, int]]
+    loc: Location, day: int, fresh: dict[ItemId, int], old: dict[ItemId, dict[int, int]]
 ) -> list[_Offer]:
     offers = []
     for item, entry in loc.menu.items():
         recipe = CATALOG[item]
         if entry.state not in (MenuState.ON_MENU, MenuState.TRIAL):
             continue
-        typical = recipe.typical_price_cents
+        typical, price = recipe.typical_price_cents, entry.price_on(day)
         if recipe.made_to_order or fresh.get(item, 0) > 0:
-            offers.append(_Offer(item, recipe.category, entry.price_cents, typical, False, 1.0))
+            offers.append(_Offer(item, recipe.category, price, typical, False, 1.0))
         if old.get(item):
-            price = round(entry.price_cents * DAY_OLD_DISCOUNT)
+            price = round(price * DAY_OLD_DISCOUNT)
             offers.append(_Offer(item, recipe.category, price, typical, True, DAY_OLD_QUALITY))
     return offers
 
@@ -450,6 +453,13 @@ def _visitors(
     cum = {nb.id: _cumulative(nb.hourly_traffic) for nb in nbs.values()}
     prox = {nb.id: proximity(nb, home) for nb in nbs.values()}
     scale = awareness_f * reputation_f / 7
+    price_f = {
+        (nb.id, seg): math.exp(
+            -PRICE_VISIT_SENSITIVITY * e / nb.income_index * (loc.price_index - 1)
+        )
+        for nb in nbs.values()
+        for seg, e in world.params.elasticity.items()
+    }
     visitors: list[tuple[int, Customer]] = []
     hours = range(24)
     known = 0.0
@@ -462,6 +472,7 @@ def _visitors(
             c.base_visit_rate
             * scale
             * factors[(c.neighborhood_id, c.segment)]
+            * price_f[(c.neighborhood_id, c.segment)]
             * reach
             * STATE_VISIT_FACTOR[c.state]
             * (0.5 + 0.7 * c.satisfaction)
@@ -492,7 +503,7 @@ def _run_location(
     roster = _roster(world, loc)
     old = _age_stock(loc, items)
     fresh, oven_use = _bake(loc, roster, weekday, grams, items)
-    offers = _build_offers(loc, fresh, old)
+    offers = _build_offers(loc, day, fresh, old)
     qty: list[int | None] = []
     for o in offers:
         if CATALOG[o.item_id].made_to_order:
@@ -655,6 +666,10 @@ def _run_location(
     for account, amount in charges.items():
         post(world.business, day, account, amount, loc.id)
 
+    fresh_offers = [o for o in offers if not o.day_old]
+    if fresh_offers:
+        board = sum(o.price / o.typical for o in fresh_offers) / len(fresh_offers)
+        loc.price_index += PRICE_MEMORY * (board - loc.price_index)
     n = len(satisfactions)
     if n:
         mean_sat = sum(satisfactions) / n
@@ -690,7 +705,8 @@ def _run_location(
 
 def _update_awareness(world: World, loc: Location, visits: int) -> None:
     buzz = visits / (visits + AWARENESS_HALF_VISITS) * (0.6 + 0.4 * loc.reputation)
-    advertising = 1 - math.exp(-loc.marketing_cents_per_month / MARKETING_SCALE_CENTS)
+    spend = loc.marketing_cents_per_month + loc.campaign_cents_per_month
+    advertising = 1 - math.exp(-spend / MARKETING_SCALE_CENTS)
     reach = (
         AWARENESS_FROM_WORD_OF_MOUTH * world.word_of_mouth * buzz
         + AWARENESS_FROM_MARKETING * advertising
@@ -776,7 +792,8 @@ def _staff_day(
             s.state = step(log, day, mc.STAFF, s.id, s.state, ev.RECOVER)
         elif s.state is StaffState.ON_NOTICE and day >= s.state_until_day:
             s.state = step(log, day, mc.STAFF, s.id, s.state, ev.LEAVE)
-            world.business.vacancies.append(Vacancy(s.role, loc.id, day + VACANCY_DAYS))
+            if world.business.auto_hire:
+                world.business.vacancies.append(Vacancy(s.role, loc.id, day + VACANCY_DAYS))
 
 
 def _fill_vacancies(world: World, rng: random.Random) -> None:

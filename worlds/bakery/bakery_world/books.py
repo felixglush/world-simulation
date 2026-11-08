@@ -19,6 +19,8 @@ class Section(StrEnum):
 A = Account
 SECTION: dict[Account, Section] = {
     A.SALES: Section.REVENUE,
+    A.CATERING: Section.REVENUE,
+    A.CATERING_COSTS: Section.COST_OF_SALES,
     A.INGREDIENTS: Section.COST_OF_SALES,
     A.PACKAGING: Section.COST_OF_SALES,
     A.CARD_FEES: Section.COST_OF_SALES,
@@ -34,6 +36,9 @@ SECTION: dict[Account, Section] = {
     A.INTEREST: Section.FINANCE,
     A.FIT_OUT: Section.ONE_OFF,
     A.LEASE_BREAK: Section.ONE_OFF,
+    A.SEVERANCE: Section.ONE_OFF,
+    A.FINES: Section.ONE_OFF,
+    A.EQUIPMENT: Section.BALANCE_SHEET,
     A.LOAN_REPAYMENT: Section.BALANCE_SHEET,
     A.CREDIT_DRAWN: Section.BALANCE_SHEET,
     A.CREDIT_REPAID: Section.BALANCE_SHEET,

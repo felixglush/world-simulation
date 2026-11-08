@@ -63,6 +63,13 @@ class MenuEntry:
     state: MenuState
     price_cents: Cents
     bake_plan: list[int]
+    discount_pct: int = 0
+    discount_until_day: int = 0
+
+    def price_on(self, day: int) -> Cents:
+        if day < self.discount_until_day:
+            return Cents(round(self.price_cents * (100 - self.discount_pct) / 100))
+        return self.price_cents
 
 
 @dataclass
@@ -96,6 +103,8 @@ class Location:
     stock: dict[ItemId, dict[int, int]] = field(default_factory=dict)
     marketing_cents_per_month: Cents = Cents(0)
     menu_changed_day: int = 0
+    campaign_cents_per_month: float = 0.0
+    price_index: float = 1.0
 
 
 @dataclass
@@ -191,6 +200,7 @@ class Business:
     ledger: list[LedgerEntry] = field(default_factory=list)
     suppliers: dict[str, Supplier] = field(default_factory=dict)
     buy_from: dict[Ingredient, str] = field(default_factory=dict)
+    auto_hire: bool = True
 
 
 @dataclass

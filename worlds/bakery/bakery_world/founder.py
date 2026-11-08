@@ -71,6 +71,82 @@ SECOND_SHOP_STAFF = (Role.BAKER, Role.COUNTER, Role.COUNTER)
 SECOND_SHOP_BAKE_SHARE = 0.3
 
 
+CATERING_CLIENTS = (
+    "Kestrel Mutual staff breakfast",
+    "Market Square traders' meeting",
+    "a christening at St Anne's",
+    "Campus Heights open day",
+    "a retirement party at the library",
+)
+HISTORY_CATERING_ORDERS = 3
+CATERING_COST_SHARE = 0.4
+
+
+@dataclass(frozen=True)
+class CateringOrder:
+    day: int
+    client: str
+    units: int
+    value_cents: Cents
+
+
+def draw_catering(rng: random.Random, first: int, last: int, count: int) -> list[CateringOrder]:
+    orders = []
+    for day in sorted(rng.randint(first, last) for _ in range(count)):
+        units = rng.randrange(60, 200, 10)
+        orders.append(CateringOrder(day, rng.choice(CATERING_CLIENTS), units, Cents(units * 450)))
+    return orders
+
+
+def deliver_catering(world: World, day: int, order: CateringOrder, loc: LocationId) -> None:
+    memo = f"Catering: {order.client}, {order.units} pastries and coffee"
+    post(world.business, day, Account.CATERING, order.value_cents, loc, memo)
+    cost = round(order.value_cents * CATERING_COST_SHARE)
+    post(world.business, day, Account.CATERING_COSTS, -cost, loc, f"{memo} (ingredients, labour)")
+
+
+def service_ovens(world: World, day: int, loc: Location) -> None:
+    for oven in loc.ovens:
+        if oven.state is EquipmentState.WORN:
+            oven.state = mc.step(
+                world.business.transitions,
+                day,
+                mc.EQUIPMENT,
+                oven.id,
+                oven.state,
+                mc.EquipmentEvent.SERVICE,
+            )
+            oven.wear = SERVICED_OVEN_WEAR
+            post(
+                world.business,
+                day,
+                Account.REPAIRS,
+                -OVEN_SERVICE_CENTS,
+                loc.id,
+                f"{oven.id} service",
+            )
+
+
+def repay_loan(world: World, day: int) -> None:
+    business = world.business
+    repay = min(business.debt_cents, LOAN_PRINCIPAL_PER_MONTH_CENTS)
+    business.debt_cents = Cents(business.debt_cents - repay)
+    post(business, day, Account.LOAN_REPAYMENT, -repay, None, "equipment loan principal")
+
+
+def treasury(world: World, day: int) -> None:
+    b = world.business
+    if b.cash_cents < CASH_FLOOR_CENTS:
+        draw = min(b.credit_limit_cents - b.credit_drawn_cents, CASH_FLOOR_CENTS - b.cash_cents)
+        if draw > 0:
+            b.credit_drawn_cents = Cents(b.credit_drawn_cents + draw)
+            post(b, day, Account.CREDIT_DRAWN, draw, None, "drawn on credit line")
+    elif b.cash_cents > CASH_COMFORT_CENTS and b.credit_drawn_cents > 0:
+        repay = min(b.credit_drawn_cents, b.cash_cents - CASH_COMFORT_CENTS)
+        b.credit_drawn_cents = Cents(b.credit_drawn_cents - repay)
+        post(b, day, Account.CREDIT_REPAID, -repay, None, "credit line repaid")
+
+
 @dataclass
 class Quirks:
     price_factor: dict[ItemId, float] = field(default_factory=dict)
@@ -118,6 +194,9 @@ class Founder:
         self.quirks = quirks or Quirks()
         self.sold: dict[tuple[LocationId, ItemId, int], deque[int]] = {}
         self.recent_prices: deque[dict[Ingredient, int]] = deque(maxlen=30)
+        self.catering = draw_catering(
+            random.Random(f"{seed}:catering-history"), 150, 1050, HISTORY_CATERING_ORDERS
+        )
 
     def __call__(self, world: World, day: int) -> None:
         self.recent_prices.append(prices_paid(world, day))
@@ -134,6 +213,9 @@ class Founder:
         for loc in world.business.locations.values():
             if loc.state is LocationState.TRADING:
                 self._plan_bakes(loc, day)
+        for order in self.catering:
+            if order.day == day:
+                deliver_catering(world, day, order, HOME_LOCATION)
         self._treasury(world, day)
 
     def observe(self, report: DayReport) -> None:
@@ -183,40 +265,11 @@ class Founder:
             spend = self._marketing(loc, day) if loc.state is LocationState.TRADING else 0
             loc.marketing_cents_per_month = Cents(spend)
             post(business, day, Account.MARKETING, -spend, loc.id, "local advertising")
-            for oven in loc.ovens:
-                if oven.state is EquipmentState.WORN:
-                    oven.state = mc.step(
-                        business.transitions,
-                        day,
-                        mc.EQUIPMENT,
-                        oven.id,
-                        oven.state,
-                        mc.EquipmentEvent.SERVICE,
-                    )
-                    oven.wear = SERVICED_OVEN_WEAR
-                    post(
-                        business,
-                        day,
-                        Account.REPAIRS,
-                        -OVEN_SERVICE_CENTS,
-                        loc.id,
-                        f"{oven.id} service",
-                    )
-        repay = min(business.debt_cents, LOAN_PRINCIPAL_PER_MONTH_CENTS)
-        business.debt_cents = Cents(business.debt_cents - repay)
-        post(business, day, Account.LOAN_REPAYMENT, -repay, None, "equipment loan principal")
+            service_ovens(world, day, loc)
+        repay_loan(world, day)
 
     def _treasury(self, world: World, day: int) -> None:
-        b = world.business
-        if b.cash_cents < CASH_FLOOR_CENTS:
-            draw = min(b.credit_limit_cents - b.credit_drawn_cents, CASH_FLOOR_CENTS - b.cash_cents)
-            if draw > 0:
-                b.credit_drawn_cents = Cents(b.credit_drawn_cents + draw)
-                post(b, day, Account.CREDIT_DRAWN, draw, None, "drawn on credit line")
-        elif b.cash_cents > CASH_COMFORT_CENTS and b.credit_drawn_cents > 0:
-            repay = min(b.credit_drawn_cents, b.cash_cents - CASH_COMFORT_CENTS)
-            b.credit_drawn_cents = Cents(b.credit_drawn_cents - repay)
-            post(b, day, Account.CREDIT_REPAID, -repay, None, "credit line repaid")
+        treasury(world, day)
 
     def _plan_bakes(self, loc: Location, day: int) -> None:
         weekday = day % 7

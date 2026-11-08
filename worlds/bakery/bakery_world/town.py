@@ -1,6 +1,7 @@
 import math
 import random
 from dataclasses import dataclass, replace
+from datetime import date
 
 from bakery_world.basics import (
     Cents,
@@ -13,6 +14,7 @@ from bakery_world.basics import (
     Role,
     Segment,
     StaffId,
+    date_of,
 )
 from bakery_world.catalog import CATALOG, OPENING_MENU, STARTING_MENU
 from bakery_world.exogenous import MeanRevertingPrices, SeasonalFootTraffic, SeasonalWeather
@@ -216,7 +218,8 @@ OWNER_WAGE_CENTS = Cents(900)
 OPENING_CUSTOMERS = 800
 OPENING_AWARENESS = 0.12
 OPENING_BAKE_SHARE = 0.35
-LEASE_YEARS = 5
+HOME_LEASE_END_DAY = (date(2026, 8, 1) - date_of(0)).days
+CREDIT_LIMIT_CENTS = Cents(8_000_000)
 
 G = Ingredient
 SUPPLIERS = (
@@ -293,7 +296,7 @@ OPENING = Start(
     15,
     OPENING_BAKE_SHARE,
     MARKET_QUIET_AFTERNOON,
-    Cents(6_000_000),
+    Cents(10_000_000),
     Cents(4_500_000),
 )
 
@@ -333,7 +336,9 @@ def build_world(seed: int, established: bool = False) -> World:
         size_m2=90,
         ovens=[Equipment("oven1"), Equipment("oven2", wear=0.15), Equipment("oven3", wear=0.3)],
         state=LocationState.TRADING,
-        lease=Lease(LeaseState.ACTIVE, Cents(90 * home.rent_cents_per_m2_month), LEASE_YEARS * 365),
+        lease=Lease(
+            LeaseState.ACTIVE, Cents(90 * home.rent_cents_per_m2_month), HOME_LEASE_END_DAY
+        ),
         menu=menu,
         open_hour=7,
         close_hour=start.close_hour,
@@ -372,7 +377,7 @@ def build_world(seed: int, established: bool = False) -> World:
         business=Business(
             cash_cents=start.cash,
             debt_cents=start.debt,
-            credit_limit_cents=Cents(6_000_000),
+            credit_limit_cents=CREDIT_LIMIT_CENTS,
             credit_drawn_cents=Cents(0),
             locations={shop.id: shop},
             staff=staff,
