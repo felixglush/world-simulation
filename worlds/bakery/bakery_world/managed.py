@@ -251,15 +251,32 @@ def weekly_hours(staff: Staff) -> int:
     return SHIFT_HOURS[staff.role] * WORKING_DAYS_PER_WEEK
 
 
-def let_go(mw: ManagedWorld, staff: Staff, memo: str) -> None:
-    b, log = mw.world.business, mw.world.business.transitions
+def depart(mw: ManagedWorld, staff: Staff) -> None:
+    log = mw.world.business.transitions
     if staff.state is not StaffState.ON_NOTICE:
         staff.state = mc.step(
             log, mw.day, mc.STAFF, staff.id, staff.state, mc.StaffEvent.GIVE_NOTICE
         )
     staff.state = mc.step(log, mw.day, mc.STAFF, staff.id, staff.state, mc.StaffEvent.LEAVE)
+
+
+def let_go(mw: ManagedWorld, staff: Staff, memo: str) -> None:
+    depart(mw, staff)
     pay = SEVERANCE_WEEKS * weekly_hours(staff) * staff.wage_cents_per_hour
-    post(b, mw.day, Account.SEVERANCE, -pay, staff.location_id, f"{memo}: {staff.name}")
+    post(
+        mw.world.business,
+        mw.day,
+        Account.SEVERANCE,
+        -pay,
+        staff.location_id,
+        f"{memo}: {staff.name}",
+    )
+
+
+def retire_founder(mw: ManagedWorld) -> None:
+    for s in mw.world.business.staff.values():
+        if s.owner and s.state is not StaffState.GONE:
+            depart(mw, s)
 
 
 def write_off(mw: ManagedWorld, location: LocationId, name: str | None = None) -> None:

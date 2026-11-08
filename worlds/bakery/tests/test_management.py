@@ -13,7 +13,8 @@ from bakery_world.machines import LocationState, StaffState
 from bakery_world.managed import ManagedWorld
 from bakery_world.management import advance_day, load, manage
 from bakery_world.observe import candidates, dashboard, open_events
-from bakery_world.town import HOME_LOCATION
+from bakery_world.observe import staff as staff_view
+from bakery_world.town import HOME_LOCATION, OWNER_ID
 
 
 @pytest.fixture
@@ -228,3 +229,17 @@ def test_expansion_is_off_by_default(seed1_history) -> None:
     with pytest.raises(ActionRefused):
         perform(mw, "scout_site", neighborhood="campus")
     assert mw.sites == {}
+
+
+def test_the_founder_retires_at_handover(seed1_history, tmp_path) -> None:
+    mw = manage(seed1_history.records.parent, Freeze(), weeks=1, out_dir=tmp_path).world
+    assert OWNER_ID not in {s["staff"] for s in staff_view(mw)}
+    assert mw.world.business.staff[OWNER_ID].state is StaffState.GONE
+    worked = {shift.staff_id for r in mw.reports for s in r.locations for shift in s.shifts}
+    assert worked and OWNER_ID not in worked
+    with sqlite3.connect(tmp_path / "records.sqlite") as conn:
+        row = conn.execute("SELECT status, left_date FROM staff WHERE staff_id = ?", (OWNER_ID,))
+        assert row.fetchone() == ("gone", date_of(1095).isoformat())
+    conn.close()
+    kept = manage(seed1_history.handoff, Founder(), weeks=1).world
+    assert kept.world.business.staff[OWNER_ID].state is StaffState.EMPLOYED

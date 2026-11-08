@@ -21,6 +21,7 @@ from bakery_world.managed import (
     LogKind,
     ManagedWorld,
     home_assets,
+    retire_founder,
 )
 from bakery_world.observe import dashboard
 from bakery_world.records import Recorder, draw_reviews
@@ -78,6 +79,8 @@ def load(source: Path | str, keeps_founder: bool = False, auto_hire: bool = Fals
     )
     mw.assets = home_assets(world)
     mw.handoff_prices = home_prices(mw)
+    if not keeps_founder:
+        retire_founder(mw)
     working = (StaffState.EMPLOYED, StaffState.SICK, StaffState.ON_NOTICE)
     mw.handoff_headcount = sum(s.state in working for s in world.business.staff.values())
     world.business.auto_hire = auto_hire
@@ -214,6 +217,7 @@ def _open_records(
     shutil.copyfile(records, target)
     conn = sqlite3.connect(target)
     mw.recorder = Recorder(conn, mw.world, mw.seed, resume=True)
+    mw.recorder.refresh_tables()
     mw.ledger_mark = len(mw.world.business.ledger)
     return conn
 
@@ -240,6 +244,7 @@ def manage(
 
     start_nw = net_worth(mw)
     mw.note(LogKind.START, seed=mw.seed, policy=policy.name, weeks=weeks, net_worth_cents=start_nw)
+    mw.log_transitions([t for t in mw.world.business.transitions if t.day >= mw.handoff_day])
     advance(ev.START)
     bankrupt, played = False, 0
     for week in range(weeks):
