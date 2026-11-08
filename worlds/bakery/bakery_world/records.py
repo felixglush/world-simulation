@@ -36,6 +36,7 @@ TABLES: dict[str, tuple[str, ...]] = {
         "day INTEGER",
         "date TEXT",
         "hour INTEGER",
+        "time TEXT",
         "location TEXT",
         "loyalty_id TEXT",
         "payment TEXT",
@@ -534,7 +535,8 @@ class Recorder:
                 lines[(line.item_id, line.price_cents, line.day_old)] += 1
             total = sum(line.price_cents for line in s.lines)
             sales.append(
-                (self.sale_id, day, _iso(day), s.hour, shop.location_id, s.loyalty_id)
+                (self.sale_id, day, _iso(day), s.hour, f"{s.hour:02d}:{s.minute:02d}")
+                + (shop.location_id, s.loyalty_id)
                 + (s.payment.value, total)
             )
             items += [(self.sale_id, i, q, p, int(old)) for (i, p, old), q in lines.items()]

@@ -133,8 +133,17 @@ def test_hidden_facts_never_reach_the_records(history) -> None:
         for c in rows(history.records, f"PRAGMA table_info({t})")
     }
     assert not columns & {"skill", "morale", "speed", "elasticity", "reputation", "awareness"}
+    assert not [c for c in columns if "clean" in c or "strain" in c or "walk" in c]
     assert set(hidden) >= {"seed", "params", "forces", "habits"}
     assert all(h["description"] for h in hidden["habits"].values())
+
+
+def test_sales_carry_the_minute_of_the_hour(history) -> None:
+    times = rows(history.records, "SELECT hour, time FROM sales")
+    assert all(time[:2] == f"{hour:02d}" and len(time) == 5 for hour, time in times)
+    assert len({time[3:] for _, time in times}) == 60
+    shifts = rows(history.records, "SELECT start_hour, end_hour, hours FROM shifts LIMIT 500")
+    assert all(end - start == hours > 0 for start, end, hours in shifts)
 
 
 def test_recipes_joined_with_supplier_prices_give_a_cost_per_item(history) -> None:

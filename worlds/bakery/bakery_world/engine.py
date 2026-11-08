@@ -144,6 +144,7 @@ class SaleLine:
 @dataclass(frozen=True)
 class Sale:
     hour: int
+    minute: int
     customer_id: CustomerId
     loyalty_id: str | None
     payment: Payment
@@ -570,12 +571,12 @@ def _run_location(
     hours = range(24)
     visitors, new_count = _visitors(world, loc, rng, weather)
     open_hours = range(loc.open_hour, loc.close_hour)
-    inside = [(h, c) for h, c in visitors if h in open_hours]
+    inside = sorted(
+        ((h, rng.randrange(60), c) for h, c in visitors if h in open_hours), key=lambda v: v[:2]
+    )
     after_close = len(visitors) - len(inside)
-    rng.shuffle(inside)
-    inside.sort(key=lambda hc: hc[0])
     arrivals = [0] * 24
-    for h, _ in inside:
+    for h, _, _ in inside:
         arrivals[h] += 1
     capacity = _counter_capacity(loc, roster.counters)
     waits = [_wait_minutes(arrivals[h], capacity[h]) for h in hours]
@@ -596,7 +597,7 @@ def _run_location(
     w_out = math.exp(BETA * (params.outside_option + DIRTY_UTILITY * grime))
     old_lots = old
 
-    for hour, c in inside:
+    for hour, minute, c in inside:
         wait = waits[hour]
         if rng.random() < _walkaway_probability(wait, params.walkaway_wait_min):
             walkaways[hour] += 1
@@ -682,7 +683,8 @@ def _run_location(
             payment = Payment.CARD if card else Payment.CASH
             if card:
                 card_revenue += sum(line.price_cents for line in lines)
-            sales.append(Sale(hour, c.id, c.loyalty_id, payment, tuple(lines)))
+            served = min(24 * 60 - 1, hour * 60 + minute + round(min(wait, 60.0)))
+            sales.append(Sale(served // 60, served % 60, c.id, c.loyalty_id, payment, tuple(lines)))
 
     # end-of-day stock
     stock: dict[ItemId, dict[int, int]] = {}
