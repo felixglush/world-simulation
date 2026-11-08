@@ -22,6 +22,7 @@ from bakery_world.records import (
     content_hash,
 )
 from bakery_world.town import build_world
+from bakery_world.writer import CACHE_FILE, Outcome, Writer
 
 HISTORY_DAYS = 1095
 
@@ -85,6 +86,7 @@ class HistoryResult:
     handoff: Path
     content_hash: str
     seconds: float
+    text: Outcome | None = None
 
 
 def hidden_facts(founding: Founding) -> dict:
@@ -114,6 +116,7 @@ def generate_history(
     out_dir: Path | str,
     days: int = HISTORY_DAYS,
     habits: tuple[HabitId, ...] | None = None,
+    writer: Writer | None = None,
 ) -> HistoryResult:
     started = time.perf_counter()
     out = Path(out_dir)
@@ -133,6 +136,9 @@ def generate_history(
     recorder = Recorder(conn, world, seed)
     live(founding, days, recorder.on_report)
     recorder.finish(facts)
+    text = writer.write(recorder.texts, out / CACHE_FILE) if writer else None
+    if text:
+        recorder.apply_texts(text.texts)
     conn.commit()
     conn.close()
     paths["hidden.json"].write_text(json.dumps(hidden_facts(founding), indent=2, sort_keys=True))
@@ -145,6 +151,7 @@ def generate_history(
         paths["handoff.pickle"],
         content_hash(paths["records.sqlite"]),
         round(time.perf_counter() - started, 2),
+        text,
     )
 
 
