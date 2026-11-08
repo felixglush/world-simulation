@@ -6,7 +6,10 @@ from pathlib import Path
 
 from bakery_world import observe
 from bakery_world.actions import ActionRefused, describe_actions, perform
+from bakery_world.analyst import MAX_CALLS as ANALYST_CALLS
 from bakery_world.analyst import Analyst
+from bakery_world.basics import date_of
+from bakery_world.calc import calculator_tool
 from bakery_world.curveballs import Curveball
 from bakery_world.llm import (
     BudgetExhausted,
@@ -22,6 +25,21 @@ from bakery_world.llm import (
 )
 from bakery_world.managed import LogKind, ManagedWorld
 from bakery_world.management import StopRun
+from bakery_world.plan import (
+    MAX_PLAN_ITEMS,
+    MAX_REVIEW_WEEKS,
+    ActionRecord,
+    Experiment,
+    PlanItem,
+    PlanState,
+    conclude_experiment,
+    parse_plan,
+    recent_actions,
+    show_actions,
+    show_experiments,
+    show_plan,
+    start_experiment,
+)
 from bakery_world.town import OWNER_NAME, SHOP_NAME
 
 NOTES_LIMIT = 8000
@@ -57,13 +75,41 @@ OBJECTIVE = (
 
 SYSTEM = (
     "You run the bakery one week at a time. Each turn you can look at the shop with the view_ "
-    "tools, change the business with the action tools, and ask your analyst questions about "
-    "the records with ask_analyst; the analyst can only read, and only you can act. Actions "
-    "that are not allowed come back refused with the reason. Money is in US cents. Each turn "
-    "starts with a fresh conversation: nothing from earlier turns is kept except your notes, "
-    "so use notes_write to keep what you learn, what you changed and what you plan to check. "
+    "tools, change the business with the action tools, ask your analyst questions about the "
+    "records with ask_analyst, and work out numbers with calculate; the analyst can only read, "
+    "and only you can act. Actions that are not allowed come back refused with the reason. "
+    "Money is in US cents.\n\n"
+    "Each turn starts with a fresh conversation. What carries over is in the turn message: "
+    "your plan (plan_update), your experiments (experiment_start, experiment_conclude), your "
+    "own actions of the last four weeks, and your notes (notes_write). Keep findings, reasons "
+    "and open questions in your notes.\n\n"
+    "Work the way a good new general manager would:\n"
+    "- In onboarding, build a picture before acting. Learn how sales, customers, costs and "
+    "cash have moved over the whole history, and why. Look at each item's price, ingredient "
+    "cost, margin and waste; labor hours and wages against sales; opening hours against the "
+    "hours customers come; what suppliers charge; staffing; reviews; and what the founder's "
+    "notebook, letters and contracts say. Write down hypotheses and check each one against "
+    "the records. Then write your findings to your notes and your plan with plan_update.\n"
+    "- Each week, review what changed, review the experiments due for review, act on your "
+    "plan, and record what you did and why.\n"
+    "- Prefer changes you can measure. Change one thing at a time per item where you can, log "
+    "each test with experiment_start, compare like periods (the same weekdays, the same weeks "
+    "last year), and judge an experiment over at least 2 to 3 weeks unless it is clearly "
+    "doing harm. One noisy week is not a result.\n"
+    "- Weigh costs and benefits with numbers before you decide. Use calculate rather than "
+    "doing arithmetic in your head.\n"
+    "- Ask the analyst focused questions and follow up on its answers.\n"
+    "- Use the turn's budget when there is something worth investigating; end the week early "
+    "only when nothing useful is left to do.\n\n"
     "Call end_week when you are done; the week then runs."
 )
+
+
+@dataclass(frozen=True)
+class Budget:
+    calls: int
+    questions: int
+    run_calls: int
 
 
 @dataclass(frozen=True)
@@ -77,13 +123,20 @@ class TurnContext:
     notes: str
     event: dict | None = None
     arrivals: tuple[dict, ...] = ()
+    day: int = 0
+    budget: Budget | None = None
+    plan: tuple[PlanItem, ...] = ()
+    experiments: tuple[Experiment, ...] = ()
+    actions: tuple[ActionRecord, ...] = ()
 
 
-def _limits(kind: TurnKind) -> str:
-    caps = CAPS[kind]
+def _limits(ctx: TurnContext) -> str:
+    b = ctx.budget or Budget(CAPS[ctx.kind].calls, CAPS[ctx.kind].questions, 0)
+    run = f", and {b.run_calls:,} model calls left in the whole run" if ctx.budget else ""
     return (
-        f"This turn you have at most {caps.calls} model calls and {caps.questions} analyst "
-        "questions; when the calls run out, the turn ends as if you had called end_week."
+        f"Budget: {b.calls} model calls left this turn, {b.questions} analyst questions left "
+        f"this turn{run}. Each analyst question uses up to {ANALYST_CALLS} of the run's calls. "
+        "When this turn's calls run out, the turn ends as if you had called end_week."
     )
 
 
@@ -91,17 +144,22 @@ def turn_messages(ctx: TurnContext) -> list[dict]:
     head = {
         TurnKind.ONBOARDING: (
             f"Today is {ctx.date}. This is your onboarding, before week 1 of {ctx.weeks}. "
-            "Read your objective, dig into the records through your analyst to understand how "
-            "the bakery has been doing and why, and write what you find to your notes. You may "
-            "act now too. Call end_week when you are ready for week 1."
+            "Build a picture of the bakery before you change it: work through the records with "
+            "your analyst, form hypotheses and check them, then write your findings to your "
+            "notes and your plan with plan_update. You may act now too. Call end_week when you "
+            "are ready for week 1."
         ),
-        TurnKind.WEEKLY: f"Today is {ctx.date}, the start of week {ctx.week + 1} of {ctx.weeks}.",
+        TurnKind.WEEKLY: (
+            f"Today is {ctx.date}, the start of week {ctx.week + 1} of {ctx.weeks}. Review what "
+            "changed and any experiment due for review, act on your plan, and record what you "
+            "did and why."
+        ),
         TurnKind.INTERRUPT: (
             f"Today is {ctx.date}, during week {ctx.week + 1} of {ctx.weeks}. Something needs "
             "your attention now. Deal with it, then call end_week to let the week carry on."
         ),
     }[ctx.kind]
-    parts = [head, _limits(ctx.kind)]
+    parts = [head, _limits(ctx)]
     if ctx.event:
         parts.append("The event:\n" + json.dumps(ctx.event, indent=1))
     if ctx.arrivals:
@@ -112,6 +170,9 @@ def turn_messages(ctx: TurnContext) -> list[dict]:
         else "none yet; dashboards cover only the weeks you have run, so ask the analyst"
     )
     parts += [
+        "Your plan:\n" + show_plan(ctx.plan),
+        "Your experiments:\n" + show_experiments(ctx.experiments, ctx.day),
+        "Your actions in the last four weeks, oldest first:\n" + show_actions(ctx.actions),
         "Weekly dashboards, oldest first (each covers the 7 days before its date):\n" + dashboards,
         "Open events:\n" + (json.dumps(list(ctx.events), indent=1) if ctx.events else "none"),
         "Your notes:\n" + (ctx.notes or "(empty)"),
@@ -232,6 +293,8 @@ class LLMManager:
     keeps_founder: bool = False
     auto_hire: bool = False
     notes: str = ""
+    plan: tuple[PlanItem, ...] = ()
+    experiments: list[Experiment] = field(default_factory=list)
     onboarded: bool = False
     exhausted: bool = False
     dashboards: deque[dict] = field(default_factory=lambda: deque(maxlen=DASHBOARD_WEEKS))
@@ -261,6 +324,7 @@ class LLMManager:
         self._turn(mw, TurnKind.INTERRUPT, facts, arrivals)
 
     def context(self, mw: ManagedWorld, kind: TurnKind, event=None, arrivals=()) -> TurnContext:
+        caps = CAPS[kind]
         return TurnContext(
             kind,
             mw.date(),
@@ -271,6 +335,11 @@ class LLMManager:
             self.notes,
             event,
             arrivals,
+            mw.day,
+            Budget(caps.calls, caps.questions, self.caller.budget.remaining),
+            self.plan,
+            tuple(self.experiments),
+            recent_actions(mw.log.lines, mw.day),
         )
 
     def tools(self, mw: ManagedWorld, turn: Turn) -> dict[str, Tool]:
@@ -309,6 +378,18 @@ class LLMManager:
             self.notes = text
             return f"saved {len(text)} characters"
 
+        def plan_update(args: dict) -> str:
+            self.plan = parse_plan(args.get("items"))
+            return f"plan saved with {len(self.plan)} items\n" + show_plan(self.plan)
+
+        def experiment_start(args: dict) -> str:
+            e = start_experiment(self.experiments, args, mw.day)
+            return f"experiment {e.name!r} started; review on {date_of(e.due_day)}"
+
+        def experiment_conclude(args: dict) -> str:
+            e = conclude_experiment(self.experiments, args, mw.day)
+            return f"experiment {e.name!r} concluded after {e.weeks_run(mw.day)} weeks"
+
         def end_week(args: dict) -> str:
             turn.ended = True
             return "turn over"
@@ -322,6 +403,55 @@ class LLMManager:
                 ask,
             ),
             Tool("notes_read", "Read your notes.", {}, lambda args: self.notes or "(empty)"),
+            Tool(
+                "plan_update",
+                f"Replace your plan with a short list of at most {MAX_PLAN_ITEMS} items, each "
+                "with a state; the plan persists between turns.",
+                {
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "text": {"type": "string"},
+                                "state": {"type": "string", "enum": list(PlanState)},
+                            },
+                            "required": ["text", "state"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                plan_update,
+            ),
+            Tool("plan_read", "Read your plan.", {}, lambda args: show_plan(self.plan)),
+            Tool(
+                "experiment_start",
+                "Record a test you are starting today: what you changed, what you expect, how "
+                "you will measure it and after how many weeks to review it.",
+                {
+                    "name": {"type": "string", "description": "a short unique name"},
+                    "hypothesis": {"type": "string"},
+                    "change": {"type": "string", "description": "what you changed"},
+                    "metric": {"type": "string", "description": "what you will compare"},
+                    "review_after_weeks": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAX_REVIEW_WEEKS,
+                    },
+                },
+                experiment_start,
+            ),
+            Tool(
+                "experiment_conclude",
+                "Close an experiment with what the numbers showed and what you decided.",
+                {
+                    "name": {"type": "string"},
+                    "result": {"type": "string", "description": "what the numbers showed"},
+                    "decision": {"type": "string", "description": "keep, revert or adjust"},
+                },
+                experiment_conclude,
+            ),
+            calculator_tool(),
             Tool(
                 "notes_write",
                 f"Replace your notes (at most {NOTES_LIMIT} characters); they persist between "

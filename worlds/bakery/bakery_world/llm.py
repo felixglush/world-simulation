@@ -233,5 +233,5 @@ class FakeChatModel:
         return self.script[n] if n < len(self.script) else Reply("done")
 
 
-def tool_call(name: str, **arguments: object) -> ToolCall:
+def tool_call(name: str, /, **arguments: object) -> ToolCall:
     return ToolCall(f"call-{name}", name, json.dumps(arguments))

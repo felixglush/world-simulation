@@ -2,23 +2,26 @@ import json
 
 import pytest
 
-from bakery_world.llm import CallBudget, Caller, FakeChatModel, Reply, tool_call
+from bakery_world.llm import CallBudget, Caller, FakeChatModel, Reply, ToolError, tool_call
 from bakery_world.management import load, manage
 from bakery_world.manager import (
     CAPS,
     OBJECTIVE,
     SYSTEM,
+    Budget,
     LLMManager,
+    Turn,
     TurnContext,
     TurnKind,
     turn_messages,
 )
+from bakery_world.plan import ActionRecord, Experiment, PlanItem, PlanState
 from bakery_world.town import HOME_LOCATION
 
 ANSWER = Reply("Croissant sales fell 9% last year. SQL: SELECT ...")
 
 
-def step(name: str, **args) -> Reply:
+def step(name: str, /, **args) -> Reply:
     return Reply(None, (tool_call(name, **args),))
 
 
@@ -71,12 +74,124 @@ def test_a_scripted_manager_acts_asks_and_ends_the_week(seed1_history) -> None:
     assert seen[3][0][-1]["content"] == ANSWER.content
 
 
-def test_the_objective_and_system_prompts_give_nothing_away() -> None:
-    ctx = TurnContext(TurnKind.ONBOARDING, "2026-01-01", 0, 52, (), (), "")
+FORBIDDEN = (
+    "profit",
+    "net worth",
+    "score",
+    "mistake",
+    "habit",
+    "force",
+    "hidden",
+    "decay",
+    "planted",
+    "elasticity",
+    "morale",
+    "reputation",
+    "awareness",
+)
+
+
+@pytest.mark.parametrize("kind", list(TurnKind))
+def test_the_objective_system_and_turn_templates_give_nothing_away(kind: TurnKind) -> None:
+    ctx = TurnContext(
+        kind,
+        "2026-01-12",
+        1,
+        52,
+        (),
+        (),
+        "",
+        event={"event": "oven"} if kind is TurnKind.INTERRUPT else None,
+        day=1102,
+        budget=Budget(25, 4, 900),
+        plan=(PlanItem("Look at bake plans", PlanState.DOING),),
+        experiments=(Experiment("latte", "h", "c", "m", 2, 1095),),
+        actions=(ActionRecord(1095, "set_price", {"item": "latte"}, "price set", False),),
+    )
     text = (OBJECTIVE + SYSTEM + json.dumps(turn_messages(ctx))).lower()
-    for word in ("profit", "net worth", "score", "mistake", "habit", "force", "hidden"):
-        assert word not in text
+    assert [word for word in FORBIDDEN if word in text] == []
     assert "make the bakery successful" in OBJECTIVE and "retired" in OBJECTIVE
+
+
+def test_the_turn_header_shows_what_is_left_of_the_budget(seed1_history) -> None:
+    ctx = TurnContext(TurnKind.WEEKLY, "2026-01-12", 1, 52, (), (), "", budget=Budget(25, 4, 1234))
+    head = turn_messages(ctx)[1]["content"].split("\n\n")[1]
+    assert head.startswith(
+        "Budget: 25 model calls left this turn, 4 analyst questions left this turn, and 1,234 "
+        "model calls left in the whole run."
+    )
+    policy = manager([step("end_week")] * 2, budget=300, records=seed1_history.records)
+    manage(seed1_history.handoff, policy, weeks=1)
+    onboarding, weekly = (m[1]["content"] for m, _ in policy.manager_model.seen)
+    assert "80 model calls left this turn, 20 analyst questions left this turn, and 300" in (
+        onboarding
+    )
+    assert "25 model calls left this turn, 4 analyst questions left this turn, and 299" in weekly
+
+
+def deep_agent(messages, tools) -> Reply:
+    head = messages[1]["content"]
+    n = sum(m["role"] == "assistant" for m in messages)
+    if "onboarding" in head:
+        return [
+            step("plan_update", items=[{"text": "Test a latte price rise", "state": "doing"}]),
+            step(
+                "experiment_start",
+                name="latte price",
+                hypothesis="Latte buyers will pay 25 cents more",
+                change="latte 450 to 475 cents",
+                metric="latte units and revenue against the same weeks last year",
+                review_after_weeks=2,
+            ),
+            step("set_price", location=HOME_LOCATION, item="latte", price_cents=475),
+            step("calculate", expression="pct_change(450, 475)"),
+            step("end_week"),
+        ][n]
+    if "start of week 3 of" in head and n == 0:
+        return step(
+            "experiment_conclude",
+            name="latte price",
+            result="units flat, revenue up 5%",
+            decision="keep 475",
+        )
+    return step("end_week")
+
+
+def test_a_deep_agent_plans_runs_an_experiment_and_concludes_it(seed1_history) -> None:
+    policy = manager(deep_agent, records=seed1_history.records)
+    result = manage(seed1_history.handoff, policy, weeks=3)
+    seen = policy.manager_model.seen
+    week = {
+        w: next(m[1]["content"] for m, _ in seen if f"start of week {w} of" in m[1]["content"])
+        for w in (2, 3)
+    }
+    for text in week.values():
+        assert "1. [doing] Test a latte price rise" in text
+        assert 'set_price {"item": "latte", "location": "shop1", "price_cents": 475}' in text
+    assert "latte price [running]: started 2026-01-01, 1 of 2 weeks run" in week[2]
+    assert "latte price [due for review]: started 2026-01-01, 2 of 2 weeks run" in week[3]
+    tools = {t["tool"]: t["result"] for t in kinds(result.log, "tool_call")}
+    assert tools["calculate"] == "5.555555556"
+    assert tools["experiment_conclude"] == "experiment 'latte price' concluded after 2 weeks"
+    (latte,) = policy.experiments
+    assert latte.decision == "keep 475" and latte.concluded_day == latte.start_day + 14
+
+
+def test_plan_and_experiment_arguments_are_checked_at_the_tool(seed1_history) -> None:
+    mw = load(seed1_history.handoff)
+    policy = manager([], records=seed1_history.records)
+    tools = policy.tools(mw, Turn(TurnKind.WEEKLY, 4))
+    for items in ("do things", [{"text": "x", "state": "maybe"}], [{"text": "", "state": "todo"}]):
+        with pytest.raises(ToolError):
+            tools["plan_update"].handler({"items": items})
+    start = {"name": "a", "hypothesis": "h", "change": "c", "metric": "m"}
+    with pytest.raises(ToolError):
+        tools["experiment_start"].handler(start | {"review_after_weeks": 0})
+    tools["experiment_start"].handler(start | {"review_after_weeks": 3})
+    with pytest.raises(ToolError):
+        tools["experiment_start"].handler(start | {"review_after_weeks": 3})
+    with pytest.raises(ToolError):
+        tools["experiment_conclude"].handler({"name": "b", "result": "r", "decision": "d"})
 
 
 def test_context_is_fresh_each_week_but_notes_carry_over(seed1_history) -> None:
