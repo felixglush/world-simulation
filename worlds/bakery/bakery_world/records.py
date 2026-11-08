@@ -26,7 +26,7 @@ from bakery_world.founder import (
     SECOND_SHOP_BREAK_MONTHS,
 )
 from bakery_world.habits import HabitId
-from bakery_world.model import World
+from bakery_world.model import LedgerEntry, Location, World
 from bakery_world.town import COMPETITORS, HOME_LOCATION, OWNER_NAME, RIVAL_ID, SHOP_NAME
 
 TABLES: dict[str, tuple[str, ...]] = {
@@ -279,6 +279,60 @@ TEMPLATES: dict[str, tuple[str, ...]] = {
         "A poor wheat harvest has pushed wholesale flour prices sharply higher. Millers expect "
         "elevated prices for at least a year.",
     ),
+    "note_oven_noise": (
+        "{oven} has been making a grinding noise on the early bake. Probably nothing, but it "
+        "takes longer to come up to heat than it used to.",
+        "The fan in {oven} is rattling again. Need to get someone to look at it one of these days.",
+    ),
+    "letter_oven_broken": (
+        "{oven} failed during the morning bake. The engineer can repair it in about {days} days "
+        "for ${repair}, or supply a new oven next morning for ${replace}.",
+    ),
+    "letter_notice": (
+        "I've been offered a job at {rival} for better pay, and I'm going to take it. Please "
+        "take this as my notice; my last day will be {last}. Thank you for everything. {name}",
+    ),
+    "letter_ingredient": (
+        "Dear customer, owing to {reason}, we expect our {ingredient} prices to rise by around "
+        "{pct}% from {start} for {weeks} weeks or so. We will keep you informed. {supplier}",
+    ),
+    "news_chain_lease": (
+        "{chain}, the coffee and pastry chain, has signed a lease on a unit on Corn Street, "
+        "about 300 metres from {area}, and expects to open in {month}.",
+    ),
+    "news_chain_open": (
+        "{chain} opened its Corn Street branch this week, offering a loyalty card and "
+        "a pastry with every large coffee before nine.",
+    ),
+    "news_road_works": (
+        "The council will close the north side of {area} to traffic for resurfacing and new "
+        "drains from {start} for about six weeks. Traders expect fewer passers-by.",
+    ),
+    "letter_landlord": (
+        "Your lease of {address} ends on {end}. We are willing to renew for five years at "
+        "${rent} a month, up from ${old}. Please let us know by {deadline}.",
+    ),
+    "letter_inspection_fail": (
+        "Food hygiene inspection, {date}: cleaning schedules not kept, grease build-up behind "
+        "the ovens and in the extraction hood. A fixed penalty of ${fine} is payable.",
+    ),
+    "letter_inspection_pass": (
+        "Food hygiene inspection, {date}: premises clean and records in order. No action.",
+    ),
+    "news_viral_good": (
+        "A short video of {shop}'s {item} coming out of the oven has been shared tens of "
+        "thousands of times this week.",
+    ),
+    "news_viral_bad": (
+        "A post calling {shop}'s {item} 'stale and overpriced' has been shared thousands of "
+        "times this week, with many replies agreeing.",
+    ),
+    "review_viral_good": ("I came because of the video and the {item} was every bit as good.",),
+    "review_viral_bad": ("Saw the post and tried the {item}. They were right, sadly.",),
+    "letter_catering": (
+        "We'd like {units} pastries with coffee for {client} on {delivery}. At your list prices "
+        "that comes to ${value}. Can you do it?",
+    ),
     "lease": (
         "COMMERCIAL LEASE\nPremises: {address}\nTenant: {shop} ({owner})\nTerm: {start} to "
         "{end}\nRent: ${rent} per month, payable monthly in advance.\nBreak: tenant may "
@@ -338,10 +392,34 @@ class _InvoiceLine:
     cents: int = 0
 
 
+def draw_reviews(rng: random.Random, loc: Location, shop: LocationDay) -> list[tuple[int, str]]:
+    count = sum(rng.random() < REVIEWS_PER_VISIT for _ in range(shop.visits))
+    sold = [i for i, d in sorted(shop.items.items()) if d.sold + d.day_old_sold]
+    early_out = [
+        i
+        for i, d in sorted(shop.items.items())
+        if d.first_stockout_hour is not None and d.first_stockout_hour < EARLY_STOCKOUT_HOUR
+    ]
+    busy = shop.walkaways > 0.08 * max(1, shop.visits)
+    out = []
+    for _ in range(count):
+        rating = round(rng.gauss(1 + 4 * loc.reputation, 0.9) - (0.8 if busy else 0))
+        rating = min(5, max(1, rating))
+        item = CATALOG[rng.choice(sold) if sold else ItemId("croissant")].name.lower()
+        text = write(f"review_{rating}", rng, item=item)
+        if busy and rng.random() < 0.6:
+            text += " " + write("review_wait", rng)
+        elif early_out and rng.random() < 0.3:
+            out_item = CATALOG[rng.choice(early_out)].name.lower()
+            text += " " + write("review_sold_out", rng, item=out_item)
+        out.append((rating, text))
+    return out
+
+
 class Recorder:
-    def __init__(self, conn: sqlite3.Connection, world: World, seed: int) -> None:
+    def __init__(self, conn: sqlite3.Connection, world: World, seed: int, resume: bool = False):
         self.conn, self.world = conn, world
-        self.rng = random.Random(f"{seed}:records")
+        self.rng = random.Random(f"{seed}:records" + (":management" if resume else ""))
         self.sale_id = 0
         self.invoice_id = 0
         self.menu: dict[tuple[LocationId, ItemId], tuple[str, int]] = {}
@@ -350,6 +428,18 @@ class Recorder:
             _InvoiceLine
         )
         self.raise_days: list[int] = []
+        if resume:
+            self.sale_id = conn.execute("SELECT MAX(sale_id) FROM sales").fetchone()[0] or 0
+            self.invoice_id = (
+                conn.execute("SELECT MAX(invoice_id) FROM invoices").fetchone()[0] or 0
+            )
+            self.menu = _snapshot(world)
+            self.wages = {
+                s.id: s.wage_cents_per_hour
+                for s in world.business.staff.values()
+                if s.state is not mc.StaffState.GONE
+            }
+            return
         for table, cols in TABLES.items():
             conn.execute(f"CREATE TABLE {table} ({', '.join(cols)})")
 
@@ -358,13 +448,14 @@ class Recorder:
             marks = ", ".join("?" * len(TABLES[table]))
             self.conn.executemany(f"INSERT INTO {table} VALUES ({marks})", rows)
 
-    def on_report(self, report: DayReport) -> None:
+    def on_report(self, report: DayReport, reviews: bool = True) -> None:
         for shop in report.locations:
             self._sales(report.day, shop)
             self._bakes(report.day, shop)
             self._shifts(report.day, shop)
             self._buy(shop, report.prices_paid)
-            self._reviews(report.day, shop)
+            if reviews:
+                self._reviews(report.day, shop)
         self._menu(report.day)
         self._wage_changes(report.day)
         if date_of(report.day).day == 1:
@@ -432,28 +523,26 @@ class Recorder:
         self.week.clear()
 
     def _reviews(self, day: int, shop: LocationDay) -> None:
-        rng, loc = self.rng, self.world.business.locations[shop.location_id]
-        count = sum(rng.random() < REVIEWS_PER_VISIT for _ in range(shop.visits))
-        sold = [i for i, d in sorted(shop.items.items()) if d.sold + d.day_old_sold]
-        early_out = [
-            i
-            for i, d in sorted(shop.items.items())
-            if d.first_stockout_hour is not None and d.first_stockout_hour < EARLY_STOCKOUT_HOUR
-        ]
-        busy = shop.walkaways > 0.08 * max(1, shop.visits)
-        rows = []
-        for _ in range(count):
-            rating = round(rng.gauss(1 + 4 * loc.reputation, 0.9) - (0.8 if busy else 0))
-            rating = min(5, max(1, rating))
-            item = CATALOG[rng.choice(sold) if sold else ItemId("croissant")].name.lower()
-            text = write(f"review_{rating}", rng, item=item)
-            if busy and rng.random() < 0.6:
-                text += " " + write("review_wait", rng)
-            elif early_out and rng.random() < 0.3:
-                out = CATALOG[rng.choice(early_out)].name.lower()
-                text += " " + write("review_sold_out", rng, item=out)
-            rows.append((None, _iso(day), shop.location_id, rating, text))
-        self._insert("reviews", rows)
+        loc = self.world.business.locations[shop.location_id]
+        self.insert_reviews(day, shop.location_id, draw_reviews(self.rng, loc, shop))
+
+    def insert_reviews(self, day: int, loc: LocationId, reviews: list[tuple[int, str]]) -> None:
+        self._insert("reviews", [(None, _iso(day), loc, rating, text) for rating, text in reviews])
+
+    def append_ledger(self, entries: list[LedgerEntry]) -> None:
+        self._insert("ledger", [_ledger_row(e) for e in entries])
+
+    def append_documents(self, docs: list[tuple[int, str, str, str]]) -> None:
+        self._insert("documents", [(None, _iso(d), k, t, b) for d, k, t, b in docs])
+
+    def refresh_summaries(self) -> None:
+        self._flush_invoices(self.world.day - 1)
+        for table, rows in (
+            ("monthly_pnl", _pnl_rows(self.world)),
+            ("staff", _staff_rows(self.world)),
+        ):
+            self.conn.execute(f"DELETE FROM {table}")
+            self._insert(table, rows)
 
     def _menu(self, day: int) -> None:
         now = _snapshot(self.world)
@@ -494,18 +583,19 @@ class Recorder:
         last = self.world.day - 1
         self._flush_invoices(last)
         world = self.world
-        self._insert(
-            "ledger",
-            [
-                (None, e.day, _iso(e.day), e.location_id, e.account.value)
-                + (SECTION[e.account].value, e.amount_cents, e.memo)
-                for e in world.business.ledger
-            ],
-        )
+        self.append_ledger(world.business.ledger)
         self._insert("monthly_pnl", _pnl_rows(world))
         self._insert("staff", _staff_rows(world))
         docs = _documents(world, founding_facts, self.raise_days, self.rng)
         self._insert("documents", [(None, _iso(d), k, t, b) for d, k, t, b in docs])
+
+
+def _ledger_row(e: LedgerEntry) -> tuple:
+    return (None, e.day, _iso(e.day), e.location_id, e.account.value) + (
+        SECTION[e.account].value,
+        e.amount_cents,
+        e.memo,
+    )
 
 
 def _role(world: World, sid: StaffId) -> str:
