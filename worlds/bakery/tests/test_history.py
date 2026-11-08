@@ -84,9 +84,9 @@ def test_forces_differ_in_mix_by_seed_but_not_in_count() -> None:
     }
 
 
-@pytest.fixture(scope="module")
-def history(tmp_path_factory):
-    return generate_history(SEED, tmp_path_factory.mktemp("history"))
+@pytest.fixture
+def history(seed1_history):
+    return seed1_history
 
 
 def rows(path: Path, sql: str, *args) -> list[tuple]:
