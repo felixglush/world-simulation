@@ -58,6 +58,7 @@ CV_NOISE, INTERVIEW_NOISE = 0.15, 0.04
 NEW_SHOP_LEASE_YEARS = 5
 NEW_SHOP_BAKE_SHARE = 0.5
 FIRE_MORALE_HIT = 0.08
+CASUAL_PREMIUM = 1.1  # relief staff ask more an hour for having no set hours
 ACTIVE_MENU = (MenuState.ON_MENU, MenuState.TRIAL)
 WORKING = (StaffState.EMPLOYED, StaffState.SICK, StaffState.ON_NOTICE)
 NEIGHBORHOODS = tuple(row[0] for row in TOWN_ROWS)
@@ -417,24 +418,38 @@ def interview(mw: ManagedWorld, candidate: str) -> ActionResult:
     )
 
 
-def hire(mw: ManagedWorld, candidate: str, wage_cents_per_hour: int) -> ActionResult:
+def _take_on(
+    mw: ManagedWorld, candidate: str, wage_cents_per_hour: int, casual: bool
+) -> ActionResult:
     c = _candidate(mw, candidate, StaffState.INTERVIEWED)
     wage = _wage(mw, wage_cents_per_hour)
     s = c.staff
     s.state = _step(mw, mc.STAFF, s.id, s.state, mc.StaffEvent.OFFER)
-    if wage < c.reservation_cents:
+    if wage < c.reservation_cents * (CASUAL_PREMIUM if casual else 1):
         s.state = _step(mw, mc.STAFF, s.id, s.state, mc.StaffEvent.DECLINE)
         return ActionResult(f"{s.name} declined ${wage / 100:.2f} an hour", {"hired": False})
     s.state = _step(mw, mc.STAFF, s.id, s.state, mc.StaffEvent.ACCEPT)
     s.wage_cents_per_hour, s.hired_day = wage, mw.day
-    assign_rota(mw.world.business.staff, s, mw.world.business.locations[s.location_id])
+    if casual:
+        s.casual, s.rota, s.contract_hours = True, (None,) * 7, 0
+    else:
+        assign_rota(mw.world.business.staff, s, mw.world.business.locations[s.location_id])
     mw.world.business.staff[s.id] = s
     del mw.candidates[s.id]
+    terms = "on casual terms, with no shifts until rota'd" if casual else "starting tomorrow"
     return ActionResult(
         f"{s.name} hired as {s.role.value} at {s.location_id} for ${wage / 100:.2f} an hour, "
-        "starting tomorrow",
+        + terms,
         {"hired": True, "staff": s.id},
     )
+
+
+def hire(mw: ManagedWorld, candidate: str, wage_cents_per_hour: int) -> ActionResult:
+    return _take_on(mw, candidate, wage_cents_per_hour, casual=False)
+
+
+def hire_casual(mw: ManagedWorld, candidate: str, wage_cents_per_hour: int) -> ActionResult:
+    return _take_on(mw, candidate, wage_cents_per_hour, casual=True)
 
 
 def set_wage(mw: ManagedWorld, staff: str, wage_cents_per_hour: int) -> ActionResult:
@@ -749,6 +764,13 @@ ACTIONS: dict[str, Action] = {
             "Offer an interviewed applicant a wage; they accept if it meets their reservation.",
             (Param("candidate", str, "applicant id"), WAGE),
             hire,
+        ),
+        Action(
+            "hire_casual",
+            "Take an interviewed applicant on as casual relief: no contracted hours or "
+            "severance, rota'd week by week, and they ask 10% more an hour.",
+            (Param("candidate", str, "applicant id"), WAGE),
+            hire_casual,
         ),
         Action(
             "set_wage",

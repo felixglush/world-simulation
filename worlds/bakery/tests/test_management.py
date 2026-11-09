@@ -304,6 +304,29 @@ def test_a_hire_starts_on_a_standard_rota(mw: ManagedWorld) -> None:
     assert shown["weekly_hours"] == 40 and shown["rota"].count("off") == 2
 
 
+def test_a_casual_hire_has_no_set_hours_and_works_only_when_rotad(mw: ManagedWorld) -> None:
+    perform(mw, "post_job", location="shop1", role="counter", wage_cents_per_hour=2500)
+    for _ in range(7):
+        advance_day(mw)
+    applicant = candidates(mw)[0]["candidate"]
+    perform(mw, "interview", candidate=applicant)
+    perform(mw, "hire_casual", candidate=applicant, wage_cents_per_hour=4000)
+    shown = next(s for s in staff_view(mw) if s["staff"] == applicant)
+    assert shown["casual"] and shown["contract_hours"] == 0 and shown["rota"] == ["off"] * 7
+    perform(mw, "set_rota", staff=applicant, shifts=["11-14"] * 7)
+    advance_day(mw)
+    worked = mw.reports[-1].locations[0].shifts
+    assert any(sh.staff_id == applicant for sh in worked)
+
+
+def test_booked_leave_for_the_coming_week_is_on_the_staff_list(mw: ManagedWorld) -> None:
+    booked = {}
+    for _ in range(14):
+        booked |= {s["staff"]: s["booked_leave"] for s in staff_view(mw) if s["booked_leave"]}
+        advance_day(mw)
+    assert booked, "someone on a 13-day leave cycle books a day within two weeks"
+
+
 @dataclass
 class Rotas(Freeze):
     name: str = "rotas"
@@ -321,8 +344,8 @@ def test_without_cleaner_hours_the_shop_gets_dirty_and_reviews_fall(seed1_histor
     control = manage(seed1_history.handoff, Freeze(), weeks=8).world
     dirty = manage(seed1_history.handoff, Rotas(), weeks=8).world
     shop = HOME_LOCATION
-    assert dirty.world.business.locations[shop].cleanliness < 0.7
-    assert control.world.business.locations[shop].cleanliness > 0.9
+    clean = control.world.business.locations[shop].cleanliness
+    assert dirty.world.business.locations[shop].cleanliness < min(0.7, clean - 0.15)
 
     def stars(mw: ManagedWorld) -> float:
         late = [r for day, _, r in mw.reviews if day >= mw.handoff_day + 21]

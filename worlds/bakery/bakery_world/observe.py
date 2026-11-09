@@ -4,7 +4,7 @@ from bakery_world.catalog import CATALOG
 from bakery_world.machines import LocationState, StaffState
 from bakery_world.managed import ManagedWorld
 from bakery_world.model import rota_hours
-from bakery_world.rota import counter_gaps, describe
+from bakery_world.rota import WEEKDAYS, counter_gaps, describe, on_leave
 
 WEEK = 7
 
@@ -104,8 +104,16 @@ def staff(mw: ManagedWorld) -> list[dict]:
             "wage_cents_per_hour": s.wage_cents_per_hour,
             "hired_day": s.hired_day,
             "owner": s.owner,
+            "covers_counter_gaps": s.covers_gaps,
+            "casual": s.casual,
+            "contract_hours": s.contract_hours,
             "rota": describe(s.rota),
             "weekly_hours": rota_hours(s.rota),
+            "booked_leave": [
+                WEEKDAYS[d % WEEK]
+                for d in range(mw.day, mw.day + WEEK)
+                if s.rota and s.rota[d % WEEK] and on_leave(s, d)
+            ],
         }
         for s in sorted(mw.world.business.staff.values(), key=lambda s: s.id)
         if s.state in working
