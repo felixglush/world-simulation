@@ -166,6 +166,8 @@ class Customer:
     recent_visits: list[int] = field(default_factory=list)
     fatigue: dict[ItemId, float] = field(default_factory=dict)
     letdowns: float = 0.0
+    # how much of what this customer buys is each baked item, recent purchases counting most
+    habit: dict[ItemId, float] = field(default_factory=dict)
 
 
 @dataclass

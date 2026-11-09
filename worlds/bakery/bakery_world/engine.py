@@ -93,6 +93,11 @@ STOCKOUT_SUBSTITUTE_PROB = 0.5
 LETDOWN_VISIT_FACTOR = 0.75
 LETDOWN_SUBSTITUTED = 0.25
 LETDOWN_RECOVERY = 0.6
+# a customer whose favourite baked items this shop has taken off its menu comes less often,
+# in proportion to how much of their habit those items were; the habit fades as they buy
+# substitutes
+MISSING_FAVOURITE_WEIGHT = 1.0
+HABIT_DECAY = 0.97
 LAPSE_AFTER_DAYS = 30
 CHURN_AFTER_LAPSED_DAYS = 90
 NEW_QUIET_AFTER_DAYS = 60
@@ -599,6 +604,21 @@ def _star_pull(loc: Location) -> float:
     return max(0.5, 1 + STARS_PULL * (loc.stars - NEUTRAL_STARS))
 
 
+def _note_habit(c: Customer, item: ItemId) -> None:
+    habit = c.habit
+    for k in list(habit):
+        habit[k] *= HABIT_DECAY
+        if habit[k] < 0.02:
+            del habit[k]
+    habit[item] = habit.get(item, 0.0) + 1.0
+
+
+def _missing_share(c: Customer, gone: list[ItemId]) -> float:
+    habit = c.habit
+    missing = sum(habit.get(item, 0.0) for item in gone)
+    return missing / sum(habit.values()) if missing else 0.0
+
+
 def _visitors(
     world: World, loc: Location, rng: random.Random, weather: tuple
 ) -> tuple[list[tuple[int, Customer]], int]:
@@ -628,6 +648,7 @@ def _visitors(
         for nb in nbs.values()
         for seg, e in world.params.elasticity.items()
     }
+    gone = [item for item, entry in loc.menu.items() if entry.state is MenuState.RETIRED]
     visitors: list[tuple[int, Customer]] = []
     hours = range(24)
     known = 0.0
@@ -646,6 +667,8 @@ def _visitors(
             * (0.5 + 0.7 * c.satisfaction)
             * LETDOWN_VISIT_FACTOR**c.letdowns
         )
+        if gone and c.habit:
+            p *= 1 - MISSING_FAVOURITE_WEIGHT * _missing_share(c, gone)
         if rng.random() < p:
             visitors.append((rng.choices(hours, cum_weights=cum[c.neighborhood_id])[0], c))
     market = sum(nb.population * prox[nb.id] for nb in nbs.values()) * BAKERY_GOER_SHARE
@@ -780,6 +803,8 @@ def _run_location(
                 stat.sold += 1
             if CATALOG[o.item_id].made_to_order:
                 _use(grams, o.item_id, 1)
+            else:
+                _note_habit(c, o.item_id)
             lines.append(SaleLine(o.item_id, Cents(o.price), o.day_old))
             revenue += o.price
             packaging += PACKAGING_CENTS[o.category]
