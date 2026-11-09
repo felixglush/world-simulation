@@ -84,7 +84,7 @@ def load(source: Path | str, keeps_founder: bool = False, auto_hire: bool = Fals
     working = (StaffState.EMPLOYED, StaffState.SICK, StaffState.ON_NOTICE)
     mw.handoff_headcount = sum(s.state in working for s in world.business.staff.values())
     world.business.auto_hire = auto_hire
-    for (loc, item, weekday), sold in founding.founder.sold.items():
+    for (loc, item, weekday), sold in founding.founder.demand.items():
         mw.demand[(loc, item, weekday)] = deque(sold, maxlen=DEMAND_WEEKS)
     return mw
 

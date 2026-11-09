@@ -161,6 +161,7 @@ class Customer:
     last_visit_day: int | None = None
     recent_visits: list[int] = field(default_factory=list)
     fatigue: dict[ItemId, float] = field(default_factory=dict)
+    letdowns: float = 0.0
 
 
 @dataclass

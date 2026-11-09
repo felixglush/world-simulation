@@ -81,6 +81,11 @@ OVEN_REPAIR_DAYS = 2
 OVEN_WEAR_PER_FULL_DAY = 0.0035
 WORN_OVEN_CAPACITY = 0.85
 STOCKOUT_SUBSTITUTE_PROB = 0.5
+# a customer let down (walked out of the queue, or what they came for was sold out) comes
+# less often, more so each time, and slowly forgives the shop over good visits
+LETDOWN_VISIT_FACTOR = 0.75
+LETDOWN_SUBSTITUTED = 0.5
+LETDOWN_RECOVERY = 0.7
 LAPSE_AFTER_DAYS = 30
 CHURN_AFTER_LAPSED_DAYS = 90
 NEW_QUIET_AFTER_DAYS = 60
@@ -537,6 +542,7 @@ def _visitors(
             * reach
             * STATE_VISIT_FACTOR[c.state]
             * (0.5 + 0.7 * c.satisfaction)
+            * LETDOWN_VISIT_FACTOR**c.letdowns
         )
         if rng.random() < p:
             visitors.append((rng.choices(hours, cum_weights=cum[c.neighborhood_id])[0], c))
@@ -611,6 +617,7 @@ def _run_location(
         wait = waits[hour]
         if rng.random() < _walkaway_probability(wait, params.walkaway_wait_min):
             walkaways[hour] += 1
+            c.letdowns += 1
             _update_satisfaction(c, 0.25)
             satisfactions.append(c.satisfaction)
             continue
@@ -639,6 +646,7 @@ def _run_location(
         n_items = rng.choices((1, 2, 3), weights=BASKET_SIZE_WEIGHTS[c.segment])[0]
         lines: list[SaleLine] = []
         misses = 0
+        let_down = False
         for _ in range(n_items):
             i = _pick(rng, weights, w_out)
             if i is None:
@@ -646,6 +654,7 @@ def _run_location(
             if qty[i] == 0:
                 items.setdefault(offers[i].item_id, ItemDay()).unmet += 1
                 misses += 1
+                let_down = let_down or not lines
                 if rng.random() >= STOCKOUT_SUBSTITUTE_PROB:
                     break
                 avail = [0.0 if q == 0 else w for w, q in zip(weights, qty, strict=True)]
@@ -679,6 +688,10 @@ def _run_location(
             target = min(target, 0.3)
         target -= 0.05 * sum(line.day_old for line in lines)
         _update_satisfaction(c, target)
+        if let_down:
+            c.letdowns += LETDOWN_SUBSTITUTED if lines else 1
+        elif lines:
+            c.letdowns *= LETDOWN_RECOVERY
         satisfactions.append(c.satisfaction)
         c.last_visit_day = day
         c.recent_visits = [d for d in c.recent_visits if day - d < 30] + [day]

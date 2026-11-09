@@ -192,7 +192,7 @@ class Founder:
         )
         self.hook = hook
         self.quirks = quirks or Quirks()
-        self.sold: dict[tuple[LocationId, ItemId, int], deque[int]] = {}
+        self.demand: dict[tuple[LocationId, ItemId, int], deque[int]] = {}
         self.recent_prices: deque[dict[Ingredient, int]] = deque(maxlen=30)
         self.catering = draw_catering(
             random.Random(f"{seed}:catering-history"), 150, 1050, HISTORY_CATERING_ORDERS
@@ -222,7 +222,7 @@ class Founder:
         for shop in report.locations:
             for item, stat in shop.items.items():
                 key = (shop.location_id, item, report.weekday)
-                self.sold.setdefault(key, deque(maxlen=PLAN_WEEKS)).append(stat.sold)
+                self.demand.setdefault(key, deque(maxlen=PLAN_WEEKS)).append(stat.sold + stat.unmet)
 
     def _tired(self, day: int) -> bool:
         return self.hook.active(ForceId.FOUNDER_FATIGUE, day)
@@ -274,7 +274,7 @@ class Founder:
     def _plan_bakes(self, loc: Location, day: int) -> None:
         weekday = day % 7
         for item, entry in loc.menu.items():
-            history = self.sold.get((loc.id, item, weekday))
+            history = self.demand.get((loc.id, item, weekday))
             if CATALOG[item].made_to_order or not history:
                 continue
             factor = PLAN_HEADROOM * self.quirks.plan_factor.get((item, weekday), 1.0)
