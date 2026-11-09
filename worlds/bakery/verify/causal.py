@@ -65,8 +65,8 @@ KNOWN: dict[str, str] = {
     "R1": HOLDS,
     "H1": HOLDS,
     "W1": HOLDS,
-    "W2": MAGNITUDE,
-    "W3": MAGNITUDE,
+    "W2": HOLDS,
+    "W3": HOLDS,
     "O1": HOLDS,
     "I1": HOLDS,
     "I2": HOLDS,
@@ -83,7 +83,8 @@ KNOWN: dict[str, str] = {
     "SM3": HOLDS,
     "SM4": HOLDS,
     "BK1": FAILS,
-    "BK2": FAILS,
+    "BK2": HOLDS,
+    "AB1": HOLDS,
 }
 
 
@@ -801,7 +802,7 @@ def check_h1(cfg: Config) -> Result:
         f"implied annual quit rate {100 * sum(r[2] for r in rows) / n:.0f}% -> "
         f"{100 * sum(r[3] for r in rows) / n:.0f}% after {MORALE_DAYS} days on two shifts a week",
         "both worse on every seed",
-        "engine._staff_day (HOURS_CUT_MORALE, quit_hazard*4*(1-morale)^2)",
+        "engine._staff_day (HOURS_CUT_MORALE, quit_hazard*(QUIT_FLOOR+QUIT_MORALE*(1-morale)^2))",
     )
 
 
@@ -831,16 +832,16 @@ def check_w1(cfg: Config) -> Result:
 
 @check
 def check_w2(cfg: Config) -> Result:
-    """Annual staff turnover at market pay is 30-100% (food service)."""
+    """Annual staff turnover at market pay is 30-60% (a small bakery, below fast food)."""
     rows = _morale_run(cfg, "wage 1.0", _wage(1.0))
     rate = sum(r[2] for r in rows) / len(rows)
     return Result(
         "W2",
-        "At market pay, annual staff turnover is in the food-service range of 30-100%",
-        HOLDS if 0.30 <= rate <= 1.0 else MAGNITUDE,
+        "At market pay, annual staff turnover is 30-60%",
+        HOLDS if 0.30 <= rate <= 0.60 else MAGNITUDE,
         f"{100 * rate:.0f}% a year (engine quit hazard at morale after {MORALE_DAYS} days)",
-        "30-100%",
-        "params.SCALARS quit_hazard 0.0003-0.0007; engine._staff_day (hazard read by bisection)",
+        "30-60%",
+        "params.SCALARS quit_hazard; engine._staff_day QUIT_FLOOR, QUIT_MORALE (read by bisection)",
     )
 
 
@@ -859,6 +860,46 @@ def check_w3(cfg: Config) -> Result:
         f"elasticity {e:.1f} (annual quits {100 * qa:.0f}% -> {100 * qb:.0f}%)",
         "[-4, -0.5]",
         "engine._staff_day",
+    )
+
+
+@check
+def check_ab1(cfg: Config) -> Result:
+    """Sickness takes 2-4% of rota'd shifts and paid leave about 4 weeks a year; an absent
+    person adds no capacity and is paid only for leave."""
+    shifts = sick = leave = 0
+    bad = []
+    for seed in cfg.seeds:
+        world = fresh(seed)
+        world.business.auto_hire = False
+        rng = random.Random(seed + 100)
+        for _ in range(cfg.days * 4):
+            loc = shop(world)
+            roster = en._roster(world, loc)
+            working = {on.staff.id for on in roster.bakers + roster.counters + roster.cleaners}
+            ill = {s.id for s in world.business.staff.values() if s.state is StaffState.SICK}
+            for s in world.business.staff.values():
+                if s.state.name != "GONE" and rota.worked(s, loc, world.day % 7):
+                    shifts += 1
+                    sick += s.id in ill
+            d = home_days([en.simulate_day(world, rng)])[0]
+            for sh in d.shifts:
+                leave += sh.leave
+                if sh.leave and (sh.staff_id in working or sh.pay_cents <= 0):
+                    bad.append(f"{sh.staff_id} on leave but working or unpaid")
+            if ill & {sh.staff_id for sh in d.shifts}:
+                bad.append("a sick worker was paid")
+    s_share, l_share = sick / shifts, leave / shifts
+    ok = 0.02 <= s_share <= 0.04 and 0.07 <= l_share <= 0.085
+    return Result(
+        "AB1",
+        "Sickness takes 2-4% of shifts, paid leave about 4 weeks a year; absences are not covered",
+        FAILS if bad else HOLDS if ok else MAGNITUDE,
+        f"sick {100 * s_share:.1f}% and paid leave {100 * l_share:.1f}% of {shifts} rota'd "
+        f"shifts; {len(bad)} violations",
+        "sick 2-4%, leave 7-8.5% (4 of 52 weeks); absent staff add no capacity, sick unpaid",
+        "engine._staff_day SICK_RATE, engine._roster, rota.on_leave, engine._shifts",
+        bad[:3],
     )
 
 
@@ -1528,7 +1569,7 @@ def check_bk2(cfg: Config) -> Result:
         f"morale after {MORALE_DAYS} days {sum(a for a, _ in rows) / n:.3f} (40 h) vs "
         f"{sum(b for _, b in rows) / n:.3f} (48 h)",
         "lower by > 0.01 on every seed",
-        "engine._staff_day (cut = 1 - rota/contract; only cuts count)",
+        "engine._staff_day (OVERTIME_MORALE * hours over contract)",
     )
 
 

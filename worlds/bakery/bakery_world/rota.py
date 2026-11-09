@@ -9,6 +9,10 @@ MAX_DAY_HOURS = 10
 MAX_WEEK_HOURS = 48
 DAYS_OFF: tuple[tuple[int, int], ...] = ((6, 2), (5, 1), (6, 4), (5, 0), (6, 3), (5, 2), (6, 0))
 ON_ROTA = (StaffState.EMPLOYED, StaffState.SICK, StaffState.ON_NOTICE)
+# four weeks' paid leave a year, taken a day at a time: one calendar day in 13, staggered so
+# colleagues with nearby staff numbers are off on different days
+LEAVE_EVERY_DAYS = 13
+LEAVE_STAGGER = 5
 
 
 def shift_window(role: Role, loc: Location) -> tuple[int, int]:
@@ -55,3 +59,9 @@ def assign_rota(staff: dict[StaffId, Staff], member: Staff, loc: Location) -> No
 
 def describe(rota: Rota) -> list[str]:
     return [str(s) if s else "off" for s in rota]
+
+
+def on_leave(staff: Staff, day: int) -> bool:
+    if staff.owner or not staff.id[1:].isdigit():
+        return False
+    return (day + LEAVE_STAGGER * int(staff.id[1:])) % LEAVE_EVERY_DAYS == 0

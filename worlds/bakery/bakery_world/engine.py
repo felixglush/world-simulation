@@ -40,7 +40,7 @@ from bakery_world.model import (
     World,
     rota_hours,
 )
-from bakery_world.rota import PRE_OPEN_BAKE_HOURS, assign_rota, standard_shift, worked
+from bakery_world.rota import PRE_OPEN_BAKE_HOURS, assign_rota, on_leave, standard_shift, worked
 from bakery_world.town import HIRE_NAMES, proximity, spawn_customer
 
 MONTHLY_OVERHEAD_CENTS: dict[Account, int] = {
@@ -111,6 +111,11 @@ STRAIN_QUALITY = 0.4
 MIN_RUSHED_QUALITY = 0.6
 STRAIN_SATISFACTION = 0.2
 HOURS_CUT_MORALE = 0.5
+OVERTIME_MORALE = 0.5
+# sickness is unpaid (statutory sick pay starts after waiting days, longer than most absences)
+SICK_RATE = 0.022
+QUIT_FLOOR = 0.5
+QUIT_MORALE = 3.0
 SERVICE_WEIGHT = 0.4
 BOREDOM_PENALTY = 0.15
 MORALE_EFFORT_FLOOR = 0.64
@@ -162,6 +167,7 @@ class Shift:
     start_hour: int
     end_hour: int
     pay_cents: Cents
+    leave: bool = False
 
     @property
     def hours(self) -> int:
@@ -258,6 +264,7 @@ class _Roster:
     bakers: list[_OnShift] = field(default_factory=list)
     counters: list[_OnShift] = field(default_factory=list)
     cleaners: list[_OnShift] = field(default_factory=list)
+    leave: list[_OnShift] = field(default_factory=list)
 
     @property
     def everyone(self) -> list[_OnShift]:
@@ -278,11 +285,15 @@ def _roster(world: World, loc: Location) -> _Roster:
     working = (StaffState.EMPLOYED, StaffState.ON_NOTICE)
     by_role: dict[Role, list[_OnShift]] = {r: [] for r in Role}
     here = [s for s in world.business.staff.values() if s.location_id == loc.id]
+    leave = []
     for s in sorted(here, key=lambda s: s.id):
         shift = worked(s, loc, world.day % 7)
         if shift and s.state in working:
-            by_role[s.role].append(_OnShift(s, shift))
-    roster = _Roster(by_role[Role.BAKER], by_role[Role.COUNTER], by_role[Role.CLEANER])
+            if on_leave(s, world.day):
+                leave.append(_OnShift(s, shift))
+            else:
+                by_role[s.role].append(_OnShift(s, shift))
+    roster = _Roster(by_role[Role.BAKER], by_role[Role.COUNTER], by_role[Role.CLEANER], leave)
     owner = next((s for s in here if s.owner and s.state in working), None)
     if owner and not roster.bakers:
         roster.counters = [on for on in roster.counters if on.staff is not owner]
@@ -331,8 +342,9 @@ def _shifts(roster: _Roster) -> tuple[Shift, ...]:
             on.shift.start_hour,
             on.shift.end_hour,
             Cents(on.staff.wage_cents_per_hour * on.shift.hours),
+            on in roster.leave,
         )
-        for on in roster.everyone
+        for on in roster.everyone + roster.leave
     )
 
 
@@ -871,14 +883,15 @@ def _staff_day(
             + params.wage_morale_sensitivity * wage_gap
             - 0.4 * overload
             - HOURS_CUT_MORALE * max(0.0, cut - HOURS_CUT_UNNOTICED)
+            - OVERTIME_MORALE * max(0.0, -cut)
         )
         s.morale = max(0.05, min(1.0, s.morale + 0.04 * (target - s.morale)))
         if s.state is StaffState.EMPLOYED:
             s.skill = min(1.0, s.skill + 0.0003)
-            if rng.random() < params.quit_hazard * 4 * (1 - s.morale) ** 2:
+            if rng.random() < params.quit_hazard * (QUIT_FLOOR + QUIT_MORALE * (1 - s.morale) ** 2):
                 s.state = step(log, day, mc.STAFF, s.id, s.state, ev.GIVE_NOTICE)
                 s.state_until_day = day + NOTICE_DAYS
-            elif rng.random() < 0.006 * (1.4 - s.reliability):
+            elif rng.random() < SICK_RATE * (1.4 - s.reliability):
                 s.state = step(log, day, mc.STAFF, s.id, s.state, ev.FALL_SICK)
                 s.state_until_day = day + rng.randint(1, 4)
         elif s.state is StaffState.SICK and day >= s.state_until_day:

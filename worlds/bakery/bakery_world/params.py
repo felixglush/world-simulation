@@ -60,7 +60,7 @@ SCALARS: dict[str, Range] = {
     "new_customer_rate": (0.03, 0.04),
     "reputation_drift": (0.015, 0.03),
     "wage_morale_sensitivity": (0.8, 1.6),
-    "quit_hazard": (0.0003, 0.0007),
+    "quit_hazard": (0.0011, 0.0023),
 }
 
 

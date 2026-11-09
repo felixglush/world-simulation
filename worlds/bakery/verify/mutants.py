@@ -162,18 +162,18 @@ MUTANTS: dict[str, Mutant] = {
         "- params.wage_morale_sensitivity * wage_gap",
         note="pay cuts raise morale",
     ),
-    "quits_x4": Mutant(
+    "quits_x2": Mutant(
         ("W2",),
         E,
-        "params.quit_hazard * 4 * (1 - s.morale) ** 2",
-        "params.quit_hazard * 16 * (1 - s.morale) ** 2",
-        note="magnitude moves: food-service turnover",
+        "params.quit_hazard * (QUIT_FLOOR + QUIT_MORALE * (1 - s.morale) ** 2)",
+        "params.quit_hazard * 2 * (QUIT_FLOOR + QUIT_MORALE * (1 - s.morale) ** 2)",
+        note="magnitude moves: twice the turnover",
     ),
     "quits_ignore_morale": Mutant(
         ("W3",),
         E,
-        "params.quit_hazard * 4 * (1 - s.morale) ** 2",
-        "params.quit_hazard * 4 * (1 - 0.6) ** 2",
+        "params.quit_hazard * (QUIT_FLOOR + QUIT_MORALE * (1 - s.morale) ** 2)",
+        "params.quit_hazard * (QUIT_FLOOR + QUIT_MORALE * (1 - 0.6) ** 2)",
         note="pay no longer moves quits",
     ),
     "serve_after_close": Mutant(
@@ -296,12 +296,26 @@ MUTANTS: dict[str, Mutant] = {
         "            if misses:\n                c.base_visit_rate *= 0.7\n",
         note="what-if: a customer who leaves empty-handed after a stockout comes 30% less often",
     ),
-    "overwork_hurts": Mutant(
+    "overtime_free": Mutant(
         ("BK2",),
         E,
-        "max(0.0, cut - HOURS_CUT_UNNOTICED)",
-        "max(0.0, abs(cut) - 0.1)",
-        note="what-if: hours far from contract either way lower morale",
+        "- OVERTIME_MORALE * max(0.0, -cut)",
+        "- OVERTIME_MORALE * 0.0",
+        note="hours over contract cost no morale",
+    ),
+    "leave_halved": Mutant(
+        ("AB1",),
+        "bakery_world.rota",
+        "LEAVE_EVERY_DAYS = 13",
+        "LEAVE_EVERY_DAYS = 26",
+        note="magnitude moves: two weeks' leave a year",
+    ),
+    "sick_rare": Mutant(
+        ("AB1",),
+        E,
+        "SICK_RATE = 0.022",
+        "SICK_RATE = 0.006",
+        note="magnitude moves: sickness a third as common",
     ),
 }
 
