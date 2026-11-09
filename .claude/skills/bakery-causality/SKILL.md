@@ -92,7 +92,7 @@ Paired runs use `town.build_world(seed, established=True)` and `engine.simulate_
 | BK2 | a baker on 48 hours (8 over contract) loses morale | paired, 90 days |
 | FX1-FX5 | fixing the habits (with an afternoon hand), one more counter worker, the cleaner on four days instead of two, a new item every 8 weeks, $500 of flyers every 4 weeks each raise last-13-week sales and operating profit | 26-week managed runs, seeds 1-3, vs Freeze, 2 of 3 seeds |
 | FX6 | the oracle grows year-on-year sales | 52-week oracle run, last 13 weeks vs the same weeks before handover |
-| MX1-MX9 | +25% on every price, firing the cleaner, a counter worker or a baker, hours cut to 09-13, baking 40% less, paying 15% below market (52 weeks) and dropping the 3 best sellers cut sales; baking 40% more cuts profit | managed runs vs Freeze, strictly down on 2 of 3 seeds |
+| MX1-MX9 | +25% on every price, firing the cleaner, a counter worker or a baker, hours cut to 09-13, baking 40% less, paying 15% below market (52 weeks) and dropping the 3 best sellers cut sales; baking 40% more cuts profit | managed runs vs Freeze, strictly down on 2 of 3 seeds (MX9: sales down by more than 4%) |
 
 The state machines are checked by enumeration, not TLA+: each machine is a small table, and the engine steps entities one at a time inside one single-threaded day loop, so there are no interleavings to explore.
 
@@ -100,7 +100,7 @@ The state machines are checked by enumeration, not TLA+: each machine is a small
 
 Sync commit: `2bb9516` (branch `bakery-unit9`). Move it forward only after running both commands at the new commit and confirming every check still measures what its claim says.
 
-- `worlds/bakery/bakery_world/engine.py`: `simulate_day`, `_run_location`, `_roster`, `_effort`, `_counter_capacity`, `_wait_minutes`, `_walkaway_probability`, `_shifts`, `ingredient_cost`, `post`, `prices_paid`, `_age_stock`, `_bake`, `_build_offers`, `_visit_factors`, `_visitors`, `_tidy`, `_update_awareness`, `_update_satisfaction`, `_staff_day`, `_advance_customers`, `market_wage`, and the constants they read
+- `worlds/bakery/bakery_world/engine.py`: `simulate_day`, `_run_location`, `_roster`, `_effort`, `_counter_capacity`, `_wait_minutes`, `_walkaway_probability`, `_shifts`, `ingredient_cost`, `post`, `prices_paid`, `_age_stock`, `_bake`, `_build_offers`, `_visit_factors`, `_visitors`, `_note_habit`, `_missing_share`, `_tidy`, `_update_awareness`, `_update_satisfaction`, `_staff_day`, `_advance_customers`, `market_wage`, and the constants they read
 - `worlds/bakery/bakery_world/records.py`: `draw_reviews`
 - `worlds/bakery/bakery_world/params.py`: `ELASTICITY`, `SCALARS`, `draw_hidden_params`
 - `worlds/bakery/bakery_world/rota.py`: `worked`, `assign_rota`, `shift_window`, `ON_ROTA`
@@ -115,4 +115,4 @@ Not covered: curveballs (they run inside the managed claims but are not checked 
 
 ## Findings at the sync commit
 
-All 54 checks hold. Weak but holding effects worth watching: MX1 (+25% prices: sales -1 to -11% by seed, profit mixed, because the shop often sells out), MX9 (dropping the 3 best sellers: sales -0 to -4%; freed baker time goes to the rest), FX3 (profit up on 2 of 3 seeds) and MX8 (one seed carries most of the effect). The previous sync commit's findings (P1, S3, W2, W3, L1, E2 magnitude; B1, BK1, BK2 fails) were fixed in unit 9.
+All 54 checks hold. Weak but holding effects worth watching: MX1 (+25% prices: sales -1 to -11% by seed, profit mixed, because the shop often sells out), FX3 (profit up on 2 of 3 seeds) and MX8 (one seed carries most of the effect). The previous sync commit's findings (P1, S3, W2, W3, L1, E2 magnitude; B1, BK1, BK2 fails) were fixed in unit 9. MX9 now measures -9.4%, -8.8%, -8.5% (seeds 1-3): customers whose habit leaned on the dropped items visit less, and recover only as they settle on substitutes; the `favourites_forgotten` mutant (no visit penalty) measures -1.8%, +1.0%, -1.1%, the old MX9 numbers, and fails the 4% floor.
