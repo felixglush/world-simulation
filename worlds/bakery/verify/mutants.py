@@ -91,12 +91,13 @@ MUTANTS: dict[str, Mutant] = {
         "if rng.random() < 0.0:",
         note="nobody ever walks away",
     ),
-    "counter_never_unstaffed": Mutant(
+    "nobody_walks_away": Mutant(
         ("S3",),
         E,
-        "COUNTER_CUSTOMERS_PER_HOUR * _counter_staff(roster, h)",
-        "COUNTER_CUSTOMERS_PER_HOUR * max(1.0, _counter_staff(roster, h))",
-        note="magnitude moves: a phantom worker covers empty hours",
+        "    if wait == math.inf:\n        return 1.0\n"
+        "    return min(0.95, max(0.0, (wait - 0.5 * threshold) / (2 * threshold)))",
+        "    return 0.0",
+        note="magnitude moves: nobody ever walks away",
     ),
     "no_cleaning": Mutant(
         ("K1", "K2"),
@@ -287,13 +288,14 @@ MUTANTS: dict[str, Mutant] = {
         ),
         note="a scouted or leased shop trades",
     ),
-    "empty_shelf_defects": Mutant(
-        ("BK1",),
+    "bakers_not_needed": Mutant(
+        ("BK1", "MX4"),
         E,
-        "        if not lines:\n            target = min(target, 0.3)\n",
-        "        if not lines:\n            target = min(target, 0.3)\n"
-        "            if misses:\n                c.base_visit_rate *= 0.7\n",
-        note="what-if: a customer who leaves empty-handed after a stockout comes 30% less often",
+        "    labor_left = sum(\n"
+        "        on.shift.hours * 60 * BAKER_HANDS_ON * _effort(on.staff) for on in roster.bakers\n"
+        "    )\n",
+        "    labor_left = 6000.0\n",
+        note="the bake gets done whoever is in, so a baker is pure cost",
     ),
     "overtime_free": Mutant(
         ("BK2",),
@@ -329,6 +331,99 @@ MUTANTS: dict[str, Mutant] = {
         "max(0.5, 1 + STARS_PULL * (loc.stars - NEUTRAL_STARS))",
         "max(0.5, 1 - STARS_PULL * (loc.stars - NEUTRAL_STARS))",
         note="good reviews keep newcomers away",
+    ),
+    "hours_ignored": Mutant(
+        ("FX6", "MX5"),
+        "bakery_world.actions",
+        "    loc.open_hour, loc.close_hour = open_hour, close_hour\n",
+        "    pass\n",
+        note="set_hours changes nothing, so the hours fixes and cuts do nothing",
+    ),
+    "habit_fixes_ignored": Mutant(
+        ("FX1",),
+        "bakery_world.actions",
+        "    loc.open_hour, loc.close_hour = open_hour, close_hour\n",
+        "    pass\n",
+        more=(
+            (
+                "    old, entry.price_cents = entry.price_cents, Cents(price_cents)\n",
+                "    old = entry.price_cents\n",
+            ),
+            (
+                "    old, b.buy_from[ing] = b.buy_from[ing], supplier\n",
+                "    old = b.buy_from[ing]\n",
+            ),
+            ("    entry.bake_plan = list(weekday_units)\n", "    pass\n"),
+        ),
+        note="hours, prices, suppliers and bake plans cannot be changed, so no habit is fixed",
+    ),
+    "firing_ignored": Mutant(
+        ("MX2", "MX3", "MX4"),
+        "bakery_world.actions",
+        '    let_go(mw, s, "dismissal, two weeks\' pay")\n',
+        "    pass\n",
+        note="a fired worker stays on",
+    ),
+    "counter_never_queues": Mutant(
+        ("FX2", "MX3"),
+        E,
+        "COUNTER_CUSTOMERS_PER_HOUR * _counter_staff(roster, h)",
+        "COUNTER_CUSTOMERS_PER_HOUR * 9",
+        note="the counter serves everyone however many are on it",
+    ),
+    "dirt_harmless": Mutant(
+        ("FX3", "MX2"),
+        E,
+        "DIRT_PER_VISIT = 0.0005",
+        "DIRT_PER_VISIT = 0.0",
+        note="the shop never gets dirty, so cleaning buys nothing",
+    ),
+    "new_items_ignored": Mutant(
+        ("FX4",),
+        "bakery_world.actions",
+        "    loc.menu[key] = entry\n    loc.menu_changed_day = mw.day\n"
+        "    mw.trials[(loc.id, key)] = mw.day + TRIAL_DAYS\n",
+        "    pass\n",
+        note="add_menu_item puts nothing new on sale",
+    ),
+    "flyers_unseen": Mutant(
+        ("FX5",),
+        "bakery_world.actions",
+        "amount_cents * CHANNELS[ch].efficiency",
+        "0.0 * CHANNELS[ch].efficiency",
+        note="marketing spend reaches nobody",
+    ),
+    "price_blind": Mutant(
+        ("MX1",),
+        E,
+        "elas = params.elasticity[c.segment] / nb.income_index",
+        "elas = 0.0",
+        more=(
+            ("PRICE_VISIT_SENSITIVITY = 1.3", "PRICE_VISIT_SENSITIVITY = 0.0"),
+            ("PRICE_SATISFACTION = 0.6", "PRICE_SATISFACTION = 0.0"),
+        ),
+        note="customers ignore prices entirely",
+    ),
+    "bake_plan_ignored": Mutant(
+        ("MX6", "MX7"),
+        "bakery_world.actions",
+        "    entry.bake_plan = list(weekday_units)\n",
+        "    pass\n",
+        note="set_bake_plan changes nothing",
+    ),
+    "pay_irrelevant": Mutant(
+        ("MX8",),
+        E,
+        "+ params.wage_morale_sensitivity * wage_gap",
+        "+ 0.0 * wage_gap",
+        note="pay below market costs no morale",
+    ),
+    "menu_cut_ignored": Mutant(
+        ("MX9",),
+        "bakery_world.actions",
+        "    entry.state = _step(mw, mc.MENU_ITEM, item, entry.state, event)\n",
+        "    pass\n",
+        note="remove_menu_item leaves the item on sale",
     ),
 }
 

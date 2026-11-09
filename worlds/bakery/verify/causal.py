@@ -36,7 +36,7 @@ from bakery_world import rota
 from bakery_world.basics import Account, Ingredient, ItemId, Role, date_of
 from bakery_world.catalog import CATALOG
 from bakery_world.machines import CompetitorState, LocationState, StaffState
-from bakery_world.model import ShiftTime, Staff, World
+from bakery_world.model import ShiftTime, Staff, World, rota_hours
 from bakery_world.town import HOME_LOCATION, RIVAL_ID, build_world
 
 REPO = Path(__file__).resolve().parents[3]
@@ -83,9 +83,24 @@ KNOWN: dict[str, str] = {
     "SM2": HOLDS,
     "SM3": HOLDS,
     "SM4": HOLDS,
-    "BK1": FAILS,
+    "BK1": HOLDS,
     "BK2": HOLDS,
     "AB1": HOLDS,
+    "FX1": HOLDS,
+    "FX2": HOLDS,
+    "FX3": HOLDS,
+    "FX4": HOLDS,
+    "FX5": HOLDS,
+    "FX6": HOLDS,
+    "MX1": HOLDS,
+    "MX2": HOLDS,
+    "MX3": HOLDS,
+    "MX4": HOLDS,
+    "MX5": HOLDS,
+    "MX6": HOLDS,
+    "MX7": HOLDS,
+    "MX8": HOLDS,
+    "MX9": HOLDS,
 }
 
 
@@ -391,8 +406,9 @@ def check_s2(cfg: Config) -> Result:
     pairs = paired(cfg, drop_counter)
     walk = [(sum(d.walkaways for d in da), sum(d.walkaways for d in db)) for _, da, _, db in pairs]
 
+    # waits are capped at 60 minutes; dropping the capped hours would drop the worst ones
     def wait(days):
-        hours = [w for d in days for w in d.wait_minutes_by_hour if 0 < w < 60]
+        hours = [w for d in days for w in d.wait_minutes_by_hour if w > 0]
         return sum(hours) / max(1, len(hours))
 
     waits = [(wait(da), wait(db)) for _, da, _, db in pairs]
@@ -403,7 +419,7 @@ def check_s2(cfg: Config) -> Result:
         "S2",
         "Losing a counter worker lengthens the queue and loses more walkaways",
         HOLDS if ok else FAILS,
-        f"walkaways {wa} -> {wb} ({pct(wb / max(1, wa) - 1)}); mean wait in staffed hours "
+        f"walkaways {wa} -> {wb} ({pct(wb / max(1, wa) - 1)}); mean wait in served hours "
         f"{sum(a for a, _ in waits) / n:.1f} -> {sum(b for _, b in waits) / n:.1f} min",
         "both higher on every seed",
         "engine._counter_capacity -> _wait_minutes -> _walkaway_probability",
@@ -681,31 +697,39 @@ def check_r1(cfg: Config) -> Result:
 
     pairs = paired(cfg, set_sat(0.9), base=set_sat(0.4), days=cfg.days)
 
-    def lapses(world: World) -> int:
-        return sum(t.event == "GO_QUIET" for t in world.business.transitions)
+    def lapses(world: World, known: set[str]) -> int:
+        """Customers there at the start who went quiet: the happier arm also wins more
+        first-timers, and those lapse at the newcomer rate."""
+        return sum(
+            t.event == "GO_QUIET" and t.entity_id in known for t in world.business.transitions
+        )
 
     rows = [
         (
             visits(da),
             visits(db),
-            lapses(a),
-            lapses(b),
+            lapses(a, known),
+            lapses(b, known),
             shop(a).reputation,
             shop(b).reputation,
             shop(a).awareness,
             shop(b).awareness,
         )
-        for a, da, b, db in pairs
+        for seed, (a, da, b, db) in zip(cfg.seeds, pairs, strict=True)
+        for known in [{c.id for c in fresh(seed).customers}]
     ]
-    ok = all(r[1] > r[0] and r[3] < r[2] and r[5] > r[4] and r[7] >= r[6] for r in rows)
+    # lapses are a few dozen a seed in 28 days, so they are judged over all seeds together
+    ok = all(r[1] > r[0] and r[5] > r[4] and r[7] >= r[6] for r in rows) and sum(
+        r[3] for r in rows
+    ) < sum(r[2] for r in rows)
     va, vb = sum(r[0] for r in rows), sum(r[1] for r in rows)
     return Result(
         "R1",
         "Happier customers visit more, lapse less, and raise reputation and word of mouth",
         HOLDS if ok else FAILS,
-        f"satisfaction 0.4 -> 0.9: visits {pct(vb / va - 1)}, lapses "
+        f"satisfaction 0.4 -> 0.9: visits {pct(vb / va - 1)}, lapses among starting customers "
         f"{sum(r[2] for r in rows)} -> {sum(r[3] for r in rows)}",
-        "visits up, lapses down, reputation up, awareness not down on every seed",
+        "visits up, reputation up, awareness not down on every seed; lapses down over all seeds",
         "engine._visitors (0.5+0.7*satisfaction), _advance_customers, _update_awareness",
     )
 
@@ -1648,11 +1672,424 @@ def check_bk2(cfg: Config) -> Result:
     )
 
 
+# ---------------------------------------------------------------- managing: fixes and mistakes
+
+
+POLICY_SEEDS = (1, 2, 3)
+POLICY_WEEKS = 26
+TAIL_DAYS = 91
+
+
+@dataclass(frozen=True)
+class Tail:
+    revenue: float
+    profit: float
+
+
+def _tail(mw, end: int | None = None) -> Tail:
+    """Sales and operating profit over the 13 weeks before `end` (default: the run's end)."""
+    from bakery_world.books import OPERATING
+
+    end = mw.day if end is None else end
+    rev = op = 0
+    for e in mw.world.business.ledger:
+        if end - TAIL_DAYS <= e.day < end:
+            rev += e.amount_cents if e.account is Account.SALES else 0
+            op += e.amount_cents if e.account in OPERATING else 0
+    return Tail(rev / 100, op / 100)
+
+
+def _manage(seed: int, policy, weeks: int):
+    from bakery_world.management import manage
+
+    return manage(handoff(seed)[0], policy, weeks).world
+
+
+_FREEZE: dict[tuple[int, int], Tail] = {}
+
+
+def _freeze_tail(seed: int, weeks: int) -> Tail:
+    """Kept in memory only: under a mutant the Freeze arm must run the broken code too."""
+    from bakery_world.baselines import Freeze
+
+    if (seed, weeks) not in _FREEZE:
+        _FREEZE[(seed, weeks)] = _tail(_manage(seed, Freeze(), weeks))
+    return _FREEZE[(seed, weeks)]
+
+
+def _try(mw, name: str, **args) -> None:
+    from bakery_world.actions import ActionRefused, perform
+
+    try:
+        perform(mw, name, **args)
+    except ActionRefused:
+        pass
+
+
+def _home(mw):
+    return mw.world.business.locations[HOME_LOCATION]
+
+
+def _on_menu(mw) -> list[ItemId]:
+    return [i for i, e in _home(mw).menu.items() if e.state.name == "ON_MENU"]
+
+
+def _baked_items(mw) -> list[ItemId]:
+    return [i for i in _on_menu(mw) if not CATALOG[i].made_to_order]
+
+
+def _at_start(step: Callable) -> Callable:
+    def act(mw, week: int) -> None:
+        if week == 0:
+            step(mw)
+
+    return act
+
+
+def _fix_habits(mw) -> None:
+    habits, home = mw.hidden["habits"], _home(mw)
+    if "cheap_croissant" in habits:
+        price = CATALOG[ItemId("croissant")].typical_price_cents
+        _try(mw, "set_price", location=HOME_LOCATION, item="croissant", price_cents=price)
+    if "dear_butter" in habits:
+        _try(mw, "choose_supplier", ingredient="butter", supplier="greenfield")
+    if "early_close" in habits:
+        _try(mw, "set_hours", location=HOME_LOCATION, open_hour=home.open_hour, close_hour=18)
+    if "early_week_sourdough" in habits and ItemId("sourdough") in home.menu:
+        plan = home.menu[ItemId("sourdough")].bake_plan
+        mid = round(sum(plan[2:5]) / 3)
+        _try(
+            mw,
+            "set_bake_plan",
+            location=HOME_LOCATION,
+            item="sourdough",
+            weekday_units=[mid, mid, *plan[2:]],
+        )
+    if "unpriced_flour_spike" in habits:
+        for item in _on_menu(mw):
+            if CATALOG[item].category.name == "BREAD":
+                price = round(home.menu[item].price_cents * 1.12 / 25) * 25
+                _try(mw, "set_price", location=HOME_LOCATION, item=item, price_cents=price)
+
+
+def _staff_counter() -> Callable:
+    from bakery_world.baselines import Heuristic
+
+    hiring = Heuristic()
+
+    def act(mw, week: int) -> None:
+        if week == 0:
+            n = sum(s.location_id == HOME_LOCATION for s in staff_of(mw.world, Role.COUNTER))
+            hiring.headcount = {(HOME_LOCATION, Role.COUNTER): n + 1}
+        hiring.staff_up(mw)
+
+    return act
+
+
+AFTERNOON = ["15-18"] * 7
+
+
+def _fix_habits_and_staff() -> Callable:
+    """Opening until 18:00 needs someone on the counter, so an afternoon hand is hired."""
+    hire = _staff_counter()
+
+    def act(mw, week: int) -> None:
+        if week == 0:
+            _fix_habits(mw)
+        if "early_close" not in mw.hidden["habits"] or _home(mw).close_hour < 18:
+            return
+        hire(mw, week)
+        for s in staff_of(mw.world, Role.COUNTER):
+            late = s.hired_day > mw.handoff_day and rota.describe(s.rota) != AFTERNOON
+            if late and not s.covers_gaps:
+                _try(mw, "set_rota", staff=s.id, shifts=AFTERNOON)
+
+    return act
+
+
+CLEANER_DAYS = (0, 1, 3, 5)
+
+
+def _cleaner_four_days(mw) -> None:
+    for s in staff_of(mw.world, Role.CLEANER):
+        shift = next(str(x) for x in s.rota if x)
+        _try(
+            mw,
+            "set_rota",
+            staff=s.id,
+            shifts=[shift if d in CLEANER_DAYS else "off" for d in range(7)],
+        )
+
+
+def _refresh_menu(mw, week: int) -> None:
+    if week % 8:
+        return
+    on = set(_on_menu(mw)) | {i for i, e in _home(mw).menu.items() if e.state.name == "TRIAL"}
+    fresh = [i for i in CATALOG if i not in on and CATALOG[i].category.name != "DRINK"]
+    if fresh:
+        _try(mw, "add_menu_item", location=HOME_LOCATION, item=fresh[0])
+
+
+def _market(mw, week: int) -> None:
+    if week % 4 == 0:
+        _try(mw, "spend_marketing", location=HOME_LOCATION, channel="flyers", amount_cents=50_000)
+
+
+def _scale_all_prices(factor: float) -> Callable:
+    def step(mw) -> None:
+        for item in _on_menu(mw):
+            price = round(_home(mw).menu[item].price_cents * factor / 25) * 25
+            _try(mw, "set_price", location=HOME_LOCATION, item=item, price_cents=price)
+
+    return step
+
+
+def _fire(role: Role, pick: Callable) -> Callable:
+    def step(mw) -> None:
+        here = [s for s in staff_of(mw.world, role) if not s.owner and not s.covers_gaps]
+        if here:
+            _try(mw, "fire", staff=pick(here).id)
+
+    return step
+
+
+def _scale_bakes(factor: float) -> Callable:
+    def step(mw) -> None:
+        for item in _baked_items(mw):
+            plan = [round(u * factor) for u in _home(mw).menu[item].bake_plan]
+            _try(mw, "set_bake_plan", location=HOME_LOCATION, item=item, weekday_units=plan)
+
+    return step
+
+
+def _underpay(mw) -> None:
+    from bakery_world.engine import market_wage
+
+    for s in mw.world.business.staff.values():
+        if s.state in rota.ON_ROTA and not s.owner:
+            wage = round(0.85 * market_wage(mw.world, s.role))
+            _try(mw, "set_wage", staff=s.id, wage_cents_per_hour=wage)
+
+
+def _drop_best_sellers(mw) -> None:
+    def demand(item: ItemId) -> int:
+        return sum(sum(mw.demand.get((HOME_LOCATION, item, wd), ())) for wd in range(7))
+
+    for item in sorted(_baked_items(mw), key=lambda i: (-demand(i), i))[:3]:
+        _try(mw, "remove_menu_item", location=HOME_LOCATION, item=item)
+
+
+@dataclass(frozen=True)
+class PolicyClaim:
+    claim: str
+    act: Callable[[], Callable]  # a fresh weekly step for each run
+    up: bool
+    judged: tuple[str, ...]  # the Tail fields that must move
+    where: str
+    weeks: int = POLICY_WEEKS
+
+
+def _once(step: Callable) -> Callable[[], Callable]:
+    return lambda: _at_start(step)
+
+
+def _short_hours(mw) -> None:
+    _try(mw, "set_hours", location=HOME_LOCATION, open_hour=9, close_hour=13)
+
+
+def _weekend_baker(xs: list[Staff]) -> Staff:
+    return min(xs, key=lambda s: rota_hours(s.rota))
+
+
+POLICY_CLAIMS: dict[str, PolicyClaim] = {
+    "FX1": PolicyClaim(
+        "Correcting the founder's habits (croissant at the market price, the cheaper butter, "
+        "open to 18:00, an even sourdough bake, bread priced for dear flour) raises sales and "
+        "operating profit (an afternoon counter hand is hired to cover the longer day)",
+        _fix_habits_and_staff,
+        True,
+        ("revenue", "profit"),
+        "actions.set_price/choose_supplier/set_hours/set_bake_plan",
+    ),
+    "FX2": PolicyClaim(
+        "Hiring one more counter worker, so an absence or a rush leaves someone serving, raises "
+        "sales and operating profit",
+        _staff_counter,
+        True,
+        ("revenue", "profit"),
+        "engine._counter_capacity, engine._lead_cover, engine._walkaway_probability",
+    ),
+    "FX3": PolicyClaim(
+        "Putting the cleaner on four days a week instead of two (Mon, Tue, Thu, Sat) keeps the "
+        "shop cleaner and raises sales and operating profit",
+        _once(_cleaner_four_days),
+        True,
+        ("revenue", "profit"),
+        "engine._tidy, DIRTY_SATISFACTION/DIRTY_UTILITY/DIRTY_STARS",
+    ),
+    "FX4": PolicyClaim(
+        "Adding a new item every 8 weeks against menu fatigue raises sales and operating profit",
+        lambda: _refresh_menu,
+        True,
+        ("revenue", "profit"),
+        "actions.add_menu_item, engine._boredom (menu_changed_day)",
+    ),
+    "FX5": PolicyClaim(
+        "Modest, sustained marketing ($500 of flyers every 4 weeks) raises sales and operating "
+        "profit",
+        lambda: _market,
+        True,
+        ("revenue", "profit"),
+        "actions.spend_marketing, engine awareness",
+    ),
+    "MX1": PolicyClaim(
+        "Raising every price 25% loses customers and cuts sales",
+        _once(_scale_all_prices(1.25)),
+        False,
+        ("revenue",),
+        "engine price utility, PRICE_MEMORY, PRICE_SATISFACTION",
+    ),
+    "MX2": PolicyClaim(
+        "Firing the cleaner cuts sales",
+        _once(_fire(Role.CLEANER, lambda xs: xs[0])),
+        False,
+        ("revenue",),
+        "engine._tidy, DIRTY_*, star_drag",
+    ),
+    "MX3": PolicyClaim(
+        "Firing a counter worker cuts sales",
+        _once(_fire(Role.COUNTER, lambda xs: xs[0])),
+        False,
+        ("revenue",),
+        "engine._counter_capacity, _walkaway_probability, LETDOWN_VISIT_FACTOR",
+    ),
+    "MX4": PolicyClaim(
+        "Firing a baker and changing no rota cuts sales",
+        _once(_fire(Role.BAKER, _weekend_baker)),
+        False,
+        ("revenue",),
+        "engine._roster/_bake, LETDOWN_VISIT_FACTOR",
+    ),
+    "MX5": PolicyClaim(
+        "Cutting the opening hours to 09:00-13:00 cuts sales",
+        _once(_short_hours),
+        False,
+        ("revenue",),
+        "actions.set_hours, engine._visitors (arrivals after close)",
+    ),
+    "MX6": PolicyClaim(
+        "Baking 40% less than the plan cuts sales",
+        _once(_scale_bakes(0.6)),
+        False,
+        ("revenue",),
+        "engine._bake, stockouts -> LETDOWN_VISIT_FACTOR",
+    ),
+    "MX7": PolicyClaim(
+        "Baking 40% more than the plan wastes it, so operating profit falls",
+        _once(_scale_bakes(1.4)),
+        False,
+        ("profit",),
+        "engine._bake/_age_stock, ingredient and packaging cost",
+    ),
+    "MX8": PolicyClaim(
+        "Paying 15% below the market wage raises quits and leaves gaps, so sales fall over a year",
+        _once(_underpay),
+        False,
+        ("revenue",),
+        "engine._staff_day (wage morale, quit hazard), vacancies",
+        weeks=52,
+    ),
+    "MX9": PolicyClaim(
+        "Dropping the three best-selling baked items cuts sales",
+        _once(_drop_best_sellers),
+        False,
+        ("revenue",),
+        "actions.remove_menu_item, engine choice model",
+    ),
+}
+
+
+def _policy_check(cid: str) -> Callable[[Config], Result]:
+    def run_claim(cfg: Config) -> Result:
+        from bakery_world.baselines import Freeze
+
+        pc = POLICY_CLAIMS[cid]
+
+        @dataclass
+        class Scripted(Freeze):
+            name: str = cid.lower()
+            step: Callable = field(default_factory=pc.act)
+
+            def weekly(self, mw, week: int) -> None:
+                self.step(mw, week)
+
+        pairs = [
+            (_freeze_tail(seed, pc.weeks), _tail(_manage(seed, Scripted(), pc.weeks)))
+            for seed in POLICY_SEEDS
+        ]
+        moves = {
+            f: [getattr(b, f) - getattr(a, f) for a, b in pairs] for f in ("revenue", "profit")
+        }
+        ok = all(sum(d > 0 if pc.up else d < 0 for d in moves[f]) >= 2 for f in pc.judged)
+        sales = ", ".join(pct(b.revenue / a.revenue - 1) for a, b in pairs)
+        profit = ", ".join(f"{x:+,.0f}" for x in moves["profit"])
+        return Result(
+            cid,
+            pc.claim,
+            HOLDS if ok else FAILS,
+            f"vs freeze, last 13 of {pc.weeks} weeks: sales {sales}; operating profit {profit} $ "
+            f"(seeds {', '.join(map(str, POLICY_SEEDS))})",
+            f"{' and '.join(pc.judged)} {'up' if pc.up else 'down'} on at least 2 of "
+            f"{len(POLICY_SEEDS)} seeds",
+            pc.where,
+            [
+                f"seed {s}: freeze sales ${a.revenue:,.0f}, profit ${a.profit:,.0f}; "
+                f"arm sales ${b.revenue:,.0f}, profit ${b.profit:,.0f}"
+                for s, (a, b) in zip(POLICY_SEEDS, pairs, strict=True)
+            ],
+        )
+
+    return run_claim
+
+
+for _cid in POLICY_CLAIMS:
+    CHECKS[_cid] = _policy_check(_cid)
+
+
+@check
+def check_fx6(cfg: Config) -> Result:
+    """The oracle's last 13 weeks beat the same weeks a year before (the founder's last ones)."""
+    from bakery_world.baselines import Oracle
+
+    rows = []
+    for seed in POLICY_SEEDS:
+        mw = _manage(seed, Oracle(), 52)
+        rows.append((_tail(mw, mw.day - 364).revenue, _tail(mw).revenue))
+    growth = [b / a - 1 for a, b in rows]
+    return Result(
+        "FX6",
+        "The oracle's combined policy turns the decline into year-on-year sales growth",
+        HOLDS if sum(g > 0 for g in growth) >= 2 else FAILS,
+        f"last 13 weeks vs the same weeks a year before: {', '.join(pct(g) for g in growth)} "
+        f"(seeds {', '.join(map(str, POLICY_SEEDS))})",
+        "up on at least 2 of 3 seeds",
+        "baselines.Oracle -> every engine path",
+        [f"seed {s}: ${a:,.0f} -> ${b:,.0f}" for s, (a, b) in zip(POLICY_SEEDS, rows, strict=True)],
+    )
+
+
 # ---------------------------------------------------------------- driver
 
 
 # checks that share cached runs go to the same worker
-GROUPS = (("P1", "P2"), ("H1", "W1", "W2", "W3", "BK2"), ("A1", "A2"))
+GROUPS = (
+    ("P1", "P2"),
+    ("H1", "W1", "W2", "W3", "BK2"),
+    ("A1", "A2"),
+    ("FX1", "FX2", "FX3", "FX4", "FX5"),
+    ("MX1", "MX2", "MX3", "MX4", "MX5"),
+    ("MX6", "MX7", "MX9"),
+)
 
 
 def _run_group(ids: list[str], cfg: Config) -> list[tuple[Result, float]]:
@@ -1685,6 +2122,9 @@ def main(argv: list[str] | None = None) -> int:
         handoff(1)
     if "BK1" in ids:
         handoff(BAKER_SEED)
+    if (set(POLICY_CLAIMS) | {"FX6"}) & set(ids):
+        for seed in POLICY_SEEDS:
+            handoff(seed)
     tasks = [[c for c in g if c in ids] for g in GROUPS]
     grouped = {c for g in GROUPS for c in g}
     tasks = [t for t in tasks if t] + [[c] for c in ids if c not in grouped]
