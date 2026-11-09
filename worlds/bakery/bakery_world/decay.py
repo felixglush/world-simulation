@@ -92,18 +92,18 @@ class ForceSpec:
 
 
 FORCES: dict[ForceId, ForceSpec] = {
-    ForceId.FOUNDER_FATIGUE: ForceSpec((390, 450), (450, 650), (0.03, 0.32), _founder_fatigue),
-    ForceId.MENU_FATIGUE: ForceSpec((400, 460), (450, 650), (0.05, 0.5), _menu_fatigue),
-    ForceId.FEW_NEW_CUSTOMERS: ForceSpec((380, 480), (450, 650), (0.03, 0.27), _few_new_customers),
-    ForceId.QUALITY_SLIP: ForceSpec((330, 420), (550, 750), (0.02, 0.2), _quality_slip),
-    ForceId.COMPETITOR_ENTRY: ForceSpec((590, 650), (350, 480), (0.07, 0.65), _competitor_entry),
+    ForceId.FOUNDER_FATIGUE: ForceSpec((430, 490), (450, 650), (0.02, 0.13), _founder_fatigue),
+    ForceId.MENU_FATIGUE: ForceSpec((440, 500), (450, 650), (0.05, 0.9), _menu_fatigue),
+    ForceId.FEW_NEW_CUSTOMERS: ForceSpec((420, 520), (450, 650), (0.03, 0.5), _few_new_customers),
+    ForceId.QUALITY_SLIP: ForceSpec((380, 460), (550, 750), (0.02, 0.18), _quality_slip),
+    ForceId.COMPETITOR_ENTRY: ForceSpec((590, 650), (350, 480), (0.07, 1.0), _competitor_entry),
     ForceId.NEIGHBORHOOD_SHIFT: ForceSpec(
-        (700, 760), (300, 420), (0.03, 0.33), _neighborhood_shift
+        (700, 760), (300, 420), (0.03, 0.55), _neighborhood_shift
     ),
 }
 
 
-SEVERITY = (0.34, 0.37)
+SEVERITY = (0.62, 0.65)
 MIX = (0.25, 1.0)
 
 

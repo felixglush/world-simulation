@@ -43,11 +43,14 @@ from bakery_world.model import (
 from bakery_world.rota import PRE_OPEN_BAKE_HOURS, assign_rota, on_leave, standard_shift, worked
 from bakery_world.town import HIRE_NAMES, proximity, spawn_customer
 
+# a bakery's ovens, espresso machine and fridges run on more than a shop's power bill;
+# supplies and services are bookkeeping, cleaning supplies, waste collection and licences
 MONTHLY_OVERHEAD_CENTS: dict[Account, int] = {
-    Account.UTILITIES: 60_000,
-    Account.INSURANCE: 35_000,
-    Account.SOFTWARE_AND_TERMINAL: 18_000,
-    Account.REPAIRS_RESERVE: 25_000,
+    Account.UTILITIES: 260_000,
+    Account.INSURANCE: 70_000,
+    Account.SOFTWARE_AND_TERMINAL: 25_000,
+    Account.REPAIRS_RESERVE: 70_000,
+    Account.SUPPLIES_AND_SERVICES: 190_000,
 }
 DAILY_OVERHEAD_CENTS = {a: round(m * 12 / 365) for a, m in MONTHLY_OVERHEAD_CENTS.items()}
 PAYROLL_ONCOST_RATE = 0.12
@@ -69,7 +72,7 @@ CARD_SHARE: dict[Segment, float] = {
 }
 
 BETA = 1.6
-CARD_FEE = 0.02
+CARD_FEE = 0.027
 DAY_OLD_DISCOUNT = 0.5
 DAY_OLD_QUALITY = 0.75
 COUNTER_CUSTOMERS_PER_HOUR = 50.0
@@ -77,6 +80,7 @@ BAKER_SERVE_SPEED = 0.3
 CLEANER_SERVE_SPEED = 0.5
 HELP_UNTIL_HOUR = 12
 BAKE_DEADLINE_HOUR = 13
+OWNER_BAKE_HOURS = 5
 VACANCY_DAYS = 10
 NOTICE_DAYS = 14
 OVEN_REPAIR_CENTS = 40_000
@@ -87,14 +91,14 @@ STOCKOUT_SUBSTITUTE_PROB = 0.5
 # a customer let down (walked out of the queue, or what they came for was sold out) comes
 # less often, more so each time, and slowly forgives the shop over good visits
 LETDOWN_VISIT_FACTOR = 0.75
-LETDOWN_SUBSTITUTED = 0.5
-LETDOWN_RECOVERY = 0.7
+LETDOWN_SUBSTITUTED = 0.25
+LETDOWN_RECOVERY = 0.6
 LAPSE_AFTER_DAYS = 30
 CHURN_AFTER_LAPSED_DAYS = 90
 NEW_QUIET_AFTER_DAYS = 60
 REGULAR_VISITS = 4
 STATE_VISIT_FACTOR = {CustomerState.NEW: 1.0, CustomerState.REGULAR: 1.0, CustomerState.LAPSED: 0.1}
-BAKERY_GOER_SHARE = 0.053
+BAKERY_GOER_SHARE = 0.09
 AWARENESS_FROM_WORD_OF_MOUTH = 0.015
 AWARENESS_FROM_MARKETING = 0.009
 AWARENESS_HALF_VISITS = 60
@@ -107,7 +111,7 @@ CLEAN_PER_HOUR = 0.05
 SLACK_CLEANING = 0.1
 DIRTY_SATISFACTION = 0.35
 DIRTY_UTILITY = 0.3
-BAKER_HANDS_ON = 0.8
+BAKER_HANDS_ON = 0.85
 STRAIN_FREE_LOAD = 0.85
 MAX_BAKE_LOAD = 2.0
 STRAIN_QUALITY = 0.4
@@ -119,6 +123,7 @@ OVERTIME_MORALE = 0.5
 SICK_RATE = 0.022
 QUIT_FLOOR = 0.5
 QUIT_MORALE = 3.0
+LOYAL_QUITS = 0.1
 SERVICE_WEIGHT = 0.4
 BOREDOM_PENALTY = 0.15
 MORALE_EFFORT_FLOOR = 0.64
@@ -131,7 +136,7 @@ PRICE_MEMORY = 1 / 10
 PRICE_UNNOTICED = 0.02
 # paying more than the going rate sours a visit a little
 PRICE_SATISFACTION = 0.6
-SHOP_LOYALTY = 3
+SHOP_LOYALTY = 5
 BUSY_WALKAWAY_SHARE = 0.08
 BUSY_STARS = 0.8
 DIRTY_STARS = 2.5
@@ -318,10 +323,31 @@ def _roster(world: World, loc: Location) -> _Roster:
                 by_role[s.role].append(_OnShift(s, shift))
     roster = _Roster(by_role[Role.BAKER], by_role[Role.COUNTER], by_role[Role.CLEANER], leave)
     owner = next((s for s in here if s.owner and s.state in working), None)
-    if owner and not roster.bakers:
-        roster.counters = [on for on in roster.counters if on.staff is not owner]
-        roster.bakers.append(_OnShift(owner, standard_shift(Role.BAKER, loc)))
+    if owner:
+        roster.counters, mine = _founder_cover(loc, roster, owner)
+        if not roster.bakers:
+            # she covers a missing baker with a short early bake before her counter shift
+            start = standard_shift(Role.BAKER, loc).start_hour
+            bake = ShiftTime(start, start + OWNER_BAKE_HOURS)
+            roster.bakers.append(_OnShift(owner, bake))
+            late = mine and mine.end_hour > bake.end_hour
+            mine = ShiftTime(max(bake.end_hour, mine.start_hour), mine.end_hour) if late else None
+        if mine:
+            roster.counters.append(_OnShift(owner, mine))
     return roster
+
+
+def _founder_cover(
+    loc: Location, roster: _Roster, owner: Staff
+) -> tuple[list[_OnShift], ShiftTime | None]:
+    """The founder works her own counter shift, or the whole day when the rota leaves an open
+    hour with nobody on the counter."""
+    others = [on for on in roster.counters if on.staff is not owner]
+    mine = next((on.shift for on in roster.counters if on.staff is owner), None)
+    hours = range(loc.open_hour, loc.close_hour)
+    if any(not any(on.covers(h) for on in others) for h in hours):
+        mine = ShiftTime(loc.open_hour, loc.close_hour)
+    return others, mine
 
 
 def _effort(s: Staff) -> float:
@@ -944,7 +970,8 @@ def _staff_day(
         s.morale = max(0.05, min(1.0, s.morale + 0.04 * (target - s.morale)))
         if s.state is StaffState.EMPLOYED:
             s.skill = min(1.0, s.skill + 0.0003)
-            if rng.random() < params.quit_hazard * (QUIT_FLOOR + QUIT_MORALE * (1 - s.morale) ** 2):
+            quit_p = params.quit_hazard * (QUIT_FLOOR + QUIT_MORALE * (1 - s.morale) ** 2)
+            if rng.random() < quit_p * (LOYAL_QUITS if s.loyal else 1.0):
                 s.state = step(log, day, mc.STAFF, s.id, s.state, ev.GIVE_NOTICE)
                 s.state_until_day = day + NOTICE_DAYS
             elif rng.random() < SICK_RATE * (1.4 - s.reliability):

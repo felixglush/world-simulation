@@ -49,27 +49,40 @@ def _flat(rev: Series, op: Series) -> Check:
 
 def _decline(rev: Series, op: Series) -> Check:
     peak = max(trailing3(rev, m) for m in range(3, 37))
-    drop = 1 - rev[35] / peak
+    drop = 1 - trailing3(rev, 36) / peak
     return Check(
-        "year 3 declines", 0.10 <= drop <= 0.25, f"month 36 {drop:.1%} below peak (10-25%)"
+        "year 3 declines", 0.10 <= drop <= 0.25, f"months 34-36 {drop:.1%} below peak (10-25%)"
     )
 
 
+# the handoff is judged on the last quarter: one month's sales swing by about 5%
 def _handoff_revenue(rev: Series, op: Series) -> Check:
-    return Check("handoff revenue", 32_000 <= rev[35] <= 42_000, f"${rev[35]:,.0f} ($32k-$42k)")
+    level = trailing3(rev, 36)
+    return Check("handoff revenue", 32_000 <= level <= 42_000, f"${level:,.0f} ($32k-$42k)")
 
 
 def _handoff_profit(rev: Series, op: Series) -> Check:
-    return Check("handoff profit", -1_000 <= op[35] <= 4_000, f"${op[35]:,.0f} (-$1k to $4k)")
+    level = trailing3(op, 36)
+    return Check("handoff profit", -1_000 <= level <= 4_000, f"${level:,.0f} (-$1k to $4k)")
 
 
-ENVELOPE: tuple[Callable[[Series, Series], Check], ...] = (
-    _growth,
-    _flat,
-    _decline,
-    _handoff_revenue,
-    _handoff_profit,
-)
+# the arc is judged on revenue with the shop's own seasons taken out, the handoff as booked
+SHAPE: tuple[Callable[[Series, Series], Check], ...] = (_growth, _flat, _decline)
+LEVEL: tuple[Callable[[Series, Series], Check], ...] = (_handoff_revenue, _handoff_profit)
+
+
+def deseasonalise(series: Series) -> Series:
+    """Divide each month by its calendar month's mean ratio to a centred 12-month average.
+
+    The shop's realised seasons, not foot traffic's: a shop short of bakers or counter hours
+    cannot follow a December peak, so traffic's swing would overstate it."""
+    ratios: dict[int, list[float]] = {}
+    for m in range(6, len(series) - 6):
+        centred = (sum(series[m - 6 : m + 6]) + sum(series[m - 5 : m + 7])) / 24
+        ratios.setdefault(m % 12, []).append(series[m] / centred)
+    index = {k: sum(v) / len(v) for k, v in ratios.items()}
+    mean = sum(index.values()) / len(index)
+    return [x / (index[m % 12] / mean) for m, x in enumerate(series)]
 
 
 def shop_months(seed: int) -> tuple[Series, Series]:
@@ -88,7 +101,10 @@ def shop_months(seed: int) -> tuple[Series, Series]:
 def calibrate_seed(seed: int) -> SeedCalibration:
     start = time.perf_counter()
     rev, op = shop_months(seed)
-    checks = tuple(check(rev, op) for check in ENVELOPE)
+    adjusted = deseasonalise(rev)
+    checks = tuple(check(adjusted, op) for check in SHAPE) + tuple(
+        check(rev, op) for check in LEVEL
+    )
     return SeedCalibration(seed, rev, op, checks, time.perf_counter() - start)
 
 

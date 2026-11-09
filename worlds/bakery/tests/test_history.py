@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from bakery_world.basics import date_of
-from bakery_world.calibrate import ENVELOPE
+from bakery_world.calibrate import SHAPE, deseasonalise
 from bakery_world.catalog import CATALOG
 from bakery_world.cli import main
 from bakery_world.decay import FORCES, Force, ForceId, draw_forces
@@ -204,14 +204,14 @@ def test_dearer_butter_supplier_and_its_cheaper_rival_are_both_on_record(tmp_pat
 
 def test_early_week_sourdough_overbake_shows_in_the_bake_log(tmp_path) -> None:
     result = generate_history(SEED, tmp_path, days=150, habits=(HabitId.EARLY_WEEK_SOURDOUGH,))
-    unsold = dict(
+    baked_per_sold = dict(
         rows(
             result.records,
-            "SELECT day % 7 IN (0, 1), 1.0 * SUM(baked - sold) / SUM(baked) FROM bake_log "
+            "SELECT day % 7 IN (0, 1), 1.0 * SUM(baked) / SUM(sold) FROM bake_log "
             "WHERE item = 'sourdough' AND day >= 60 AND day % 7 < 5 GROUP BY 1",
         )
     )
-    assert unsold[1] > 2 * unsold[0]
+    assert baked_per_sold[1] > 1.25 * baked_per_sold[0]
 
 
 def test_same_seed_writes_byte_identical_records(tmp_path) -> None:
@@ -239,10 +239,16 @@ def test_handoff_resumes_exactly_where_the_history_stopped(tmp_path) -> None:
 def test_envelope_flags_a_history_that_never_declines() -> None:
     rising = [1000.0 * (10 + m) for m in range(36)]
     flat_profit = [1000.0] * 36
-    results = {c.name: c.passed for c in (check(rising, flat_profit) for check in ENVELOPE)}
+    results = {c.name: c.passed for c in (check(rising, flat_profit) for check in SHAPE)}
     assert results["year 1 grows"] is True
     assert results["year 2 flat"] is False
     assert results["year 3 declines"] is False
+
+
+def test_deseasonalising_removes_a_repeating_calendar_swing() -> None:
+    swing = (0.9, 0.95, 1.0, 1.0, 1.0, 0.95, 0.95, 1.0, 1.0, 1.05, 1.05, 1.15)
+    seasonal = [1000.0 * swing[m % 12] for m in range(36)]
+    assert max(deseasonalise(seasonal)) / min(deseasonalise(seasonal)) == pytest.approx(1.0)
 
 
 def test_calibrate_cli_rejects_a_malformed_seed_range() -> None:

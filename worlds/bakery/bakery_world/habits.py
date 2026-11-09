@@ -46,7 +46,7 @@ def _slow_loyal_baker(world: World, quirks: Quirks, rng: random.Random, seed: in
     baker = min(
         (s for s in world.business.staff.values() if s.role is Role.BAKER), key=lambda s: s.id
     )
-    baker.speed, baker.skill, baker.reliability = 0.6, 0.25, 0.97
+    baker.speed, baker.skill, baker.reliability, baker.loyal = 0.72, 0.25, 0.97, True
     baker.wage_cents_per_hour = Cents(round(market_wage(world, Role.BAKER) * 1.08))
     return {"staff_id": baker.id, "name": baker.name, "speed": 0.6, "skill": 0.25}
 

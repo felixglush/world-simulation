@@ -146,6 +146,7 @@ class Staff:
     owner: bool = False
     rota: Rota = ()
     contract_hours: int = 0
+    loyal: bool = False
 
 
 @dataclass

@@ -69,6 +69,7 @@ class Account(StrEnum):
     INSURANCE = auto()
     SOFTWARE_AND_TERMINAL = auto()
     REPAIRS_RESERVE = auto()
+    SUPPLIES_AND_SERVICES = auto()
     MARKETING = auto()
     INTEREST = auto()
     CATERING = auto()

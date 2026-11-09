@@ -7,7 +7,14 @@ from bakery_world import machines as mc
 from bakery_world.basics import Account, Ingredient, ItemId, Payment, Role
 from bakery_world.catalog import CATALOG
 from bakery_world.cli import main
-from bakery_world.engine import DayReport, prices_paid, run_days, simulate_day
+from bakery_world.engine import (
+    CARD_FEE,
+    HELP_UNTIL_HOUR,
+    DayReport,
+    prices_paid,
+    run_days,
+    simulate_day,
+)
 from bakery_world.machines import CustomerState, LocationState, StaffState
 from bakery_world.model import World
 from bakery_world.town import HOME_LOCATION, build_world
@@ -141,7 +148,7 @@ def test_cash_change_equals_revenue_minus_costs():
             line.price_cents for s in day.sales if s.payment is Payment.CARD for line in s.lines
         )
         assert 0 < card < day.revenue_cents
-        assert day.card_fees_cents == round(card * 0.02)
+        assert day.card_fees_cents == round(card * CARD_FEE)
         assert day.payroll_oncost_cents == round(day.wages_cents * 0.12)
         assert day.wages_cents > 0 and day.rent_cents > 0 and day.ingredient_cost_cents > 0
         assert day.overhead_cents > 0 and report.interest_cents > 0
@@ -174,6 +181,7 @@ def test_unsold_items_are_wasted_after_their_shelf_life_and_sold_day_old_at_half
     menu[croissant].bake_plan = [150] * 7
     menu[sourdough].bake_plan = [60] * 7
     rng = random.Random(7)
+    simulate_day(world, rng)  # the only weekday baker takes her leave on day 0
     day0 = simulate_day(world, rng).locations[0]
     day1 = simulate_day(world, rng).locations[0]
     assert CATALOG[croissant].shelf_life_days == 1
@@ -193,7 +201,7 @@ def test_selling_out_records_the_first_stockout_hour_and_unmet_demand():
         shop(world).menu[ItemId("croissant")].bake_plan = [3] * 7
 
     _, reports = run(1, 5, scarce)
-    stats = [r.locations[0].items[ItemId("croissant")] for r in reports]
+    stats = [r.locations[0].items[ItemId("croissant")] for r in reports[1:]]
     assert all(s.baked == 3 for s in stats)
     assert all(s.first_stockout_hour is not None for s in stats)
     assert sum(s.unmet for s in stats) > 0
@@ -208,16 +216,29 @@ def test_no_working_ovens_means_nothing_is_baked():
     assert all(i.baked == 0 for r in reports for i in r.locations[0].items.values())
 
 
-def test_no_counter_staff_means_every_visitor_walks_away():
-    def sack_counters(world: World) -> None:
+def test_no_staff_means_every_visitor_walks_away():
+    def sack_everyone(world: World) -> None:
         for s in world.business.staff.values():
-            if s.role is Role.COUNTER:
-                s.state = StaffState.GONE
+            s.state = StaffState.GONE
 
-    _, reports = run(1, 3, sack_counters)
+    _, reports = run(1, 3, sack_everyone)
     for r in reports:
         day = r.locations[0]
         assert day.visits > 0 and day.walkaways == day.visits and not day.sales
+
+
+def test_without_counter_staff_bakers_serve_slowly_before_noon_and_then_nobody_does():
+    def sack_counters(world: World) -> None:
+        for s in world.business.staff.values():
+            if s.role in (Role.COUNTER, Role.CLEANER):
+                s.state = StaffState.GONE
+
+    staffed = [r.locations[0] for r in run(1, 4)[1]]
+    helped = [r.locations[0] for r in run(1, 4, sack_counters)[1]]
+    for full, thin in zip(staffed[1:], helped[1:], strict=True):
+        hours = {sale.hour for sale in thin.sales}
+        assert hours and max(hours) <= HELP_UNTIL_HOUR  # the last queue clears on the hour
+        assert thin.walkaways > 1.5 * full.walkaways
 
 
 def test_a_resigned_worker_leaves_and_is_replaced_in_the_same_role():

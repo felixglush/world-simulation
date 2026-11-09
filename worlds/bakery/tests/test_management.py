@@ -258,7 +258,7 @@ def _baker(mw: ManagedWorld) -> str:
 def test_a_rota_sets_the_hours_worked_and_paid(mw: ManagedWorld) -> None:
     baker = _baker(mw)
     result = perform(mw, "set_rota", staff=baker, shifts=["05-09"] + ["off"] * 6)
-    assert result.data == {"weekly_hours": 4}
+    assert result.data == {"weekly_hours": 4, "counter_uncovered_hours": {}}
     shown = next(s for s in staff_view(mw) if s["staff"] == baker)
     assert shown["rota"] == ["05-09"] + ["off"] * 6 and shown["weekly_hours"] == 4
     for _ in range(7):
