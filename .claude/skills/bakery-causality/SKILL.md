@@ -19,7 +19,7 @@ From the repository root:
 PYTHONPATH=worlds/bakery uv run --frozen python worlds/bakery/verify/causal.py
 ```
 
-About 30 s with 4 jobs (the first run also builds a seed-1 and a seed-3 handoff, about 8 s each, cached in `runs/bakery/verify/`, which is gitignored; delete that folder after changing anything that shapes the three-year history). Options: `--only P1,S2` for some checks, `--seeds N` (default 6), `--days N` (default 28), `--draws N` (default 40), `--jobs N`. Stdlib `random` with fixed seeds only; no model calls, no extra dependencies. It is not collected by `pytest worlds/bakery`.
+About 90 s with 4 jobs (the first run also builds seed 1-3 handoffs, about 8 s each, cached in `runs/bakery/verify/`, which is gitignored; delete that folder after changing anything that shapes the three-year history). Options: `--only P1,S2` for some checks, `--seeds N` (default 6), `--days N` (default 28), `--draws N` (default 40), `--jobs N`. Stdlib `random` with fixed seeds only; no model calls, no extra dependencies. It is not collected by `pytest worlds/bakery`.
 
 To prove the checks can still fail (run this after editing a check):
 
@@ -27,7 +27,7 @@ To prove the checks can still fail (run this after editing a check):
 PYTHONPATH=worlds/bakery uv run --frozen python worlds/bakery/verify/mutants.py
 ```
 
-About 3 minutes. Each mutant in `verify/mutants.py` swaps one exact snippet of a `bakery_world` module's source (flip a sign, drop a term) and re-executes the module in memory, in its own process; nothing is written to disk. Every mutant must print `caught`. `mutants.py NAME` runs one.
+About 10 minutes. Each mutant in `verify/mutants.py` swaps one exact snippet of a `bakery_world` module's source (flip a sign, drop a term) and re-executes the module in memory, in its own process; nothing is written to disk. Every mutant must print `caught`. `mutants.py NAME` runs one.
 
 ## Read the output
 
@@ -51,9 +51,9 @@ Paired runs use `town.build_world(seed, established=True)` and `engine.simulate_
 
 | id | claim | method |
 |---|---|---|
-| P1 | +10% on every price cuts units, elasticity -0.5 to -2 | paired, 56 days |
+| P1 | +10% on every price cuts units, elasticity -0.5 to -1.2 | paired, 56 days |
 | P2 | revenue changes by (1+dQ)(1.1)-1, less than +10% | paired, 56 days |
-| P3 | +20% on croissants cuts their units (-0.5 to -4), not the rest | paired, 28 days |
+| P3 | +20% on croissants cuts their units (-1 to -3), not the rest | paired, 28 days |
 | Q1 | baking more raises waste and lowers unmet requests | plan x0.7/x1/x1.3 |
 | Q2 | waste is 5-15% of units baked | 28 days |
 | S1 | wait rises with arrivals, falls with capacity; walkaways rise with wait | generated, `_wait_minutes`, `_walkaway_probability` |
@@ -65,19 +65,22 @@ Paired runs use `town.build_world(seed, established=True)` and `engine.simulate_
 | B1 | more baker hours never bake fewer units or strain more | generated, `_bake` |
 | B2 | strain lowers quality, down to a floor | sweep, `_build_offers` |
 | B3 | short baker shifts: less baked, more strain, fewer stars | paired |
-| R1 | happier customers visit more, lapse less, raise reputation | paired |
+| R1 | happier customers visit more and raise reputation (every seed), lapse less (all seeds together, starting customers) | paired |
 | H1 | hours cut far below contract lower morale and raise quits | paired, 90 days |
 | W1 | pay below market lowers morale and raises quits | paired, 90 days |
-| W2 | turnover at market pay is 30-100% a year | engine hazard read by bisection |
+| W2 | turnover at market pay is 30-60% a year | engine hazard read by bisection |
 | W3 | quit elasticity to pay is -0.5 to -4 | same |
+| AB1 | sickness takes 2-4% of shifts, leave about 4 weeks a year, absences uncovered | 365 days |
 | O1 | closing at 14:00 loses afternoon sales only | paired |
 | I1 | dearer flour raises cost by grams x price, moves no sale | paired, exact |
 | I2 | food and packaging are 25-35% of sales | 28 days |
 | L1 | labor is 25-35% of sales | 28 days |
+| ST1 | better stars bring more newcomers and word of mouth | paired |
 | M1 | marketing raises awareness, concave, and brings visits | generated `_update_awareness` + paired |
 | C1 | a rival opening takes 5-30% of visits | paired |
 | E1 | rain and extreme temperatures lower visits | `_visit_factors` over a year |
-| E2 | best vs worst month differ by 10-40% | `_visit_factors` with the seeded weather |
+| E2 | best vs worst month differ by 10-40%, December peak | `_visit_factors` with the seeded weather |
+| E3 | cold weather moves the mix toward hot drinks | paired |
 | A1 | cash change = that day's ledger; each shop's P&L = what it posted | 40 managed days with random actions, exact |
 | A2 | net worth moves one for one with cash, monotone in operating profit | generated amounts |
 | A3 | revenue = sale lines, wages = shifts, on-costs = 12% | exact |
@@ -87,12 +90,15 @@ Paired runs use `town.build_world(seed, established=True)` and `engine.simulate_
 | SM4 | a shop that is not trading sells and pays nothing | exhaustive over `LocationState` |
 | BK1 | firing either of two bakers does not pay over 52 weeks | `management.manage`, seed 3, freeze vs fire |
 | BK2 | a baker on 48 hours (8 over contract) loses morale | paired, 90 days |
+| FX1-FX5 | fixing the habits (with an afternoon hand), one more counter worker, the cleaner on four days instead of two, a new item every 8 weeks, $500 of flyers every 4 weeks each raise last-13-week sales and operating profit | 26-week managed runs, seeds 1-3, vs Freeze, 2 of 3 seeds |
+| FX6 | the oracle grows year-on-year sales | 52-week oracle run, last 13 weeks vs the same weeks before handover |
+| MX1-MX9 | +25% on every price, firing the cleaner, a counter worker or a baker, hours cut to 09-13, baking 40% less, paying 15% below market (52 weeks) and dropping the 3 best sellers cut sales; baking 40% more cuts profit | managed runs vs Freeze, strictly down on 2 of 3 seeds |
 
 The state machines are checked by enumeration, not TLA+: each machine is a small table, and the engine steps entities one at a time inside one single-threaded day loop, so there are no interleavings to explore.
 
 ## Coverage record
 
-Sync commit: `36fb81a` (branch `claude/project-thread-xae0h9`). Move it forward only after running both commands at the new commit and confirming every check still measures what its claim says.
+Sync commit: `2bb9516` (branch `bakery-unit9`). Move it forward only after running both commands at the new commit and confirming every check still measures what its claim says.
 
 - `worlds/bakery/bakery_world/engine.py`: `simulate_day`, `_run_location`, `_roster`, `_effort`, `_counter_capacity`, `_wait_minutes`, `_walkaway_probability`, `_shifts`, `ingredient_cost`, `post`, `prices_paid`, `_age_stock`, `_bake`, `_build_offers`, `_visit_factors`, `_visitors`, `_tidy`, `_update_awareness`, `_update_satisfaction`, `_staff_day`, `_advance_customers`, `market_wage`, and the constants they read
 - `worlds/bakery/bakery_world/records.py`: `draw_reviews`
@@ -103,10 +109,10 @@ Sync commit: `36fb81a` (branch `claude/project-thread-xae0h9`). Move it forward 
 - `worlds/bakery/bakery_world/town.py`: `build_world`, `STARTING_STAFF`, `RIVAL_ID`; `decay.py`: `RIVAL_APPEAL`
 - `worlds/bakery/bakery_world/machines.py`: `MACHINES`, `advance`, `step`
 - `worlds/bakery/bakery_world/score.py`: `net_worth`, `going_concern`, `operating_profit`
-- `worlds/bakery/bakery_world/managed.py`: `let_go`, `depart`, `retire_founder`; `management.py`: `load`, `manage`, `advance_day`; `actions.py`: `perform` and the actions `_random_action` draws (`set_price`, `spend_marketing`, `draw_credit`, `repay_credit`, `run_promotion`, `post_job`, `buy_market_research`, `set_hours`, `set_wage`, `fire`) plus `set_rota` in BK1; `baselines.py`: `Freeze`
+- `worlds/bakery/bakery_world/managed.py`: `let_go`, `depart`, `retire_founder`; `management.py`: `load`, `manage`, `advance_day`; `actions.py`: `perform` and the actions `_random_action` draws (`set_price`, `spend_marketing`, `draw_credit`, `repay_credit`, `run_promotion`, `post_job`, `buy_market_research`, `set_hours`, `set_wage`, `fire`) plus `set_rota` in BK1; `baselines.py`: `Freeze`, `Heuristic.staff_up` (FX2), `Oracle` (FX6), and in the FX/MX claims `set_hours`, `set_bake_plan`, `choose_supplier`, `add_menu_item`, `remove_menu_item`, `hire`, `set_wage`
 
-Not covered: curveballs, the founder policy's own decisions, history generation and calibration, the records database, the manager and analyst, expansion (second shops), loans and credit interest beyond the ledger identity, menu launches and trials.
+Not covered: curveballs (they run inside the managed claims but are not checked on their own), the founder policy's own decisions, history generation and calibration, the records database, the manager and analyst, expansion (second shops), loans and credit interest beyond the ledger identity, `hire_casual` and the heuristic's relief cover.
 
 ## Findings at the sync commit
 
-`magnitude`: P1 (elasticity about -0.2 after 8 weeks, about -0.35 after 26), S3 (16% walk away; about half in open hours no counter worker covers), W2 (about 10% turnover a year), W3 (quit elasticity about -4.6), L1 (labor 42% of sales; 60% or more in the managed year), E2 (seasons move visits about 5%). `fails`: B1 (on an oven-bound day more baker time can bake fewer units: earlier menu items take the oven and the last item gets nothing), BK1 (firing either baker pays $26-33k on seed 3), BK2 (hours over contract cost no morale). The full report, with counterexamples and the baker analysis, was written for the change that added these checks.
+All 54 checks hold. Weak but holding effects worth watching: MX1 (+25% prices: sales -1 to -11% by seed, profit mixed, because the shop often sells out), MX9 (dropping the 3 best sellers: sales -0 to -4%; freed baker time goes to the rest), FX3 (profit up on 2 of 3 seeds) and MX8 (one seed carries most of the effect). The previous sync commit's findings (P1, S3, W2, W3, L1, E2 magnitude; B1, BK1, BK2 fails) were fixed in unit 9.
