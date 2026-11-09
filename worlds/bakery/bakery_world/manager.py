@@ -320,8 +320,9 @@ def view_tools(mw: ManagedWorld) -> list[Tool]:
         ("view_sites_scouted", "Sites you have scouted for a new shop.", observe.sites_scouted),
         (
             "view_staff",
-            "Current staff, roles, wages and rotas (shift hours per weekday, Monday first).",
-            observe.staff,
+            "Current staff, roles, wages and rotas (shift hours per weekday, Monday first), "
+            "and open hours no counter worker is rota'd for.",
+            observe.staff_view,
         ),
         (
             "view_price_list",

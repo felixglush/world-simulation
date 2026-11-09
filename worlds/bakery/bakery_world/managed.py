@@ -12,10 +12,11 @@ from bakery_world.basics import (
     ItemId,
     LocationId,
     NeighborhoodId,
+    Role,
     StaffId,
     date_of,
 )
-from bakery_world.engine import DayReport, post
+from bakery_world.engine import DayReport, hire_now, post
 from bakery_world.history import Founding
 from bakery_world.machines import (
     CurveballState,
@@ -24,7 +25,7 @@ from bakery_world.machines import (
     StaffState,
     Transition,
 )
-from bakery_world.model import Location, Staff, World
+from bakery_world.model import Location, Staff, Vacancy, World
 from bakery_world.records import Recorder
 
 MANAGER_HOURS_PER_WEEK = 10
@@ -263,9 +264,13 @@ def let_go(mw: ManagedWorld, staff: Staff, memo: str) -> None:
 
 
 def retire_founder(mw: ManagedWorld) -> None:
-    for s in mw.world.business.staff.values():
+    """The founder leaves; the counter hand she hired to take over her shifts starts today."""
+    for s in list(mw.world.business.staff.values()):
         if s.owner and s.state is not StaffState.GONE:
             depart(mw, s)
+            if s.rota:
+                successor = Vacancy(Role.COUNTER, s.location_id, mw.day, s.rota)
+                hire_now(mw.world, mw.rng("successor"), successor)
 
 
 def write_off(mw: ManagedWorld, location: LocationId, name: str | None = None) -> None:

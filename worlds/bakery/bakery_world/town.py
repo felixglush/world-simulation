@@ -39,19 +39,20 @@ from bakery_world.model import (
     Staff,
     Supplier,
     World,
+    rota_hours,
 )
 from bakery_world.params import draw_hidden_params
-from bakery_world.rota import assign_rota
+from bakery_world.rota import parse_rota
 
 HOME_NEIGHBORHOOD = NeighborhoodId("market")
 HOME_LOCATION = LocationId("shop1")
 
 SEGMENT_VISITS_PER_WEEK: dict[Segment, float] = {
-    Segment.COMMUTER: 2.2,
-    Segment.OFFICE: 1.8,
-    Segment.STUDENT: 1.2,
-    Segment.FAMILY: 0.8,
-    Segment.RETIREE: 1.3,
+    Segment.COMMUTER: 1.9,
+    Segment.OFFICE: 1.55,
+    Segment.STUDENT: 1.0,
+    Segment.FAMILY: 0.7,
+    Segment.RETIREE: 1.1,
 }
 
 SEGMENT_LOYALTY_ENROLL = 0.35
@@ -177,20 +178,23 @@ def _staff(rng: random.Random, seq: int, role: Role, name: str, loc: LocationId)
     )
 
 
-STARTING_STAFF = (
-    (Role.BAKER, "Marta"),
-    (Role.BAKER, "Idris"),
-    (Role.COUNTER, "Joss"),
-    (Role.COUNTER, "Priya"),
-    (Role.COUNTER, "Theo"),
-    (Role.CLEANER, "Bea"),
+OFF = "off"
+# weekly rotas, Monday first: one baker every day, the counter covered every open hour with
+# a second pair of hands at busy times, and a part-time cleaner
+STARTING_STAFF: tuple[tuple[Role, str, tuple[str, ...]], ...] = (
+    (Role.BAKER, "Marta", ("05-13",) * 5 + (OFF,) * 2),
+    (Role.BAKER, "Idris", (OFF,) * 5 + ("05-13",) * 2),
+    (Role.COUNTER, "Joss", ("07-15",) * 5 + (OFF,) * 2),
+    (Role.COUNTER, "Priya", (OFF,) * 2 + ("10-18",) * 5),
+    (Role.COUNTER, "Theo", ("10-18", "10-18", OFF, OFF, OFF, "07-10", "07-10")),
+    (Role.CLEANER, "Bea", ("14-18", OFF, "14-18", OFF, "14-18", OFF, OFF)),
 )
-OPENING_STAFF = (
-    (Role.BAKER, "Marta"),
-    (Role.BAKER, "Idris"),
-    (Role.COUNTER, "Joss"),
-    (Role.COUNTER, "Priya"),
-    (Role.CLEANER, "Bea"),
+OWNER_ROTA = (OFF,) + ("07-15",) * 5 + (OFF,)
+OPENING_STAFF: tuple[tuple[Role, str, tuple[str, ...]], ...] = (
+    (Role.BAKER, "Marta", ("05-13",) * 5 + (OFF,) * 2),
+    (Role.BAKER, "Idris", (OFF,) * 5 + ("05-13",) * 2),
+    (Role.COUNTER, "Joss", ("07-15", OFF, "11-15", "11-15", OFF, OFF, "07-15")),
+    (Role.CLEANER, "Bea", ("11-15", OFF, "11-15", OFF, "11-15", OFF, OFF)),
 )
 HIRE_NAMES = (
     "Sana",
@@ -261,7 +265,7 @@ def _owner(loc: LocationId) -> Staff:
 
 @dataclass(frozen=True)
 class Start:
-    staff: tuple[tuple[Role, str], ...]
+    staff: tuple[tuple[Role, str, tuple[str, ...]], ...]
     menu: tuple[ItemId, ...]
     customers: int
     reach_floor: float
@@ -345,15 +349,20 @@ def build_world(seed: int, established: bool = False) -> World:
         close_hour=start.close_hour,
         reputation=start.reputation,
         awareness=start.awareness,
+        stars=1 + 4 * start.reputation,
     )
     staff = {}
+    rotas = [rota for *_, rota in start.staff]
     members = [
-        _staff(rng, seq, role, name, HOME_LOCATION) for seq, (role, name) in enumerate(start.staff)
+        _staff(rng, seq, role, name, HOME_LOCATION)
+        for seq, (role, name, _) in enumerate(start.staff)
     ]
     if not established:
         members.insert(0, _owner(HOME_LOCATION))
-    for member in members:
-        assign_rota(staff, member, shop)
+        rotas.insert(0, OWNER_ROTA)
+    for member, rota in zip(members, rotas, strict=True):
+        member.rota = parse_rota(rota)
+        member.contract_hours = rota_hours(member.rota)
         staff[member.id] = member
 
     weights = [n.population * (start.reach_floor + proximity(home, n)) for n in town.values()]
@@ -393,4 +402,5 @@ def build_world(seed: int, established: bool = False) -> World:
         weather=SeasonalWeather(seed),
         ingredient_prices=MeanRevertingPrices(seed),
         foot_traffic=SeasonalFootTraffic(),
+        seed=seed,
     )

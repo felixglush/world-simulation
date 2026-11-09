@@ -94,9 +94,8 @@ MUTANTS: dict[str, Mutant] = {
     "counter_never_unstaffed": Mutant(
         ("S3",),
         E,
-        "COUNTER_CUSTOMERS_PER_HOUR * sum(_effort(on.staff) for on in counters if on.covers(h))",
-        "COUNTER_CUSTOMERS_PER_HOUR * max(1.0, sum(_effort(on.staff) for on in "
-        "counters if on.covers(h)))",
+        "COUNTER_CUSTOMERS_PER_HOUR * _counter_staff(roster, h)",
+        "COUNTER_CUSTOMERS_PER_HOUR * max(1.0, _counter_staff(roster, h))",
         note="magnitude moves: a phantom worker covers empty hours",
     ),
     "no_cleaning": Mutant(
@@ -115,9 +114,9 @@ MUTANTS: dict[str, Mutant] = {
     ),
     "dirty_stars_flip": Mutant(
         ("K2",),
-        R,
-        "drag = (0.8 if busy else 0) + DIRTY_STARS * grime",
-        "drag = (0.8 if busy else 0) - DIRTY_STARS * grime",
+        E,
+        "+ DIRTY_STARS * (1 - loc.cleanliness)",
+        "- DIRTY_STARS * (1 - loc.cleanliness)",
         note="dirt earns stars",
     ),
     "oven_first_come": Mutant(
@@ -225,12 +224,12 @@ MUTANTS: dict[str, Mutant] = {
         "(1.03 if seg is Segment.COMMUTER else 1.06) if rain else 1.0",
         note="rain brings visits",
     ),
-    "strong_seasons": Mutant(
+    "weak_seasons": Mutant(
         ("E2",),
         X,
-        "SEASONAL_AMPLITUDE = 0.015",
-        "SEASONAL_AMPLITUDE = 0.08",
-        note="magnitude moves: an 8% seasonal swing in foot traffic",
+        "MONTH_TRAFFIC = (0.91, 0.95, 0.99, 1.01, 1.02, 1.0, 0.96, 0.95, 1.0, 1.02, 1.04, 1.12)",
+        "MONTH_TRAFFIC = (0.98, 0.99, 1.0, 1.0, 1.01, 1.0, 0.99, 0.98, 1.0, 1.0, 1.01, 1.02)",
+        note="magnitude moves: a 4% seasonal swing in foot traffic",
     ),
     "cash_leak": Mutant(
         ("A1",),
@@ -316,6 +315,20 @@ MUTANTS: dict[str, Mutant] = {
         "SICK_RATE = 0.022",
         "SICK_RATE = 0.006",
         note="magnitude moves: sickness a third as common",
+    ),
+    "drinks_ignore_weather": Mutant(
+        ("E3",),
+        E,
+        "DRINK_WARMTH_PER_DEGREE = 0.012",
+        "DRINK_WARMTH_PER_DEGREE = -0.012",
+        note="hot drinks sell better on hot days",
+    ),
+    "stars_repel": Mutant(
+        ("ST1",),
+        E,
+        "max(0.5, 1 + STARS_PULL * (loc.stars - NEUTRAL_STARS))",
+        "max(0.5, 1 - STARS_PULL * (loc.stars - NEUTRAL_STARS))",
+        note="good reviews keep newcomers away",
     ),
 }
 

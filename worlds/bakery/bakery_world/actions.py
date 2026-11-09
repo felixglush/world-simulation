@@ -41,6 +41,7 @@ from bakery_world.rota import (
     PRE_OPEN_BAKE_HOURS,
     WEEKDAYS,
     assign_rota,
+    counter_gaps,
     describe,
     shift_window,
 )
@@ -293,9 +294,11 @@ def set_hours(mw: ManagedWorld, location: str, open_hour: int, close_hour: int) 
     if close_hour - open_hour < 4:
         raise ActionRefused("the shop must open for at least 4 hours")
     loc.open_hour, loc.close_hour = open_hour, close_hour
+    gaps = counter_gaps(list(mw.world.business.staff.values()), loc)
     return ActionResult(
         f"{location} opens {open_hour}:00 to {close_hour}:00 from today; staff rotas are "
-        "unchanged and shifts outside the hours they may work are cut to fit"
+        "unchanged and shifts outside the hours they may work are cut to fit" + _gap_note(gaps),
+        {"counter_uncovered_hours": gaps},
     )
 
 
@@ -329,9 +332,19 @@ def set_rota(mw: ManagedWorld, staff: str, shifts: list[str]) -> ActionResult:
     if total > MAX_WEEK_HOURS:
         raise ActionRefused(f"that is {total} hours a week, more than {MAX_WEEK_HOURS}")
     s.rota = tuple(rota)
+    gaps = counter_gaps(list(mw.world.business.staff.values()), loc)
     return ActionResult(
-        f"{s.name}: {' '.join(describe(s.rota))} from today, {total} hours a week (was {before})",
-        {"weekly_hours": total},
+        f"{s.name}: {' '.join(describe(s.rota))} from today, {total} hours a week (was {before})"
+        + _gap_note(gaps),
+        {"weekly_hours": total, "counter_uncovered_hours": gaps},
+    )
+
+
+def _gap_note(gaps: dict[str, list[str]]) -> str:
+    if not gaps:
+        return ""
+    return "; no counter worker on the rota " + ", ".join(
+        f"{day} {' '.join(spans)}" for day, spans in gaps.items()
     )
 
 

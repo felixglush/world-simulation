@@ -7,6 +7,7 @@ from datetime import date
 from pathlib import Path
 from typing import NamedTuple
 
+from bakery_world import engine
 from bakery_world import machines as mc
 from bakery_world.basics import (
     START_DATE,
@@ -20,7 +21,7 @@ from bakery_world.basics import (
 from bakery_world.books import OPERATING, SECTION, Section, monthly_by_account
 from bakery_world.catalog import CATALOG
 from bakery_world.decay import FORCES, ForceId
-from bakery_world.engine import LOAN_APR, DayReport, LocationDay
+from bakery_world.engine import BUSY_WALKAWAY_SHARE, LOAN_APR, DayReport, LocationDay
 from bakery_world.founder import (
     LOAN_PRINCIPAL_PER_MONTH_CENTS,
     SECOND_SHOP,
@@ -399,9 +400,7 @@ MIN_WAGE_EFFECTIVE_DAY = (date(2026, 4, 1) - START_DATE).days
 MIN_WAGE_ANNOUNCED_DAY = 1040
 REVIEWS_PER_VISIT = 0.0015
 DIRTY_REVIEW_GRIME = 0.35
-DIRTY_STARS = 2.5
 UNEVEN_REVIEW_STRAIN = 0.1
-UNEVEN_STARS = 1.5
 EARLY_STOCKOUT_HOUR = 12
 RAISE_NOTE_MIN_STAFF = 3
 
@@ -442,12 +441,12 @@ def draw_reviews(rng: random.Random, loc: Location, shop: LocationDay) -> list[R
         for i, d in sorted(shop.items.items())
         if d.first_stockout_hour is not None and d.first_stockout_hour < EARLY_STOCKOUT_HOUR
     ]
-    busy = shop.walkaways > 0.08 * max(1, shop.visits)
+    busy = shop.walkaways > BUSY_WALKAWAY_SHARE * max(1, shop.visits)
     grime = 1 - loc.cleanliness
     dirty = grime > DIRTY_REVIEW_GRIME
     out = []
     for _ in range(count):
-        drag = (0.8 if busy else 0) + DIRTY_STARS * grime + UNEVEN_STARS * shop.bake_strain
+        drag = engine.star_drag(loc, shop.walkaways, shop.visits, shop.bake_strain)
         rating = min(5, max(1, round(rng.gauss(1 + 4 * loc.reputation, 0.9) - drag)))
         item = CATALOG[rng.choice(sold) if sold else ItemId("croissant")].name.lower()
         text = write(f"review_{rating}", rng, item=item)

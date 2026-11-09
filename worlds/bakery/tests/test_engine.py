@@ -88,8 +88,12 @@ def test_closing_at_15_removes_afternoon_sales_that_18_has():
     def afternoon(reports):
         return sum(len(s.lines) for r in reports for s in r.locations[0].sales if s.hour >= 15)
 
+    def after_queue(reports):
+        # anyone still queueing at 15:00 is served by 16:00
+        return sum(1 for r in reports for s in r.locations[0].sales if s.hour >= 16)
+
     assert afternoon(late) > 0
-    assert afternoon(early) == 0
+    assert after_queue(early) == 0
     assert sum(r.locations[0].arrivals_after_close for r in early) > 0
 
 
@@ -167,7 +171,7 @@ def test_unsold_items_are_wasted_after_their_shelf_life_and_sold_day_old_at_half
     world = build_world(1, established=True)
     menu = shop(world).menu
     croissant, sourdough = ItemId("croissant"), ItemId("sourdough")
-    menu[croissant].bake_plan = [60] * 7
+    menu[croissant].bake_plan = [150] * 7
     menu[sourdough].bake_plan = [60] * 7
     rng = random.Random(7)
     day0 = simulate_day(world, rng).locations[0]

@@ -57,6 +57,10 @@ def assign_rota(staff: dict[StaffId, Staff], member: Staff, loc: Location) -> No
     member.contract_hours = rota_hours(member.rota)
 
 
+def parse_rota(texts: tuple[str, ...]) -> Rota:
+    return tuple(None if t == "off" else ShiftTime(*(int(h) for h in t.split("-"))) for t in texts)
+
+
 def describe(rota: Rota) -> list[str]:
     return [str(s) if s else "off" for s in rota]
 
@@ -65,3 +69,25 @@ def on_leave(staff: Staff, day: int) -> bool:
     if staff.owner or not staff.id[1:].isdigit():
         return False
     return (day + LEAVE_STAGGER * int(staff.id[1:])) % LEAVE_EVERY_DAYS == 0
+
+
+def counter_gaps(staff: list[Staff], loc: Location) -> dict[str, list[str]]:
+    """Open hours, per weekday, that no counter worker on the rota covers."""
+    gaps = {}
+    for d, day in enumerate(WEEKDAYS):
+        shifts = [
+            worked(s, loc, d)
+            for s in staff
+            if s.location_id == loc.id and s.role is Role.COUNTER and s.state in ON_ROTA
+        ]
+        spans: list[list[int]] = []
+        for h in range(loc.open_hour, loc.close_hour):
+            if any(x and x.start_hour <= h < x.end_hour for x in shifts):
+                continue
+            if spans and spans[-1][1] == h:
+                spans[-1][1] = h + 1
+            else:
+                spans.append([h, h + 1])
+        if spans:
+            gaps[day] = [str(ShiftTime(a, b)) for a, b in spans]
+    return gaps

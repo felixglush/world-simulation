@@ -3,7 +3,7 @@ import random
 from dataclasses import dataclass
 from typing import Protocol
 
-from bakery_world.basics import Ingredient, NeighborhoodId
+from bakery_world.basics import Ingredient, NeighborhoodId, date_of
 
 
 class Weather(Protocol):
@@ -90,8 +90,15 @@ class TrafficShock:
     multiplier: float
 
 
-SEASONAL_AMPLITUDE = 0.015
+# mid-month foot traffic, January first: a December peak, a January dip, a softer summer
+MONTH_TRAFFIC = (0.91, 0.95, 0.99, 1.01, 1.02, 1.0, 0.96, 0.95, 1.0, 1.02, 1.04, 1.12)
 WEEKDAY_TRAFFIC = (1.0, 1.0, 1.0, 1.02, 1.05, 1.05, 0.88)
+
+
+def season(day: int) -> float:
+    months = (date_of(day).timetuple().tm_yday - 15) / (365 / 12)
+    i, frac = int(math.floor(months)) % 12, months - math.floor(months)
+    return MONTH_TRAFFIC[i] + frac * (MONTH_TRAFFIC[(i + 1) % 12] - MONTH_TRAFFIC[i])
 
 
 @dataclass(frozen=True)
@@ -99,9 +106,7 @@ class SeasonalFootTraffic:
     shocks: tuple[TrafficShock, ...] = ()
 
     def multiplier(self, neighborhood: NeighborhoodId, day: int) -> float:
-        value = WEEKDAY_TRAFFIC[day % 7] * (
-            1 + SEASONAL_AMPLITUDE * math.sin(2 * math.pi * (day - 120) / 365)
-        )
+        value = WEEKDAY_TRAFFIC[day % 7] * season(day)
         for s in self.shocks:
             if s.start_day <= day < s.end_day and s.neighborhood in (None, neighborhood):
                 value *= s.multiplier

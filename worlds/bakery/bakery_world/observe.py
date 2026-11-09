@@ -4,7 +4,7 @@ from bakery_world.catalog import CATALOG
 from bakery_world.machines import LocationState, StaffState
 from bakery_world.managed import ManagedWorld
 from bakery_world.model import rota_hours
-from bakery_world.rota import describe
+from bakery_world.rota import counter_gaps, describe
 
 WEEK = 7
 
@@ -110,6 +110,19 @@ def staff(mw: ManagedWorld) -> list[dict]:
         for s in sorted(mw.world.business.staff.values(), key=lambda s: s.id)
         if s.state in working
     ]
+
+
+def staff_view(mw: ManagedWorld) -> dict:
+    b = mw.world.business
+    everyone = list(b.staff.values())
+    return {
+        "staff": staff(mw),
+        "counter_uncovered_hours": {
+            loc.id: counter_gaps(everyone, loc)
+            for loc in b.locations.values()
+            if loc.state is LocationState.TRADING
+        },
+    }
 
 
 def price_list(mw: ManagedWorld) -> dict[str, dict[str, int]]:

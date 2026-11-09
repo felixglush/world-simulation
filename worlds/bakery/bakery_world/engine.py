@@ -72,7 +72,10 @@ BETA = 1.6
 CARD_FEE = 0.02
 DAY_OLD_DISCOUNT = 0.5
 DAY_OLD_QUALITY = 0.75
-COUNTER_CUSTOMERS_PER_HOUR = 40.0
+COUNTER_CUSTOMERS_PER_HOUR = 50.0
+BAKER_SERVE_SPEED = 0.3
+CLEANER_SERVE_SPEED = 0.5
+HELP_UNTIL_HOUR = 12
 BAKE_DEADLINE_HOUR = 13
 VACANCY_DAYS = 10
 NOTICE_DAYS = 14
@@ -124,9 +127,23 @@ BOREDOM_RETENTION = 0.05
 FATIGUE_CAP = 0.8
 # regulars remember a shop's price board: a dearer shop than usual gets fewer visits
 PRICE_VISIT_SENSITIVITY = 1.0
-PRICE_MEMORY = 1 / 28
-PRICE_UNNOTICED = 0.05
+PRICE_MEMORY = 1 / 10
+PRICE_UNNOTICED = 0.02
+# paying more than the going rate sours a visit a little
+PRICE_SATISFACTION = 0.6
 SHOP_LOYALTY = 3
+BUSY_WALKAWAY_SHARE = 0.08
+BUSY_STARS = 0.8
+DIRTY_STARS = 2.5
+UNEVEN_STARS = 1.5
+# the shop's recent review stars (about the last 90 days) bring or keep away newcomers
+STAR_MEMORY = 1 / 90
+NEUTRAL_STARS = 3.5
+STARS_PULL = 0.1
+# every drink is hot: more wanted on a cold day, less on a hot one
+DRINK_WARMTH_PER_DEGREE = 0.012
+MILD_TEMP_C = 14.0
+MAX_DRINK_WARMTH = 0.3
 
 SEGMENT_WEEKDAY: dict[Segment, tuple[float, ...]] = {
     Segment.COMMUTER: (1.25, 1.25, 1.25, 1.25, 1.2, 0.5, 0.3),
@@ -136,11 +153,11 @@ SEGMENT_WEEKDAY: dict[Segment, tuple[float, ...]] = {
     Segment.RETIREE: (1.1, 1.1, 1.1, 1.1, 1.0, 0.8, 0.8),
 }
 BASKET_SIZE_WEIGHTS: dict[Segment, tuple[float, float, float]] = {
-    Segment.COMMUTER: (0.55, 0.30, 0.15),
-    Segment.OFFICE: (0.40, 0.35, 0.25),
-    Segment.STUDENT: (0.60, 0.30, 0.10),
-    Segment.FAMILY: (0.35, 0.35, 0.30),
-    Segment.RETIREE: (0.55, 0.30, 0.15),
+    Segment.COMMUTER: (0.40, 0.40, 0.20),
+    Segment.OFFICE: (0.30, 0.40, 0.30),
+    Segment.STUDENT: (0.50, 0.35, 0.15),
+    Segment.FAMILY: (0.25, 0.35, 0.40),
+    Segment.RETIREE: (0.40, 0.40, 0.20),
 }
 
 
@@ -281,6 +298,12 @@ def _poisson(rng: random.Random, lam: float) -> int:
     return k
 
 
+def stream(world: World, *name: object) -> random.Random:
+    """A per-day random stream of its own, so staff and equipment events do not shift with
+    how many customers came (and paired runs keep them in step)."""
+    return random.Random(":".join(str(x) for x in (world.seed, *name, world.day)))
+
+
 def _roster(world: World, loc: Location) -> _Roster:
     working = (StaffState.EMPLOYED, StaffState.ON_NOTICE)
     by_role: dict[Role, list[_OnShift]] = {r: [] for r in Role}
@@ -310,9 +333,21 @@ def market_wage(world: World, role: Role) -> Cents:
     return Cents(round(MARKET_WAGE_CENTS[role] * world.market_wage_index))
 
 
-def _counter_capacity(loc: Location, counters: list[_OnShift]) -> list[float]:
+def _counter_staff(roster: _Roster, h: int) -> float:
+    staff = sum(_effort(on.staff) for on in roster.counters if on.covers(h))
+    if staff:
+        return staff
+    # with nobody on the counter, a baker (before noon) or the cleaner serves between tasks
+    return sum(
+        BAKER_SERVE_SPEED * _effort(on.staff)
+        for on in roster.bakers
+        if on.covers(h) and h < HELP_UNTIL_HOUR
+    ) + sum(CLEANER_SERVE_SPEED * _effort(on.staff) for on in roster.cleaners if on.covers(h))
+
+
+def _counter_capacity(loc: Location, roster: _Roster) -> list[float]:
     return [
-        COUNTER_CUSTOMERS_PER_HOUR * sum(_effort(on.staff) for on in counters if on.covers(h))
+        COUNTER_CUSTOMERS_PER_HOUR * _counter_staff(roster, h)
         if loc.open_hour <= h < loc.close_hour
         else 0.0
         for h in range(24)
@@ -509,6 +544,15 @@ def _visit_factors(world: World, day: int, temp: float, rain: bool) -> dict:
     return factors
 
 
+def star_drag(loc: Location, walkaways: int, visits: int, strain: float) -> float:
+    busy = walkaways > BUSY_WALKAWAY_SHARE * max(1, visits)
+    return (BUSY_STARS if busy else 0) + DIRTY_STARS * (1 - loc.cleanliness) + UNEVEN_STARS * strain
+
+
+def _star_pull(loc: Location) -> float:
+    return max(0.5, 1 + STARS_PULL * (loc.stars - NEUTRAL_STARS))
+
+
 def _visitors(
     world: World, loc: Location, rng: random.Random, weather: tuple
 ) -> tuple[list[tuple[int, Customer]], int]:
@@ -560,7 +604,7 @@ def _visitors(
             visitors.append((rng.choices(hours, cum_weights=cum[c.neighborhood_id])[0], c))
     market = sum(nb.population * prox[nb.id] for nb in nbs.values()) * BAKERY_GOER_SHARE
     untried = max(0.0, loc.awareness * market - known)
-    new_count = _poisson(rng, world.params.new_customer_rate * untried)
+    new_count = _poisson(rng, world.params.new_customer_rate * untried * _star_pull(loc))
     nb_list = list(nbs.values())
     nb_weights = [nb.population * prox[nb.id] for nb in nb_list]
     for _ in range(new_count):
@@ -606,7 +650,7 @@ def _run_location(
     arrivals = [0] * 24
     for h, _, _ in inside:
         arrivals[h] += 1
-    capacity = _counter_capacity(loc, roster.counters)
+    capacity = _counter_capacity(loc, roster)
     waits = [_wait_minutes(arrivals[h], capacity[h]) for h in hours]
 
     weight_cache: dict[tuple, tuple[list[float], list[float]]] = {}
@@ -623,6 +667,8 @@ def _run_location(
         (sum(moods) / len(moods) if moods else NEUTRAL_MORALE) - NEUTRAL_MORALE
     )
     w_out = math.exp(BETA * (params.outside_option + DIRTY_UTILITY * grime))
+    chill = DRINK_WARMTH_PER_DEGREE * (MILD_TEMP_C - weather[0])
+    warmth = max(-MAX_DRINK_WARMTH, min(MAX_DRINK_WARMTH, chill))
     old_lots = old
 
     for hour, minute, c in inside:
@@ -638,6 +684,7 @@ def _run_location(
         if key not in weight_cache:
             taste = [
                 params.taste[c.segment][o.category] * params.item_appeal[o.item_id] * o.quality
+                + (warmth if o.category is Category.DRINK else 0.0)
                 for o in offers
             ]
             elas = params.elasticity[c.segment] / nb.income_index
@@ -699,6 +746,11 @@ def _run_location(
         if not lines:
             target = min(target, 0.3)
         target -= 0.05 * sum(line.day_old for line in lines)
+        if lines:
+            dear = sum(
+                line.price_cents / CATALOG[line.item_id].typical_price_cents for line in lines
+            )
+            target -= PRICE_SATISFACTION * max(0.0, dear / len(lines) - 1)
         _update_satisfaction(c, target)
         if let_down:
             c.letdowns += LETDOWN_SUBSTITUTED if lines else 1
@@ -733,7 +785,7 @@ def _run_location(
             stock.setdefault(item, {})[0] = left
     loc.stock = stock
 
-    repairs = _tend_ovens(world, loc, oven_use, rng)
+    repairs = _tend_ovens(world, loc, oven_use, stream(world, "ovens", loc.id))
     shifts = _shifts(roster)
     wages = sum(s.pay_cents for s in shifts)
     oncost = round(wages * PAYROLL_ONCOST_RATE)
@@ -763,7 +815,9 @@ def _run_location(
         loc.reputation += params.reputation_drift * min(1.0, n / 60) * (mean_sat - loc.reputation)
     _update_awareness(world, loc, len(inside))
     _tidy(loc, roster, arrivals, capacity, len(inside))
-    _staff_day(world, loc, roster, arrivals, capacity, rng)
+    drag = star_drag(loc, sum(walkaways), len(inside), strain)
+    loc.stars += STAR_MEMORY * (min(5.0, max(1.0, 1 + 4 * loc.reputation - drag)) - loc.stars)
+    _staff_day(world, loc, roster, arrivals, capacity, stream(world, "staff", loc.id))
 
     return LocationDay(
         location_id=loc.id,
@@ -803,7 +857,9 @@ def _tidy(
 
 
 def _update_awareness(world: World, loc: Location, visits: int) -> None:
-    buzz = visits / (visits + AWARENESS_HALF_VISITS) * (0.6 + 0.4 * loc.reputation)
+    buzz = (
+        visits / (visits + AWARENESS_HALF_VISITS) * (0.6 + 0.4 * loc.reputation) * _star_pull(loc)
+    )
     spend = loc.marketing_cents_per_month + loc.campaign_cents_per_month
     advertising = 1 - math.exp(-spend / MARKETING_SCALE_CENTS)
     reach = (
@@ -899,35 +955,42 @@ def _staff_day(
         elif s.state is StaffState.ON_NOTICE and day >= s.state_until_day:
             s.state = step(log, day, mc.STAFF, s.id, s.state, ev.LEAVE)
             if world.business.auto_hire:
-                world.business.vacancies.append(Vacancy(s.role, loc.id, day + VACANCY_DAYS))
+                world.business.vacancies.append(Vacancy(s.role, loc.id, day + VACANCY_DAYS, s.rota))
+
+
+def hire_now(world: World, rng: random.Random, v: Vacancy) -> Staff:
+    day, log, staff = world.day, world.business.transitions, world.business.staff
+    seq = len(staff)
+    hire = Staff(
+        id=StaffId(f"s{seq}"),
+        name=HIRE_NAMES[seq % len(HIRE_NAMES)],
+        role=v.role,
+        state=StaffState.CANDIDATE,
+        location_id=v.location_id,
+        wage_cents_per_hour=Cents(round(market_wage(world, v.role) * rng.uniform(0.97, 1.05))),
+        skill=rng.uniform(0.4, 0.7),
+        speed=rng.uniform(0.92, 1.08),
+        reliability=rng.uniform(0.7, 0.98),
+        morale=0.7,
+        hired_day=day,
+    )
+    for event in (mc.StaffEvent.INTERVIEW, mc.StaffEvent.OFFER, mc.StaffEvent.ACCEPT):
+        hire.state = step(log, day, mc.STAFF, hire.id, hire.state, event)
+    if v.rota:
+        hire.rota, hire.contract_hours = v.rota, rota_hours(v.rota)
+    else:
+        assign_rota(staff, hire, world.business.locations[v.location_id])
+    staff[hire.id] = hire
+    return hire
 
 
 def _fill_vacancies(world: World, rng: random.Random) -> None:
-    day, log, staff = world.day, world.business.transitions, world.business.staff
-    ev, remaining = mc.StaffEvent, []
+    remaining = []
     for v in world.business.vacancies:
-        if v.fill_day > day:
+        if v.fill_day > world.day:
             remaining.append(v)
-            continue
-        seq = len(staff)
-        market = market_wage(world, v.role)
-        hire = Staff(
-            id=StaffId(f"s{seq}"),
-            name=HIRE_NAMES[seq % len(HIRE_NAMES)],
-            role=v.role,
-            state=StaffState.CANDIDATE,
-            location_id=v.location_id,
-            wage_cents_per_hour=Cents(round(market * rng.uniform(0.97, 1.05))),
-            skill=rng.uniform(0.4, 0.7),
-            speed=rng.uniform(0.92, 1.08),
-            reliability=rng.uniform(0.7, 0.98),
-            morale=0.7,
-            hired_day=day,
-        )
-        for event in (ev.INTERVIEW, ev.OFFER, ev.ACCEPT):
-            hire.state = step(log, day, mc.STAFF, hire.id, hire.state, event)
-        assign_rota(staff, hire, world.business.locations[v.location_id])
-        staff[hire.id] = hire
+        else:
+            hire_now(world, rng, v)
     world.business.vacancies = remaining
 
 
@@ -1002,7 +1065,7 @@ def simulate_day(world: World, rng: random.Random) -> DayReport:
     )
     interest = _charge_interest(world.business, day)
     _advance_customers(world, rng)
-    _fill_vacancies(world, rng)
+    _fill_vacancies(world, stream(world, "hires"))
     _lease_tick(world)
     world.day += 1
     return DayReport(

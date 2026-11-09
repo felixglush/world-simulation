@@ -30,11 +30,10 @@ from itertools import product
 from pathlib import Path
 
 from bakery_world import engine as en
-from bakery_world import exogenous as ex
 from bakery_world import machines as mc
 from bakery_world import records as rec
 from bakery_world import rota
-from bakery_world.basics import Account, Ingredient, ItemId, Role
+from bakery_world.basics import Account, Ingredient, ItemId, Role, date_of
 from bakery_world.catalog import CATALOG
 from bakery_world.machines import CompetitorState, LocationState, StaffState
 from bakery_world.model import ShiftTime, Staff, World
@@ -48,14 +47,14 @@ HOLDS, FAILS, MAGNITUDE = "holds", "fails", "magnitude"
 # Verdicts at the sync commit. A finding stays here as a finding; when the engine
 # changes, the run says which verdicts moved.
 KNOWN: dict[str, str] = {
-    "P1": MAGNITUDE,
+    "P1": HOLDS,
     "P2": HOLDS,
     "P3": HOLDS,
     "Q1": HOLDS,
     "Q2": HOLDS,
     "S1": HOLDS,
     "S2": HOLDS,
-    "S3": MAGNITUDE,
+    "S3": HOLDS,
     "K1": HOLDS,
     "K2": HOLDS,
     "K3": HOLDS,
@@ -70,11 +69,13 @@ KNOWN: dict[str, str] = {
     "O1": HOLDS,
     "I1": HOLDS,
     "I2": HOLDS,
-    "L1": MAGNITUDE,
+    "L1": HOLDS,
+    "ST1": HOLDS,
     "M1": HOLDS,
     "C1": HOLDS,
     "E1": HOLDS,
-    "E2": MAGNITUDE,
+    "E2": HOLDS,
+    "E3": HOLDS,
     "A1": HOLDS,
     "A2": HOLDS,
     "A3": HOLDS,
@@ -210,30 +211,37 @@ def arc(new: float, old: float) -> float:
 # ---------------------------------------------------------------- price
 
 
+PRICE_DAYS = 182
+
+
 @check
 def check_p1(cfg: Config) -> Result:
-    """All prices +10% for 56 days: units fall, elasticity -0.5 to -2."""
-    pairs = paired(cfg, scale_prices(1.1), days=56, key="prices x1.1")
-    es = [arc(units(db), units(da)) / arc(1.1, 1.0) for _, da, _, db in pairs]
-    e = sum(es) / len(es)
-    sign_ok = all(x < 0 for x in es)
-    verdict = FAILS if not sign_ok else HOLDS if -2.0 <= e <= -0.5 else MAGNITUDE
+    """All prices +10%: units fall with a menu-level elasticity of -0.5 to -1.2, both over the
+    first 8 weeks and in weeks 19-26 (customers notice the board and come less)."""
+    pairs = paired(cfg, scale_prices(1.1), days=PRICE_DAYS, key="prices x1.1")
+    early = [arc(units(db[:56]), units(da[:56])) / arc(1.1, 1.0) for _, da, _, db in pairs]
+    late = [arc(units(db[-56:]), units(da[-56:])) / arc(1.1, 1.0) for _, da, _, db in pairs]
+    e8, e26 = sum(early) / len(early), sum(late) / len(late)
+    sign_ok = all(x < 0 for x in early + late)
+    in_range = all(-1.2 <= e <= -0.5 for e in (e8, e26))
+    verdict = FAILS if not sign_ok else HOLDS if in_range else MAGNITUDE
     return Result(
         "P1",
-        "Raising every price 10% lowers units sold; own-price elasticity -0.5 to -2",
+        "Raising every price 10% lowers units sold; menu-level elasticity -0.5 to -1.2",
         verdict,
-        f"elasticity {e:.2f} (per seed {min(es):.2f}..{max(es):.2f})",
-        "< 0, in [-2.0, -0.5]",
-        "engine._run_location weights (BETA, elas*price/typical); engine._visitors price_f",
+        f"elasticity {e8:.2f} over weeks 1-8 (per seed {min(early):.2f}..{max(early):.2f}), "
+        f"{e26:.2f} over weeks 19-26",
+        "< 0, both in [-1.2, -0.5]",
+        "engine._run_location weights, ADDON_OUTSIDE, PRICE_SATISFACTION; engine._visitors price_f",
     )
 
 
 @check
 def check_p2(cfg: Config) -> Result:
     """Revenue moves as (1 + e): up when demand is inelastic, by less than the price rise."""
-    pairs = paired(cfg, scale_prices(1.1), days=56, key="prices x1.1")
-    dq = [units(db) / units(da) - 1 for _, da, _, db in pairs]
-    dr = [revenue(db) / revenue(da) - 1 for _, da, _, db in pairs]
+    pairs = paired(cfg, scale_prices(1.1), days=PRICE_DAYS, key="prices x1.1")
+    dq = [units(db[:56]) / units(da[:56]) - 1 for _, da, _, db in pairs]
+    dr = [revenue(db[:56]) / revenue(da[:56]) - 1 for _, da, _, db in pairs]
     consistent = all(abs((1 + q) * 1.1 - 1 - r) < 0.02 for q, r in zip(dq, dr, strict=True))
     below = all(r < 0.10 for r in dr)
     r = sum(dr) / len(dr)
@@ -260,13 +268,13 @@ def check_p3(cfg: Config) -> Result:
     rest = [arc(units(db) - item_units(db), units(da) - item_units(da)) for _, da, _, db in pairs]
     e = sum(own) / len(own)
     ok = all(x < 0 for x in own) and sum(rest) / len(rest) > -0.01
-    verdict = FAILS if not ok else HOLDS if -4.0 <= e <= -0.5 else MAGNITUDE
+    verdict = FAILS if not ok else HOLDS if -3.0 <= e <= -1.0 else MAGNITUDE
     return Result(
         "P3",
-        "Raising one item's price cuts its own units (elasticity -0.5 to -4) and not the rest",
+        "Raising one item's price cuts its own units (elasticity -1 to -3) and not the rest",
         verdict,
         f"croissant elasticity {e:.2f}; other units {pct(sum(rest) / len(rest))}",
-        "own < 0 in [-4, -0.5]; others >= -1%",
+        "own < 0 in [-3, -1]; others >= -1%",
         "engine._run_location weight_cache, _pick",
     )
 
@@ -411,7 +419,7 @@ def check_s3(cfg: Config) -> Result:
         rng, days = random.Random(seed + 100), []
         for _ in range(cfg.days):
             roster = en._roster(world, shop(world))
-            cap = en._counter_capacity(shop(world), roster.counters)
+            cap = en._counter_capacity(shop(world), en._Roster(counters=roster.counters))
             d = home_days([en.simulate_day(world, rng)])[0]
             days.append(d)
             unstaffed += sum(
@@ -1024,6 +1032,37 @@ def check_l1(cfg: Config) -> Result:
     )
 
 
+@check
+def check_st1(cfg: Config) -> Result:
+    """Paired: a shop whose recent reviews average 4.5 stars draws more newcomers and grows
+    awareness faster than one at 2.5 stars, by a modest 10-60%."""
+
+    def stars(v: float):
+        return lambda world: setattr(shop(world), "stars", v)
+
+    def thinned(world: World) -> None:
+        # an established shop already knows its whole market; leave room for newcomers
+        for c in world.customers[::2]:
+            c.state = mc.CustomerState.CHURNED
+        stars(2.5)(world)
+
+    pairs = paired(cfg, stars(4.5), base=thinned, days=56)
+    rows = [
+        (sum(d.new_customers for d in da), sum(d.new_customers for d in db), shop(a), shop(b))
+        for a, da, b, db in pairs
+    ]
+    lift = sum(r[1] for r in rows) / max(1, sum(r[0] for r in rows)) - 1
+    ok = all(r[1] > r[0] and r[3].awareness > r[2].awareness for r in rows)
+    return Result(
+        "ST1",
+        "Better recent review stars bring more new customers and word of mouth (modestly)",
+        (HOLDS if 0.10 <= lift <= 0.60 else MAGNITUDE) if ok else FAILS,
+        f"new customers over 56 days {pct(lift)} at 4.5 vs 2.5 stars",
+        "more newcomers and awareness on every seed; +10% to +60%",
+        "engine._star_pull (STARS_PULL), _visitors new_count, _update_awareness buzz",
+    )
+
+
 # ---------------------------------------------------------------- marketing, rivals, weather
 
 
@@ -1118,20 +1157,56 @@ def check_e2(cfg: Config) -> Result:
     """Seasonal swing in visit propensity (month mean, max/min - 1) is 10-40%."""
     world = fresh(1)
     months: dict[int, list[float]] = {}
-    for day in range(365):
+    for day in range(364):
         temp, rain = world.weather.on(day)
         f = en._visit_factors(world, day, temp, rain)
-        months.setdefault(day * 12 // 365, []).append(sum(f.values()) / len(f))
+        months.setdefault(date_of(day).month - 1, []).append(sum(f.values()) / len(f))
     means = [sum(v) / len(v) for v in months.values()]
     swing = max(means) / min(means) - 1
+    names = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+    best, worst = names[means.index(max(means))], names[means.index(min(means))]
+    shape = best == "Dec" and worst in ("Jan", "Feb")
     return Result(
         "E2",
-        "Visits swing by season (best month vs worst month 10-40%)",
-        HOLDS if 0.10 <= swing <= 0.40 else MAGNITUDE,
-        f"{100 * swing:.1f}% best vs worst month (traffic amplitude "
-        f"{100 * ex.SEASONAL_AMPLITUDE:.1f}%, rain only)",
-        "10-40%",
-        "exogenous.SeasonalFootTraffic SEASONAL_AMPLITUDE, SeasonalWeather; engine._visit_factors",
+        "Visits swing by season (best month vs worst month 10-40%): a December peak, a winter dip",
+        (HOLDS if 0.10 <= swing <= 0.40 else MAGNITUDE) if shape else FAILS,
+        f"{100 * swing:.1f}% best vs worst month (best {best}, worst {worst})",
+        "10-40%, best in December, worst in January or February",
+        "exogenous.MONTH_TRAFFIC, season, SeasonalWeather; engine._visit_factors",
+    )
+
+
+@dataclass(frozen=True)
+class _FixedWeather:
+    temp: float
+
+    def on(self, day: int) -> tuple[float, bool]:
+        return self.temp, False
+
+
+@check
+def check_e3(cfg: Config) -> Result:
+    """Paired: a cold spell (2 C) sells a larger share of hot drinks than a hot one (26 C)."""
+
+    def share(days: list[en.LocationDay]) -> float:
+        lines = [ln for d in days for s in d.sales for ln in s.lines]
+        return sum(CATALOG[ln.item_id].made_to_order for ln in lines) / max(1, len(lines))
+
+    def weather(temp: float):
+        return lambda world: setattr(world, "weather", _FixedWeather(temp))
+
+    pairs = paired(cfg, weather(2.0), base=weather(26.0))
+    rows = [(share(da), share(db)) for _, da, _, db in pairs]
+    ok = all(b > a for a, b in rows)
+    n = len(rows)
+    return Result(
+        "E3",
+        "Cold weather moves the mix toward hot drinks",
+        HOLDS if ok else FAILS,
+        f"drinks {100 * sum(a for a, _ in rows) / n:.1f}% of units at 26 C, "
+        f"{100 * sum(b for _, b in rows) / n:.1f}% at 2 C",
+        "higher share when cold on every seed",
+        "engine._run_location DRINK_WARMTH_PER_DEGREE",
     )
 
 

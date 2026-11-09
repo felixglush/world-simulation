@@ -7,11 +7,11 @@ from bakery_world.model import HiddenParams
 Range = tuple[float, float]
 
 ELASTICITY: dict[Segment, Range] = {
-    Segment.COMMUTER: (0.7, 1.1),
-    Segment.FAMILY: (1.1, 1.6),
-    Segment.STUDENT: (1.5, 2.1),
-    Segment.RETIREE: (1.0, 1.4),
-    Segment.OFFICE: (0.6, 1.0),
+    Segment.COMMUTER: (0.9, 1.45),
+    Segment.FAMILY: (1.45, 2.1),
+    Segment.STUDENT: (1.95, 2.75),
+    Segment.RETIREE: (1.3, 1.8),
+    Segment.OFFICE: (0.8, 1.3),
 }
 
 TASTE: dict[Segment, dict[Category, Range]] = {

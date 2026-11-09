@@ -106,6 +106,7 @@ class Location:
     campaign_cents_per_month: float = 0.0
     price_index: float = 1.0
     cleanliness: float = 1.0
+    stars: float = 3.5
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,7 @@ class Vacancy:
     role: Role
     location_id: LocationId
     fill_day: int
+    rota: Rota = ()
 
 
 @dataclass(frozen=True)
@@ -243,6 +245,7 @@ class World:
     menu_boredom: float = 0.0
     segment_shift: dict[tuple[NeighborhoodId, Segment], float] = field(default_factory=dict)
     daily_hooks: list[Callable[["World"], None]] = field(default_factory=list)
+    seed: int = 0
 
 
 MARKET_WAGE_CENTS: dict[Role, Cents] = {
