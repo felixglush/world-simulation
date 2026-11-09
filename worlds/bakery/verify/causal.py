@@ -1237,14 +1237,29 @@ def check_e3(cfg: Config) -> Result:
 # ---------------------------------------------------------------- accounting
 
 
+def source_hash() -> str:
+    """A digest of the bakery_world source on disk, so cached handoffs built by other code are
+    rebuilt rather than unpickled into classes that have since changed."""
+    import hashlib
+
+    import bakery_world
+
+    digest = hashlib.sha256()
+    for f in sorted(Path(bakery_world.__file__).parent.glob("*.py")):
+        digest.update(f.name.encode() + b"\0" + f.read_bytes())
+    return digest.hexdigest()[:12]
+
+
 def handoff(seed: int):
     """A real ManagedWorld at handoff, cached under runs/bakery/verify (gitignored)."""
     from bakery_world.history import HISTORY_DAYS, found, live
     from bakery_world.management import load
 
-    path = CACHE / f"seed-{seed}.pickle"
+    path = CACHE / f"seed-{seed}-{source_hash()}.pickle"
     if not path.exists():
         CACHE.mkdir(parents=True, exist_ok=True)
+        for stale in [CACHE / f"seed-{seed}.pickle", *CACHE.glob(f"seed-{seed}-*.pickle")]:
+            stale.unlink(missing_ok=True)
         founding = found(seed)
         live(founding, HISTORY_DAYS)
         path.write_bytes(pickle.dumps(founding, protocol=pickle.HIGHEST_PROTOCOL))

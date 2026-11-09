@@ -19,7 +19,7 @@ From the repository root:
 PYTHONPATH=worlds/bakery uv run --frozen python worlds/bakery/verify/causal.py
 ```
 
-About 90 s with 4 jobs (the first run also builds seed 1-3 handoffs, about 8 s each, cached in `runs/bakery/verify/`, which is gitignored; delete that folder after changing anything that shapes the three-year history). Options: `--only P1,S2` for some checks, `--seeds N` (default 6), `--days N` (default 28), `--draws N` (default 40), `--jobs N`. Stdlib `random` with fixed seeds only; no model calls, no extra dependencies. It is not collected by `pytest worlds/bakery`.
+About 90 s with 4 jobs (the first run also builds seed 1-3 handoffs, about 8 s each, cached in `runs/bakery/verify/` (gitignored) under a hash of the `bakery_world` source, so any code change rebuilds them). Options: `--only P1,S2` for some checks, `--seeds N` (default 6), `--days N` (default 28), `--draws N` (default 40), `--jobs N`. Stdlib `random` with fixed seeds only; no model calls, no extra dependencies. It is not collected by `pytest worlds/bakery`.
 
 To prove the checks can still fail (run this after editing a check):
 
