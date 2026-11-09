@@ -98,7 +98,7 @@ The state machines are checked by enumeration, not TLA+: each machine is a small
 
 ## Coverage record
 
-Sync commit: `2bb9516` (branch `bakery-unit9`). Move it forward only after running both commands at the new commit and confirming every check still measures what its claim says.
+Sync commit: `9e22e51` (branch `claude/project-thread-xae0h9`). Move it forward only after running both commands at the new commit and confirming every check still measures what its claim says.
 
 - `worlds/bakery/bakery_world/engine.py`: `simulate_day`, `_run_location`, `_roster`, `_effort`, `_counter_capacity`, `_wait_minutes`, `_walkaway_probability`, `_shifts`, `ingredient_cost`, `post`, `prices_paid`, `_age_stock`, `_bake`, `_build_offers`, `_visit_factors`, `_visitors`, `_note_habit`, `_missing_share`, `_tidy`, `_update_awareness`, `_update_satisfaction`, `_staff_day`, `_advance_customers`, `market_wage`, and the constants they read
 - `worlds/bakery/bakery_world/records.py`: `draw_reviews`
