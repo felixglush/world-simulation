@@ -1,0 +1,379 @@
+import json
+import pickle
+import sqlite3
+from dataclasses import dataclass, field
+
+import pytest
+
+from bakery_world.actions import ACTIONS, ActionRefused, describe_actions, perform
+from bakery_world.baselines import Founder, Freeze, Heuristic
+from bakery_world.basics import Account, Cents, date_of
+from bakery_world.curveballs import Curveball
+from bakery_world.machines import LocationState, StaffState
+from bakery_world.managed import ManagedWorld
+from bakery_world.management import advance_day, load, manage
+from bakery_world.model import LedgerEntry
+from bakery_world.observe import candidates, dashboard, open_events
+from bakery_world.observe import staff as staff_view
+from bakery_world.score import going_concern
+from bakery_world.town import HOME_LOCATION, OWNER_ID
+
+
+@pytest.fixture
+def mw(seed1_history) -> ManagedWorld:
+    world = load(seed1_history.handoff)
+    world.world.business.credit_limit_cents = Cents(50_000_000)
+    world.allow_expansion = True
+    return world
+
+
+def frozen(mw: ManagedWorld) -> bytes:
+    return pickle.dumps((mw.world, mw.candidates, mw.sites, mw.assets, mw.par_rules))
+
+
+@pytest.mark.parametrize(
+    "name, args",
+    [
+        ("set_price", {"location": "shop1", "item": "croissant", "price_cents": -100}),
+        ("set_price", {"location": "shop1", "item": "unicorn", "price_cents": 400}),
+        ("set_price", {"location": "shop1", "item": "eclair", "price_cents": 400}),
+        ("set_price", {"location": "shop9", "item": "croissant", "price_cents": 400}),
+        ("set_price", {"location": "shop1", "item": "croissant"}),
+        ("set_hours", {"location": "shop2", "open_hour": 7, "close_hour": 18}),
+        ("add_menu_item", {"location": "shop1", "item": "croissant"}),
+        ("hire", {"candidate": "s99", "wage_cents_per_hour": 2000}),
+        ("respond_to_event", {"event": "event01", "option": "accept"}),
+        ("set_bake_plan", {"location": "shop1", "item": "latte", "weekday_units": [1] * 7}),
+        ("set_wage", {"staff": "owner", "wage_cents_per_hour": 3000}),
+        ("post_job", {"location": "shop1", "role": "baker", "wage_cents_per_hour": 1100}),
+        ("set_rota", {"staff": "s99", "shifts": ["off"] * 7}),
+        ("set_rota", {"staff": "s1", "shifts": ["15-09"] + ["off"] * 6}),
+        ("set_rota", {"staff": "s1", "shifts": ["05-15"] * 7}),
+        ("set_rota", {"staff": "s1", "shifts": ["05-13"] * 6}),
+        ("launch_rocket", {}),
+    ],
+)
+def test_refused_actions_change_nothing(mw: ManagedWorld, name: str, args: dict) -> None:
+    before = frozen(mw)
+    with pytest.raises(ActionRefused):
+        perform(mw, name, **args)
+    assert frozen(mw) == before
+    assert json.loads(mw.log.lines[-1])["kind"] == "refusal"
+
+
+def test_a_fourth_location_is_refused(mw: ManagedWorld) -> None:
+    for nb in ("station", "oakwood"):
+        perform(mw, "scout_site", neighborhood=nb)
+        perform(mw, "sign_lease", site=f"site-{nb}")
+    perform(mw, "scout_site", neighborhood="campus")
+    before = frozen(mw)
+    with pytest.raises(ActionRefused, match="already has 3"):
+        perform(mw, "sign_lease", site="site-campus")
+    assert frozen(mw) == before
+
+
+def test_a_hire_goes_through_interview_and_offer(mw: ManagedWorld) -> None:
+    perform(mw, "post_job", location="shop1", role="counter", wage_cents_per_hour=2500)
+    for _ in range(7):
+        advance_day(mw)
+    applicant = candidates(mw)[0]["candidate"]
+    with pytest.raises(ActionRefused, match="must be interviewed"):
+        perform(mw, "hire", candidate=applicant, wage_cents_per_hour=2500)
+    perform(mw, "interview", candidate=applicant)
+    result = perform(mw, "hire", candidate=applicant, wage_cents_per_hour=4000)
+    assert result.data["hired"]
+    assert mw.world.business.staff[applicant].state is StaffState.EMPLOYED
+    path = [(t.before, t.after) for t in mw.world.business.transitions if t.entity_id == applicant]
+    assert path == [
+        ("CANDIDATE", "INTERVIEWED"),
+        ("INTERVIEWED", "OFFERED"),
+        ("OFFERED", "EMPLOYED"),
+    ]
+
+
+def test_a_low_offer_is_declined(mw: ManagedWorld) -> None:
+    perform(mw, "post_job", location="shop1", role="baker", wage_cents_per_hour=2000)
+    for _ in range(7):
+        advance_day(mw)
+    applicant = candidates(mw)[0]["candidate"]
+    perform(mw, "interview", candidate=applicant)
+    result = perform(mw, "hire", candidate=applicant, wage_cents_per_hour=1750)
+    assert not result.data["hired"]
+    assert applicant not in mw.world.business.staff
+
+
+def test_a_new_site_trades_only_after_fit_out(mw: ManagedWorld) -> None:
+    perform(mw, "scout_site", neighborhood="station")
+    opened = perform(mw, "sign_lease", site="site-station").data
+    shop = mw.world.business.locations[opened["location"]]
+    states = []
+    while mw.day <= opened["opens_day"]:
+        states.append((mw.day, shop.state))
+        advance_day(mw)
+    assert all(s is LocationState.FITTING_OUT for d, s in states if d < opened["opens_day"])
+    assert shop.state is LocationState.TRADING
+    assert shop.menu and dashboard(mw)["locations"][shop.id]["state"] == "trading"
+
+
+def test_actions_describe_their_arguments() -> None:
+    schemas = {s["name"]: s for s in describe_actions(allow_expansion=True)}
+    assert set(schemas) == set(ACTIONS)
+    price = schemas["set_price"]["arguments"]["price_cents"]
+    assert price["type"] == "integer" and price["minimum"] > 0
+    assert schemas["set_bake_plan"]["arguments"]["weekday_units"]["minItems"] == 7
+
+
+def test_the_lease_renewal_falls_inside_the_year(mw: ManagedWorld) -> None:
+    end = mw.world.business.locations[HOME_LOCATION].lease.end_day
+    assert mw.day + 180 <= end <= mw.day + 240
+    assert date_of(end).isoformat() == "2026-08-01"
+
+
+@dataclass
+class Recording(Freeze):
+    name: str = "recording"
+    events: list[str] = field(default_factory=list)
+
+    def interrupt(self, world: ManagedWorld, event: Curveball) -> None:
+        self.events.append(event.id)
+        assert any(e["event"] == event.id for e in open_events(world))
+
+
+def test_curveballs_arrive_on_the_same_days_for_every_policy(seed1_history) -> None:
+    def timings(policy) -> list[tuple]:
+        run = manage(seed1_history.handoff, policy, weeks=3)
+        return [(c.id, c.kind, c.start_day, c.foreshadow_day) for c in run.world.curveballs]
+
+    assert timings(Freeze()) == timings(Heuristic()) == timings(Founder())
+
+
+def test_an_urgent_curveball_interrupts_the_week(seed1_history) -> None:
+    mw = load(seed1_history.handoff)
+    first = min((c for c in mw.curveballs if c.spec.urgent), key=lambda c: c.start_day)
+    policy = Recording()
+    manage(seed1_history.handoff, policy, weeks=(first.start_day - mw.day) // 7 + 1)
+    assert policy.events[:1] == [first.id]
+
+
+def test_the_founder_scores_zero_against_itself(seed1_history) -> None:
+    a = manage(seed1_history.handoff, Founder(), weeks=4)
+    b = manage(seed1_history.handoff, Founder(), weeks=4)
+    assert a.net_worth_change - b.net_worth_change == 0
+    assert a.log == b.log
+
+
+def test_the_run_log_is_deterministic(seed1_history) -> None:
+    a = manage(seed1_history.handoff, Heuristic(), weeks=3)
+    b = manage(seed1_history.handoff, Heuristic(), weeks=3)
+    assert a.log == b.log
+    kinds = {json.loads(line)["kind"] for line in a.log}
+    assert {"action", "transition", "week"} <= kinds
+
+
+@dataclass
+class Spendthrift(Freeze):
+    name: str = "spendthrift"
+    auto_hire: bool = False
+
+    def weekly(self, world: ManagedWorld, week: int) -> None:
+        for channel in ("flyers", "social", "local_paper"):
+            try:
+                perform(
+                    world,
+                    "spend_marketing",
+                    location="shop1",
+                    channel=channel,
+                    amount_cents=1_000_000,
+                )
+            except ActionRefused:
+                world.world.business.cash_cents = Cents(world.world.business.cash_cents - 1_000_000)
+
+
+def test_bankruptcy_ends_the_run(seed1_history) -> None:
+    run = manage(seed1_history.handoff, Spendthrift(), weeks=52)
+    assert run.bankrupt and run.weeks < 52
+    assert json.loads(run.log[-2])["kind"] == "bankrupt"
+
+
+def test_management_days_are_appended_to_the_records(seed1_history, tmp_path) -> None:
+    manage(seed1_history.records.parent, Heuristic(), weeks=2, out_dir=tmp_path)
+    with sqlite3.connect(tmp_path / "records.sqlite") as conn:
+        last_sale = conn.execute("SELECT MAX(date) FROM sales").fetchone()[0]
+        ledger = conn.execute("SELECT MAX(date) FROM ledger").fetchone()[0]
+        bakes = conn.execute("SELECT COUNT(*) FROM bake_log WHERE day >= 1095").fetchone()[0]
+    conn.close()
+    assert last_sale == ledger == date_of(1095 + 13).isoformat()
+    assert bakes > 0
+    assert (tmp_path / "run.jsonl").read_text().count("\n") > 10
+
+
+@dataclass
+class OneCampaign(Freeze):
+    name: str = "one campaign"
+
+    def weekly(self, world: ManagedWorld, week: int) -> None:
+        if week == 0:
+            perform(
+                world, "spend_marketing", location="shop1", channel="flyers", amount_cents=50_000
+            )
+
+
+def test_ledger_entries_from_weekly_actions_reach_the_records(seed1_history, tmp_path) -> None:
+    manage(seed1_history.records.parent, OneCampaign(), weeks=1, out_dir=tmp_path)
+    with sqlite3.connect(tmp_path / "records.sqlite") as conn:
+        rows = conn.execute(
+            "SELECT amount_cents FROM ledger WHERE day >= 1095 AND memo = 'flyers campaign'"
+        ).fetchall()
+    conn.close()
+    assert rows == [(-50_000,)]
+
+
+def test_expansion_is_off_by_default(seed1_history) -> None:
+    mw = load(seed1_history.handoff)
+    names = {a["name"] for a in describe_actions()}
+    assert names.isdisjoint({"scout_site", "sign_lease", "close_location"})
+    with pytest.raises(ActionRefused):
+        perform(mw, "scout_site", neighborhood="campus")
+    assert mw.sites == {}
+
+
+def test_the_founder_retires_at_handover(seed1_history, tmp_path) -> None:
+    mw = manage(seed1_history.records.parent, Freeze(), weeks=1, out_dir=tmp_path).world
+    assert OWNER_ID not in {s["staff"] for s in staff_view(mw)}
+    assert mw.world.business.staff[OWNER_ID].state is StaffState.GONE
+    worked = {shift.staff_id for r in mw.reports for s in r.locations for shift in s.shifts}
+    assert worked and OWNER_ID not in worked
+    with sqlite3.connect(tmp_path / "records.sqlite") as conn:
+        row = conn.execute("SELECT status, left_date FROM staff WHERE staff_id = ?", (OWNER_ID,))
+        assert row.fetchone() == ("gone", date_of(1095).isoformat())
+    conn.close()
+    kept = manage(seed1_history.handoff, Founder(), weeks=1).world
+    assert kept.world.business.staff[OWNER_ID].state is StaffState.EMPLOYED
+
+
+def _baker(mw: ManagedWorld) -> str:
+    return next(s["staff"] for s in staff_view(mw) if s["role"] == "baker")
+
+
+def test_a_rota_sets_the_hours_worked_and_paid(mw: ManagedWorld) -> None:
+    baker = _baker(mw)
+    result = perform(mw, "set_rota", staff=baker, shifts=["05-09"] + ["off"] * 6)
+    assert result.data == {"weekly_hours": 4, "counter_uncovered_hours": {}}
+    shown = next(s for s in staff_view(mw) if s["staff"] == baker)
+    assert shown["rota"] == ["05-09"] + ["off"] * 6 and shown["weekly_hours"] == 4
+    for _ in range(7):
+        advance_day(mw)
+    worked = [
+        (shift.start_hour, shift.end_hour, shift.pay_cents)
+        for r in mw.reports
+        for shop in r.locations
+        for shift in shop.shifts
+        if shift.staff_id == baker
+    ]
+    wage = mw.world.business.staff[baker].wage_cents_per_hour
+    assert worked == [(5, 9, 4 * wage)]
+
+
+@pytest.mark.parametrize(
+    "shifts, reason",
+    [
+        (["13-05"] + ["off"] * 6, "mon: 13-05 ends before it starts"),
+        (["off", "03-11"] + ["off"] * 5, "tue: 03-11 is outside 05-15"),
+        (["05-15"] * 7, "70 hours a week, more than 48"),
+        (["late"] + ["off"] * 6, "must be 'off' or start-end hours"),
+    ],
+)
+def test_a_bad_rota_is_refused_with_a_reason(mw: ManagedWorld, shifts: list, reason: str) -> None:
+    with pytest.raises(ActionRefused, match=reason):
+        perform(mw, "set_rota", staff=_baker(mw), shifts=shifts)
+
+
+def test_an_unknown_staff_member_has_no_rota(mw: ManagedWorld) -> None:
+    with pytest.raises(ActionRefused, match="'s99' is not on the staff"):
+        perform(mw, "set_rota", staff="s99", shifts=["off"] * 7)
+
+
+def test_a_hire_starts_on_a_standard_rota(mw: ManagedWorld) -> None:
+    perform(mw, "post_job", location="shop1", role="counter", wage_cents_per_hour=2500)
+    for _ in range(7):
+        advance_day(mw)
+    applicant = candidates(mw)[0]["candidate"]
+    perform(mw, "interview", candidate=applicant)
+    perform(mw, "hire", candidate=applicant, wage_cents_per_hour=4000)
+    shown = next(s for s in staff_view(mw) if s["staff"] == applicant)
+    assert shown["weekly_hours"] == 40 and shown["rota"].count("off") == 2
+
+
+def test_a_casual_hire_has_no_set_hours_and_works_only_when_rotad(mw: ManagedWorld) -> None:
+    perform(mw, "post_job", location="shop1", role="counter", wage_cents_per_hour=2500)
+    for _ in range(7):
+        advance_day(mw)
+    applicant = candidates(mw)[0]["candidate"]
+    perform(mw, "interview", candidate=applicant)
+    perform(mw, "hire_casual", candidate=applicant, wage_cents_per_hour=4000)
+    shown = next(s for s in staff_view(mw) if s["staff"] == applicant)
+    assert shown["casual"] and shown["contract_hours"] == 0 and shown["rota"] == ["off"] * 7
+    perform(mw, "set_rota", staff=applicant, shifts=["11-14"] * 7)
+    advance_day(mw)
+    worked = mw.reports[-1].locations[0].shifts
+    assert any(sh.staff_id == applicant for sh in worked)
+
+
+def test_booked_leave_for_the_coming_week_is_on_the_staff_list(mw: ManagedWorld) -> None:
+    booked = {}
+    for _ in range(14):
+        booked |= {s["staff"]: s["booked_leave"] for s in staff_view(mw) if s["booked_leave"]}
+        advance_day(mw)
+    assert booked, "someone on a 13-day leave cycle books a day within two weeks"
+
+
+@dataclass
+class Rotas(Freeze):
+    name: str = "rotas"
+    role: str = "cleaner"
+    shifts: tuple[str, ...] = ("off",) * 7
+
+    def weekly(self, world: ManagedWorld, week: int) -> None:
+        if week == 0:
+            for s in staff_view(world):
+                if s["role"] == self.role:
+                    perform(world, "set_rota", staff=s["staff"], shifts=list(self.shifts))
+
+
+def test_without_cleaner_hours_the_shop_gets_dirty_and_reviews_fall(seed1_history) -> None:
+    control = manage(seed1_history.handoff, Freeze(), weeks=8).world
+    dirty = manage(seed1_history.handoff, Rotas(), weeks=8).world
+    shop = HOME_LOCATION
+    clean = control.world.business.locations[shop].cleanliness
+    assert dirty.world.business.locations[shop].cleanliness < min(0.7, clean - 0.15)
+
+    def stars(mw: ManagedWorld) -> float:
+        late = [r for day, _, r in mw.reviews if day >= mw.handoff_day + 21]
+        return sum(late) / len(late)
+
+    assert stars(dirty) < stars(control) - 0.5
+
+
+def test_cutting_baker_hours_cuts_the_bake(seed1_history) -> None:
+    control = manage(seed1_history.handoff, Freeze(), weeks=2)
+    short = manage(
+        seed1_history.handoff, Rotas(role="baker", shifts=("05-07",) * 5 + ("off",) * 2), weeks=2
+    )
+    assert short.world.totals["baked"] < 0.7 * control.world.totals["baked"]
+    strained = [s.bake_strain for r in short.world.reports for s in r.locations]
+    assert max(strained) > 0
+
+
+def test_the_going_concern_is_twice_the_annualised_last_26_weeks(seed1_history) -> None:
+    mw = load(seed1_history.handoff)
+    ledger = mw.world.business.ledger
+
+    def book(days_ago: int) -> int:
+        day = mw.day - days_ago
+        at = next(i for i, e in enumerate(ledger) if e.day > day)
+        ledger.insert(at, LedgerEntry(day, Account.SALES, 10_000_000, HOME_LOCATION))
+        return going_concern(mw)
+
+    base = book(26 * 7)
+    assert book(26 * 7 - 1) - base == round(2 * 10_000_000 * 365 / (26 * 7))
+    assert book(26 * 7 + 1) == book(26 * 7 + 2)
