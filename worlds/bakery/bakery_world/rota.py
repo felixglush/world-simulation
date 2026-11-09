@@ -7,7 +7,16 @@ SHIFT_HOURS: dict[Role, int] = {Role.BAKER: 8, Role.COUNTER: 8, Role.CLEANER: 4}
 PRE_OPEN_BAKE_HOURS = 2
 MAX_DAY_HOURS = 10
 MAX_WEEK_HOURS = 48
-DAYS_OFF: tuple[tuple[int, int], ...] = ((6, 2), (5, 1), (6, 4), (5, 0), (6, 3), (5, 2), (6, 0))
+DAYS_OFF: tuple[tuple[int, int], ...] = (
+    (6, 2),
+    (5, 1),
+    (6, 4),
+    (5, 0),
+    (6, 3),
+    (5, 2),
+    (6, 0),
+    (5, 6),
+)
 ON_ROTA = (StaffState.EMPLOYED, StaffState.SICK, StaffState.ON_NOTICE)
 # four weeks' paid leave a year, taken a day at a time: one calendar day in 13, staggered so
 # colleagues with nearby staff numbers are off on different days

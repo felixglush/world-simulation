@@ -48,7 +48,7 @@ def _slow_loyal_baker(world: World, quirks: Quirks, rng: random.Random, seed: in
     )
     baker.speed, baker.skill, baker.reliability, baker.loyal = 0.72, 0.25, 0.97, True
     baker.wage_cents_per_hour = Cents(round(market_wage(world, Role.BAKER) * 1.08))
-    return {"staff_id": baker.id, "name": baker.name, "speed": 0.6, "skill": 0.25}
+    return {"staff_id": baker.id, "name": baker.name, "speed": 0.72, "skill": 0.25}
 
 
 def _dear_butter(world: World, quirks: Quirks, rng: random.Random, seed: int) -> dict:

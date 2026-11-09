@@ -147,6 +147,8 @@ class Staff:
     rota: Rota = ()
     contract_hours: int = 0
     loyal: bool = False
+    covers_gaps: bool = False
+    casual: bool = False
 
 
 @dataclass

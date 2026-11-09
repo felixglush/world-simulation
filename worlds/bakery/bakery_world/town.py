@@ -99,17 +99,17 @@ _ORDER = (S.COMMUTER, S.FAMILY, S.STUDENT, S.RETIREE, S.OFFICE)
 
 # item id: units per weekday (Mon..Sun) for the starting shop
 DEFAULT_BAKE_PLAN: dict[str, tuple[int, ...]] = {
-    "sourdough": (21, 20, 23, 24, 24, 17, 11),
-    "baguette": (12, 13, 15, 16, 17, 14, 8),
-    "croissant": (27, 29, 32, 32, 33, 19, 11),
-    "painchoc": (32, 32, 35, 33, 37, 22, 12),
-    "cinnamon": (26, 26, 27, 28, 28, 19, 10),
-    "danish": (30, 33, 33, 34, 36, 22, 12),
-    "muffin": (47, 41, 51, 46, 50, 26, 15),
-    "cookie": (41, 40, 46, 48, 50, 30, 14),
-    "choccake": (21, 23, 23, 22, 26, 18, 10),
-    "quiche": (30, 33, 36, 35, 34, 14, 8),
-    "cheesetwist": (27, 29, 31, 32, 32, 15, 7),
+    "sourdough": (18, 17, 20, 21, 21, 15, 10),
+    "baguette": (10, 11, 13, 14, 15, 12, 7),
+    "croissant": (23, 25, 28, 28, 29, 17, 10),
+    "painchoc": (28, 28, 30, 29, 32, 19, 10),
+    "cinnamon": (23, 23, 23, 24, 24, 17, 9),
+    "danish": (26, 29, 29, 30, 31, 19, 10),
+    "muffin": (41, 36, 44, 40, 44, 23, 13),
+    "cookie": (36, 35, 40, 42, 44, 26, 12),
+    "choccake": (18, 20, 20, 19, 23, 16, 9),
+    "quiche": (26, 29, 31, 30, 30, 12, 7),
+    "cheesetwist": (23, 25, 27, 28, 28, 13, 6),
 }
 
 COMPETITORS = [
@@ -193,8 +193,8 @@ OWNER_ROTA = (OFF,) + ("07-15",) * 5 + (OFF,)
 OPENING_STAFF: tuple[tuple[Role, str, tuple[str, ...]], ...] = (
     (Role.BAKER, "Marta", ("05-13",) * 5 + (OFF,) * 2),
     (Role.BAKER, "Idris", (OFF,) * 5 + ("05-13",) * 2),
-    (Role.COUNTER, "Joss", ("07-15", OFF, "11-15", "11-15", OFF, OFF, "07-15")),
-    (Role.CLEANER, "Bea", ("11-15", OFF, "11-15", OFF, "11-15", OFF, OFF)),
+    (Role.COUNTER, "Joss", ("07-15",) + (OFF,) * 5 + ("07-15",)),
+    (Role.CLEANER, "Bea", ("11-15", OFF, OFF, "11-15", OFF, OFF, OFF)),
 )
 HIRE_NAMES = (
     "Sana",
@@ -219,7 +219,7 @@ SHOP_NAME = "Larkspur Bakery"
 OWNER_ID = StaffId("owner")
 OWNER_NAME = "Ada Brennan"
 OWNER_SPEED = 1.15
-OWNER_WAGE_CENTS = Cents(900)
+OWNER_WAGE_CENTS = Cents(1600)
 OPENING_CUSTOMERS = 800
 OPENING_AWARENESS = 0.12
 OPENING_BAKE_SHARE = 0.35

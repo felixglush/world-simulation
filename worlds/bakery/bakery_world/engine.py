@@ -46,11 +46,11 @@ from bakery_world.town import HIRE_NAMES, proximity, spawn_customer
 # a bakery's ovens, espresso machine and fridges run on more than a shop's power bill;
 # supplies and services are bookkeeping, cleaning supplies, waste collection and licences
 MONTHLY_OVERHEAD_CENTS: dict[Account, int] = {
-    Account.UTILITIES: 260_000,
+    Account.UTILITIES: 200_000,
     Account.INSURANCE: 70_000,
     Account.SOFTWARE_AND_TERMINAL: 25_000,
     Account.REPAIRS_RESERVE: 70_000,
-    Account.SUPPLIES_AND_SERVICES: 190_000,
+    Account.SUPPLIES_AND_SERVICES: 260_000,
 }
 DAILY_OVERHEAD_CENTS = {a: round(m * 12 / 365) for a, m in MONTHLY_OVERHEAD_CENTS.items()}
 PAYROLL_ONCOST_RATE = 0.12
@@ -98,7 +98,7 @@ CHURN_AFTER_LAPSED_DAYS = 90
 NEW_QUIET_AFTER_DAYS = 60
 REGULAR_VISITS = 4
 STATE_VISIT_FACTOR = {CustomerState.NEW: 1.0, CustomerState.REGULAR: 1.0, CustomerState.LAPSED: 0.1}
-BAKERY_GOER_SHARE = 0.09
+BAKERY_GOER_SHARE = 0.1
 AWARENESS_FROM_WORD_OF_MOUTH = 0.015
 AWARENESS_FROM_MARKETING = 0.009
 AWARENESS_HALF_VISITS = 60
@@ -131,12 +131,12 @@ FATIGUE_RETENTION = 0.93
 BOREDOM_RETENTION = 0.05
 FATIGUE_CAP = 0.8
 # regulars remember a shop's price board: a dearer shop than usual gets fewer visits
-PRICE_VISIT_SENSITIVITY = 1.0
+PRICE_VISIT_SENSITIVITY = 1.3
 PRICE_MEMORY = 1 / 10
 PRICE_UNNOTICED = 0.02
 # paying more than the going rate sours a visit a little
 PRICE_SATISFACTION = 0.6
-SHOP_LOYALTY = 5
+SHOP_LOYALTY = 6
 BUSY_WALKAWAY_SHARE = 0.08
 BUSY_STARS = 0.8
 DIRTY_STARS = 2.5
@@ -151,11 +151,11 @@ MILD_TEMP_C = 14.0
 MAX_DRINK_WARMTH = 0.3
 
 SEGMENT_WEEKDAY: dict[Segment, tuple[float, ...]] = {
-    Segment.COMMUTER: (1.25, 1.25, 1.25, 1.25, 1.2, 0.5, 0.3),
+    Segment.COMMUTER: (1.25, 1.25, 1.25, 1.25, 1.2, 0.6, 0.4),
     Segment.OFFICE: (1.3, 1.3, 1.3, 1.3, 1.2, 0.4, 0.2),
-    Segment.STUDENT: (1.1, 1.1, 1.1, 1.1, 1.0, 0.9, 0.7),
-    Segment.FAMILY: (0.7, 0.7, 0.7, 0.8, 0.9, 1.9, 1.3),
-    Segment.RETIREE: (1.1, 1.1, 1.1, 1.1, 1.0, 0.8, 0.8),
+    Segment.STUDENT: (1.1, 1.1, 1.1, 1.1, 1.0, 1.1, 0.9),
+    Segment.FAMILY: (0.7, 0.7, 0.7, 0.8, 0.9, 2.6, 2.0),
+    Segment.RETIREE: (1.1, 1.1, 1.1, 1.1, 1.0, 1.2, 1.0),
 }
 BASKET_SIZE_WEIGHTS: dict[Segment, tuple[float, float, float]] = {
     Segment.COMMUTER: (0.40, 0.40, 0.20),
@@ -313,39 +313,59 @@ def _roster(world: World, loc: Location) -> _Roster:
     working = (StaffState.EMPLOYED, StaffState.ON_NOTICE)
     by_role: dict[Role, list[_OnShift]] = {r: [] for r in Role}
     here = [s for s in world.business.staff.values() if s.location_id == loc.id]
-    leave = []
+    leave, away = [], []
     for s in sorted(here, key=lambda s: s.id):
         shift = worked(s, loc, world.day % 7)
-        if shift and s.state in working:
-            if on_leave(s, world.day):
-                leave.append(_OnShift(s, shift))
-            else:
-                by_role[s.role].append(_OnShift(s, shift))
+        if not shift or s.state not in (*working, StaffState.SICK):
+            continue
+        if s.state is StaffState.SICK:
+            away.append(_OnShift(s, shift))
+        elif on_leave(s, world.day):
+            leave.append(_OnShift(s, shift))
+            away.append(_OnShift(s, shift))
+        else:
+            by_role[s.role].append(_OnShift(s, shift))
     roster = _Roster(by_role[Role.BAKER], by_role[Role.COUNTER], by_role[Role.CLEANER], leave)
     owner = next((s for s in here if s.owner and s.state in working), None)
+    lead = owner or next(
+        (s for s in here if s.covers_gaps and s.state in working and not on_leave(s, world.day)),
+        None,
+    )
+    if lead is None:
+        return roster
+    # the founder fills any gap; the lead she hired fills only what an absent colleague leaves
     if owner:
-        roster.counters, mine = _founder_cover(loc, roster, owner)
-        if not roster.bakers:
-            # she covers a missing baker with a short early bake before her counter shift
-            start = standard_shift(Role.BAKER, loc).start_hour
-            bake = ShiftTime(start, start + OWNER_BAKE_HOURS)
-            roster.bakers.append(_OnShift(owner, bake))
-            late = mine and mine.end_hour > bake.end_hour
-            mine = ShiftTime(max(bake.end_hour, mine.start_hour), mine.end_hour) if late else None
-        if mine:
-            roster.counters.append(_OnShift(owner, mine))
+        hours = set(range(loc.open_hour, loc.close_hour))
+    else:
+        hours = {
+            h
+            for on in away
+            if on.staff.role is Role.COUNTER
+            for h in range(on.shift.start_hour, on.shift.end_hour)
+        }
+    roster.counters, mine = _lead_cover(loc, roster, lead, hours)
+    baker_away = any(on.staff.role is Role.BAKER for on in away)
+    if not roster.bakers and (owner or baker_away):
+        # she covers a missing baker with a short early bake before her counter shift
+        start = standard_shift(Role.BAKER, loc).start_hour
+        bake = ShiftTime(start, start + OWNER_BAKE_HOURS)
+        roster.bakers.append(_OnShift(lead, bake))
+        late = mine and mine.end_hour > bake.end_hour
+        mine = ShiftTime(max(bake.end_hour, mine.start_hour), mine.end_hour) if late else None
+    if mine:
+        roster.counters.append(_OnShift(lead, mine))
     return roster
 
 
-def _founder_cover(
-    loc: Location, roster: _Roster, owner: Staff
+def _lead_cover(
+    loc: Location, roster: _Roster, lead: Staff, hours: set[int]
 ) -> tuple[list[_OnShift], ShiftTime | None]:
-    """The founder works her own counter shift, or the whole day when the rota leaves an open
-    hour with nobody on the counter."""
-    others = [on for on in roster.counters if on.staff is not owner]
-    mine = next((on.shift for on in roster.counters if on.staff is owner), None)
-    hours = range(loc.open_hour, loc.close_hour)
-    if any(not any(on.covers(h) for on in others) for h in hours):
+    """The lead works her own counter shift, or the whole open day when one of the given hours
+    would have nobody on the counter."""
+    others = [on for on in roster.counters if on.staff is not lead]
+    mine = next((on.shift for on in roster.counters if on.staff is lead), None)
+    open_hours = hours & set(range(loc.open_hour, loc.close_hour))
+    if any(not any(on.covers(h) for on in others) for h in open_hours):
         mine = ShiftTime(loc.open_hour, loc.close_hour)
     return others, mine
 

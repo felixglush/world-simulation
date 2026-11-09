@@ -264,13 +264,14 @@ def let_go(mw: ManagedWorld, staff: Staff, memo: str) -> None:
 
 
 def retire_founder(mw: ManagedWorld) -> None:
-    """The founder leaves; the counter hand she hired to take over her shifts starts today."""
+    """The founder leaves; the counter lead she hired starts today on her shifts and, like her,
+    covers an absence that leaves the counter or the bakery empty."""
     for s in list(mw.world.business.staff.values()):
         if s.owner and s.state is not StaffState.GONE:
             depart(mw, s)
             if s.rota:
                 successor = Vacancy(Role.COUNTER, s.location_id, mw.day, s.rota)
-                hire_now(mw.world, mw.rng("successor"), successor)
+                hire_now(mw.world, mw.rng("successor"), successor).covers_gaps = True
 
 
 def write_off(mw: ManagedWorld, location: LocationId, name: str | None = None) -> None:
