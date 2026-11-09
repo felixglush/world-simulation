@@ -425,6 +425,13 @@ MUTANTS: dict[str, Mutant] = {
         "    pass\n",
         note="remove_menu_item leaves the item on sale",
     ),
+    "favourites_forgotten": Mutant(
+        ("MX9",),
+        "bakery_world.engine",
+        "MISSING_FAVOURITE_WEIGHT = 1.0\n",
+        "MISSING_FAVOURITE_WEIGHT = 0.0\n",
+        note="a customer whose favourites are gone visits as often as before",
+    ),
 }
 
 

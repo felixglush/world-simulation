@@ -1902,6 +1902,7 @@ class PolicyClaim:
     judged: tuple[str, ...]  # the Tail fields that must move
     where: str
     weeks: int = POLICY_WEEKS
+    min_sales_move: float = 0.0  # a judged sales move must be at least this share of sales
 
 
 def _once(step: Callable) -> Callable[[], Callable]:
@@ -2019,7 +2020,8 @@ POLICY_CLAIMS: dict[str, PolicyClaim] = {
         _once(_drop_best_sellers),
         False,
         ("revenue",),
-        "actions.remove_menu_item, engine choice model",
+        "actions.remove_menu_item, engine choice model and Customer.habit",
+        min_sales_move=0.04,
     ),
 }
 
@@ -2045,7 +2047,15 @@ def _policy_check(cid: str) -> Callable[[Config], Result]:
         moves = {
             f: [getattr(b, f) - getattr(a, f) for a, b in pairs] for f in ("revenue", "profit")
         }
-        ok = all(sum(d > 0 if pc.up else d < 0 for d in moves[f]) >= 2 for f in pc.judged)
+        floor = {"revenue": [pc.min_sales_move * a.revenue for a, _ in pairs]}
+        ok = all(
+            sum(
+                (d if pc.up else -d) > m
+                for d, m in zip(moves[f], floor.get(f, [0.0] * len(pairs)), strict=True)
+            )
+            >= 2
+            for f in pc.judged
+        )
         sales = ", ".join(pct(b.revenue / a.revenue - 1) for a, b in pairs)
         profit = ", ".join(f"{x:+,.0f}" for x in moves["profit"])
         return Result(
@@ -2054,8 +2064,9 @@ def _policy_check(cid: str) -> Callable[[Config], Result]:
             HOLDS if ok else FAILS,
             f"vs freeze, last 13 of {pc.weeks} weeks: sales {sales}; operating profit {profit} $ "
             f"(seeds {', '.join(map(str, POLICY_SEEDS))})",
-            f"{' and '.join(pc.judged)} {'up' if pc.up else 'down'} on at least 2 of "
-            f"{len(POLICY_SEEDS)} seeds",
+            f"{' and '.join(pc.judged)} {'up' if pc.up else 'down'}"
+            + (f" by more than {pc.min_sales_move:.0%}" if pc.min_sales_move else "")
+            + f" on at least 2 of {len(POLICY_SEEDS)} seeds",
             pc.where,
             [
                 f"seed {s}: freeze sales ${a.revenue:,.0f}, profit ${a.profit:,.0f}; "
