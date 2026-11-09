@@ -405,10 +405,18 @@ def _bake(
     }
     need = sum(units * CATALOG[item].labor_minutes for item, units in plans.items())
     load = need / labor_left if labor_left else 0.0
+    oven_need = sum(
+        units / CATALOG[item].batch_size * CATALOG[item].oven_minutes
+        for item, units in plans.items()
+    )
+    # an oven shortfall is shared across items like a labor one; each item keeps room for
+    # its last part-full batch, so no item is starved by the ones baked before it
+    oven_room = oven_total - sum(CATALOG[item].oven_minutes for item in plans)
+    cut = max(load, oven_need / oven_room if oven_room > 0 else math.inf)
     fresh: dict[ItemId, int] = {}
     for item, planned in plans.items():
         recipe = CATALOG[item]
-        plan = math.floor(planned / load) if load > 1 else planned
+        plan = math.floor(planned / cut) if cut > 1 else planned
         by_oven = int(oven_left // recipe.oven_minutes) * recipe.batch_size
         by_labor = int(labor_left // recipe.labor_minutes)
         units = max(0, min(plan, by_oven, by_labor))

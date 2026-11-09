@@ -59,7 +59,7 @@ KNOWN: dict[str, str] = {
     "K1": HOLDS,
     "K2": HOLDS,
     "K3": HOLDS,
-    "B1": FAILS,
+    "B1": HOLDS,
     "B2": HOLDS,
     "B3": HOLDS,
     "R1": HOLDS,

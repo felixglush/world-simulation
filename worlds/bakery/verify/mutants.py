@@ -120,23 +120,12 @@ MUTANTS: dict[str, Mutant] = {
         "drag = (0.8 if busy else 0) - DIRTY_STARS * grime",
         note="dirt earns stars",
     ),
-    "oven_cut_shared": Mutant(
+    "oven_first_come": Mutant(
         ("B1",),
         E,
-        "load = need / labor_left if labor_left else 0.0",
-        "load = need / labor_left if labor_left else 0.0\n"
-        "    oven_need = sum(\n"
-        "        math.ceil(u / CATALOG[i].batch_size) * CATALOG[i].oven_minutes"
-        " for i, u in plans.items()\n"
-        "    )\n"
-        "    cut = max(load, oven_need / oven_total if oven_total else 0.0)",
-        more=(
-            (
-                "plan = math.floor(planned / load) if load > 1 else planned",
-                "plan = math.floor(planned / cut) if cut > 1 else planned",
-            ),
-        ),
-        note="what-if fix: an oven shortfall is shared across items like a labor shortfall",
+        "cut = max(load, oven_need / oven_room if oven_room > 0 else math.inf)",
+        "cut = load",
+        note="oven time goes to items in menu order, so the last can get none",
     ),
     "strain_improves": Mutant(
         ("B2",),
